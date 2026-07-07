@@ -23,22 +23,23 @@ async function api(method: string, body: unknown): Promise<any> {
 // callback_data ограничена 64 байтами — id создаваемых нами событий укладывается.
 export async function notifyRequest(params: {
   eventId: string;
-  parentName: string;
-  parentTg: string;
-  child: string;
+  name: string;
+  tg: string;
+  student: string;
   subject: string;
   when: string;
+  header?: string;
 }): Promise<void> {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!chatId) throw new Error("TELEGRAM_CHAT_ID не задан");
 
-  const tgLine = params.parentTg ? `\nTelegram: ${params.parentTg}` : "";
+  const tgLine = params.tg ? `\nTelegram: ${params.tg}` : "";
   const text =
-    `🆕 <b>Новая заявка на запись</b>\n\n` +
-    `🧒 Ученик: <b>${escapeHtml(params.child)}</b>\n` +
+    `${params.header || "🆕 <b>Новая заявка на запись</b>"}\n\n` +
+    `🧑‍🎓 Ученик: <b>${escapeHtml(params.student)}</b>\n` +
     `📚 Предмет: ${escapeHtml(params.subject)}\n` +
     `🕒 Время: <b>${escapeHtml(params.when)}</b>\n` +
-    `👤 Родитель: ${escapeHtml(params.parentName)}${escapeHtml(tgLine)}`;
+    `👤 Записал(а): ${escapeHtml(params.name)}${escapeHtml(tgLine)}`;
 
   await api("sendMessage", {
     chat_id: chatId,

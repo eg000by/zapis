@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { encodeParentToken } from "@/lib/link";
+import { encodeToken } from "@/lib/link";
 import AdminResult from "./AdminResult";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +42,7 @@ export default function AdminPage({
 
   let link = "";
   if (name) {
-    const token = encodeParentToken({ name, tg });
+    const token = encodeToken({ name, tg });
     link = `${baseUrl()}/?t=${encodeURIComponent(token)}`;
   }
 
@@ -50,17 +50,17 @@ export default function AdminPage({
     <div className="wrap">
       <div className="hero">
         <h1>Генератор ссылок</h1>
-        <p>Создайте персональную ссылку для родителя ученика.</p>
+        <p>Создайте персональную ссылку для записи — её открывает тот, кому вы её отправите.</p>
       </div>
 
       <form className="card" method="GET" style={{ marginTop: 16 }}>
         <input type="hidden" name="key" value={key} />
 
-        <label htmlFor="name">Имя родителя</label>
-        <input id="name" name="name" defaultValue={name} placeholder="Например, Мама Марина" />
+        <label htmlFor="name">Имя (кому отправляете ссылку)</label>
+        <input id="name" name="name" defaultValue={name} placeholder="Например, Егор" />
 
         <label htmlFor="tg">Telegram (необязательно)</label>
-        <input id="tg" name="tg" defaultValue={tg} placeholder="@marina" />
+        <input id="tg" name="tg" defaultValue={tg} placeholder="@egor" />
 
         <button className="btn" type="submit">
           Создать ссылку

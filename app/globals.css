@@ -346,3 +346,183 @@ select:focus {
     transform: rotate(360deg);
   }
 }
+
+/* Выбранный слот (мультивыбор) */
+.slot.picked {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Нижняя панель выбора */
+.picker-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 20px rgba(16, 24, 40, 0.08);
+}
+.picker-bar span {
+  font-size: 15px;
+}
+.picker-btn {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.picker-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* Мои записи */
+.my-card {
+  margin-top: 16px;
+}
+.my-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.my-row:first-of-type {
+  border-top: none;
+}
+.my-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.my-when {
+  color: var(--muted);
+  font-size: 13px;
+}
+.badge {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.badge.ok {
+  background: rgba(22, 163, 74, 0.14);
+  color: var(--success);
+}
+.badge.wait {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.my-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.mini {
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mini:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mini.danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.mini:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reschedule-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.notice {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Чипы выбранных слотов в форме */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.chip-x {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 4px;
+  font-weight: 600;
+}
+.check-row input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}

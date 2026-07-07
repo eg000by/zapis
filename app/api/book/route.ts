@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
-import { formatMsk, validateSlot, windowBounds } from "@/lib/slots";
-import { decodeParentToken } from "@/lib/link";
+import { buildRecurrence, formatMsk, weeklyOccurrences, windowBounds } from "@/lib/slots";
+import { decodeToken, contactKey } from "@/lib/link";
 import { notifyRequest } from "@/lib/telegram";
-import { PENDING_PREFIX, SUBJECTS, TIMEZONE } from "@/lib/config";
+import { PENDING_PREFIX, RECURRENCE_WEEKS, SLOT_MINUTES, SUBJECTS, TIMEZONE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -15,80 +15,132 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Некорректный запрос" }, { status: 400 });
   }
 
-  const parent = decodeParentToken(body?.token);
-  if (!parent) {
-    return NextResponse.json(
-      { error: "Недействительная ссылка. Попросите преподавателя прислать персональную ссылку." },
-      { status: 403 }
-    );
+  const decoded = decodeToken(body?.token);
+  if (!decoded.ok) {
+    const error =
+      decoded.reason === "expired"
+        ? "Ссылка истекла. Попросите преподавателя прислать новую персональную ссылку."
+        : "Недействительная ссылка. Попросите преподавателя прислать персональную ссылку.";
+    return NextResponse.json({ error }, { status: 403 });
   }
+  const contact = decoded.info;
 
-  const child = String(body?.child || "").trim();
+  const student = String(body?.student || "").trim();
   const subject = String(body?.subject || "").trim();
-  const startIso = String(body?.start || "");
 
-  if (!child) return NextResponse.json({ error: "Укажите имя ребёнка" }, { status: 400 });
+  // Принимаем и один слот (start), и несколько (starts).
+  const rawStarts: string[] = Array.isArray(body?.starts)
+    ? body.starts.map((s: any) => String(s))
+    : body?.start
+      ? [String(body.start)]
+      : [];
+  const starts = Array.from(new Set(rawStarts.filter(Boolean)));
+
+  // Повтор — фиксированный горизонт (~полгода). Либо разовая запись.
+  const repeat = Boolean(body?.repeat);
+  const weeks = repeat ? RECURRENCE_WEEKS : 1;
+
+  if (!student) return NextResponse.json({ error: "Укажите имя ученика" }, { status: 400 });
   if (!SUBJECTS.includes(subject)) {
     return NextResponse.json({ error: "Выберите предмет" }, { status: 400 });
+  }
+  if (starts.length === 0) {
+    return NextResponse.json({ error: "Выберите хотя бы один слот" }, { status: 400 });
   }
 
   try {
     const now = new Date();
     const { timeMin, timeMax } = windowBounds(now);
-    const busy = await fetchBusy(timeMin, timeMax);
 
-    // Повторно проверяем, что слот всё ещё свободен (защита от гонки).
-    const check = validateSlot(startIso, busy, now);
-    if (!check.ok || !check.end) {
-      return NextResponse.json({ error: check.reason || "Слот недоступен" }, { status: 409 });
+    // Для повторяющихся записей проверяем занятость и за пределами окна —
+    // до последнего занятия самой дальней серии.
+    let far = timeMax.getTime();
+    for (const s of starts) {
+      const occ = weeklyOccurrences(s, weeks);
+      const last = new Date(occ[occ.length - 1]).getTime() + SLOT_MINUTES * 60000;
+      if (last > far) far = last;
+    }
+    const busy = await fetchBusy(timeMin, new Date(far + 60000));
+
+    // Заранее считаем правила повторения (и проверяем первый слот каждой серии).
+    const plans: { startIso: string; recurrence?: string[] }[] = [];
+    for (const startIso of starts) {
+      const r = buildRecurrence(startIso, weeks, busy, now);
+      if (!r.ok) {
+        return NextResponse.json(
+          { error: `${formatMsk(startIso)}: ${r.reason || "слот недоступен"}` },
+          { status: 409 }
+        );
+      }
+      plans.push({ startIso, recurrence: r.recurrence });
     }
 
-    const when = formatMsk(startIso);
     const cal = calendarClient();
-    const inserted = await cal.events.insert({
-      calendarId: CALENDAR_ID,
-      requestBody: {
-        summary: `${PENDING_PREFIX}${child} — ${subject}`,
-        description:
-          `Заявка через сайт записи (ожидает подтверждения).\n` +
-          `Ученик: ${child}\n` +
-          `Предмет: ${subject}\n` +
-          `Родитель: ${parent.name}` +
-          (parent.tg ? `\nTelegram: ${parent.tg}` : ""),
-        start: { dateTime: startIso, timeZone: TIMEZONE },
-        end: { dateTime: check.end.toISOString(), timeZone: TIMEZONE },
-        status: "tentative",
-        extendedProperties: {
-          private: {
-            app: "zapis",
-            status: "pending",
-            parentName: parent.name,
-            parentTg: parent.tg,
-            child,
-            subject,
+    const key = contactKey(contact);
+    const created: { when: string }[] = [];
+
+    for (const plan of plans) {
+      const startIso = plan.startIso;
+      const end = new Date(new Date(startIso).getTime() + SLOT_MINUTES * 60000);
+      const suffix = repeat ? " (еженедельно, полгода)" : "";
+
+      const inserted = await cal.events.insert({
+        calendarId: CALENDAR_ID,
+        requestBody: {
+          summary: `${PENDING_PREFIX}${student} — ${subject}`,
+          description:
+            `Заявка через сайт записи (ожидает подтверждения).\n` +
+            `Ученик: ${student}\n` +
+            `Предмет: ${subject}\n` +
+            (repeat ? `Повтор: еженедельно, ~полгода\n` : "") +
+            `Записал(а): ${contact.name}` +
+            (contact.tg ? `\nTelegram: ${contact.tg}` : ""),
+          start: { dateTime: startIso, timeZone: TIMEZONE },
+          end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
+          status: "tentative",
+          ...(plan.recurrence ? { recurrence: plan.recurrence } : {}),
+          extendedProperties: {
+            private: {
+              app: "zapis",
+              status: "pending",
+              contactKey: key,
+              name: contact.name,
+              tg: contact.tg,
+              student,
+              subject,
+              weeks: String(weeks),
+            },
           },
         },
-      },
-    });
-
-    const eventId = inserted.data.id;
-    if (!eventId) throw new Error("Событие не создано");
-
-    try {
-      await notifyRequest({
-        eventId,
-        parentName: parent.name,
-        parentTg: parent.tg,
-        child,
-        subject,
-        when,
       });
-    } catch (e) {
-      // Заявка уже в календаре; сбой уведомления не должен ломать ответ родителю.
-      console.error("Telegram notify failed", e);
+
+      const eventId = inserted.data.id;
+      if (!eventId) throw new Error("Событие не создано");
+
+      const when = `${formatMsk(startIso)}${suffix}`;
+      created.push({ when });
+
+      try {
+        await notifyRequest({
+          eventId,
+          name: contact.name,
+          tg: contact.tg,
+          student,
+          subject,
+          when,
+        });
+      } catch (e) {
+        // Заявка уже в календаре; сбой уведомления не должен ломать ответ пользователю.
+        console.error("Telegram notify failed", e);
+      }
     }
 
-    return NextResponse.json({ ok: true, when });
+    const when =
+      created.length === 1
+        ? created[0].when
+        : `${created.length} занятий:\n` + created.map((c) => `• ${c.when}`).join("\n");
+
+    return NextResponse.json({ ok: true, count: created.length, when });
   } catch (e: any) {
     console.error("/api/book error", e);
     return NextResponse.json({ error: "Не удалось создать заявку" }, { status: 500 });

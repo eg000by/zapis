@@ -59,13 +59,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Пользователь мог отменить заявку сам — тогда событие уже удалено и приходит
+  // со статусом "cancelled". Не воскрешаем его при подтверждении.
+  if (ev.status === "cancelled") {
+    await answerCallback(cq.id, "Заявку отменил сам пользователь");
+    if (chatId && messageId) {
+      await editMessageText(
+        chatId,
+        messageId,
+        "🚫 <b>Пользователь отменил эту заявку</b> — подтверждать нечего."
+      );
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   const priv = ev.extendedProperties?.private || {};
-  const child = priv.child || "";
+  const student = priv.student || "";
   const subject = priv.subject || "";
-  const parentName = priv.parentName || "";
-  const parentTg = priv.parentTg || "";
+  const name = priv.name || "";
+  const tg = priv.tg || "";
   const when = ev.start?.dateTime ? formatMsk(ev.start.dateTime) : "";
-  const cleanSummary = (ev.summary || `${child} — ${subject}`).replace(PENDING_PREFIX, "");
+  const cleanSummary = (ev.summary || `${student} — ${subject}`).replace(PENDING_PREFIX, "");
 
   try {
     if (action === "c") {
@@ -84,7 +98,7 @@ export async function POST(req: Request) {
         await editMessageText(
           chatId,
           messageId,
-          `✅ <b>Запись подтверждена</b>\n\n🧒 ${child}\n📚 ${subject}\n🕒 ${when}\n👤 ${parentName}${parentTg ? ` (${parentTg})` : ""}`
+          `✅ <b>Запись подтверждена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}\n👤 ${name}${tg ? ` (${tg})` : ""}`
         );
       }
     } else if (action === "d") {
@@ -95,7 +109,7 @@ export async function POST(req: Request) {
         await editMessageText(
           chatId,
           messageId,
-          `❌ <b>Заявка отклонена</b>\n\n🧒 ${child}\n📚 ${subject}\n🕒 ${when}\n👤 ${parentName}${parentTg ? ` (${parentTg})` : ""}`
+          `❌ <b>Заявка отклонена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}\n👤 ${name}${tg ? ` (${tg})` : ""}`
         );
       }
     }

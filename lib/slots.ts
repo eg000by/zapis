@@ -5,6 +5,7 @@ import {
   BOOKING_WINDOW_DAYS,
   MSK_OFFSET_MINUTES,
   SLOT_MINUTES,
+  TIMEZONE,
   WORK_DAYS,
   WORK_END_HOUR,
   WORK_START_HOUR,
@@ -121,6 +122,52 @@ export function validateSlot(
   const end = new Date(start.getTime() + SLOT_MINUTES * 60000);
   if (overlaps(start, end, busy)) return { ok: false, reason: "Слот уже занят" };
   return { ok: true, end };
+}
+
+// Возвращает ISO-моменты еженедельных повторений слота (первое = сам слот).
+// МСК фиксирован (UTC+3, без перехода на летнее время), поэтому +7 суток
+// сохраняет то же «стеночное» время.
+export function weeklyOccurrences(startIso: string, weeks: number): string[] {
+  const base = new Date(startIso).getTime();
+  const out: string[] = [];
+  for (let w = 0; w < Math.max(1, weeks); w++) {
+    out.push(new Date(base + w * 7 * 86400000).toISOString());
+  }
+  return out;
+}
+
+// Момент в формате EXDATE/DTSTART по «стеночному» времени МСК: "20260722T100000".
+function mskWallStamp(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + MSK_OFFSET_MINUTES * 60000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}00`
+  );
+}
+
+// Готовит правило повторения для события.
+// Первое занятие (выбранный слот) обязано быть свободным. Недели, где вы уже
+// заняты, автоматически исключаются через EXDATE — вся серия из-за них не падает.
+// Для weeks<=1 повторения нет (recurrence = undefined).
+export function buildRecurrence(
+  startIso: string,
+  weeks: number,
+  busy: BusyEvent[],
+  now = new Date()
+): { ok: boolean; reason?: string; recurrence?: string[] } {
+  const occ = weeklyOccurrences(startIso, weeks);
+  const first = validateSlot(occ[0], busy, now);
+  if (!first.ok) return { ok: false, reason: first.reason };
+  if (weeks <= 1) return { ok: true };
+
+  const exdates: string[] = [];
+  for (let i = 1; i < occ.length; i++) {
+    if (!validateSlot(occ[i], busy, now).ok) exdates.push(mskWallStamp(occ[i]));
+  }
+  const recurrence = [`RRULE:FREQ=WEEKLY;COUNT=${weeks}`];
+  if (exdates.length) recurrence.push(`EXDATE;TZID=${TIMEZONE}:${exdates.join(",")}`);
+  return { ok: true, recurrence };
 }
 
 // Форматирует момент как "7 июля, 10:00 (МСК)" для сообщений.

@@ -1,4 +1,4 @@
-import { decodeParentToken } from "@/lib/link";
+import { decodeToken } from "@/lib/link";
 import BookingClient from "./BookingClient";
 
 export const dynamic = "force-dynamic";
@@ -10,15 +10,20 @@ export default function Page({
 }) {
   const tokenRaw = searchParams.t;
   const token = Array.isArray(tokenRaw) ? tokenRaw[0] : tokenRaw;
-  const parent = decodeParentToken(token);
+  const decoded = decodeToken(token);
 
-  if (!parent) {
+  if (!decoded.ok) {
+    const expired = decoded.reason === "expired";
     return (
       <div className="wrap">
         <div className="center-note">
-          <span className="emoji">🔗</span>
+          <span className="emoji">{expired ? "⌛" : "🔗"}</span>
           <p>
-            Похоже, ссылка неполная или устарела.
+            {expired ? (
+              <>Срок действия ссылки истёк.</>
+            ) : (
+              <>Похоже, ссылка неполная или неверная.</>
+            )}
             <br />
             Попросите преподавателя прислать вашу персональную ссылку для записи.
           </p>
@@ -27,7 +32,8 @@ export default function Page({
     );
   }
 
-  const firstName = parent.name.trim().split(/\s+/).slice(-1)[0] || parent.name;
+  const contact = decoded.info;
+  const firstName = contact.name.trim().split(/\s+/).slice(-1)[0] || contact.name;
 
-  return <BookingClient token={token as string} parentName={parent.name} greetName={firstName} />;
+  return <BookingClient token={token as string} greetName={firstName} />;
 }
