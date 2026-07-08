@@ -4,7 +4,8 @@ import { SUBJECTS } from "@/lib/config";
 import { formatMskRange } from "@/lib/slots";
 import { getStudent, listStudents } from "@/lib/students";
 import { listStudentLessons } from "@/lib/lessons";
-import type { Lesson, Student } from "@/lib/schema";
+import { listStudentPayments } from "@/lib/payments";
+import type { Lesson, Payment, Student } from "@/lib/schema";
 import AdminResult from "./AdminResult";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,14 @@ const STATUS_LABEL: Record<string, string> = {
   done: "✔️ проведено",
   cancelled: "🚫 отменено",
 };
+
+const PAY_STATUS: Record<string, string> = {
+  unpaid: "🔴 не оплачено",
+  paid: "🟢 оплачено",
+  canceled: "⚪ отменён",
+};
+
+const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 
 function lessonWhen(l: Lesson): string {
   if (!l.occurrenceStart) return "—";
@@ -68,10 +77,14 @@ export default async function AdminPage({
     const id = get("id");
     let student: Student | null = null;
     let lessons: Lesson[] = [];
+    let studentPayments: Payment[] = [];
     let dbError = false;
     try {
       student = await getStudent(id);
-      if (student) lessons = await listStudentLessons(student.id);
+      if (student) {
+        lessons = await listStudentLessons(student.id);
+        studentPayments = await listStudentPayments(student.id);
+      }
     } catch (e) {
       console.error("admin student card", e);
       dbError = true;
@@ -170,6 +183,118 @@ export default async function AdminPage({
               </button>
             </form>
           </div>
+        </div>
+
+        <div className="card" style={{ marginTop: 16 }}>
+          <label style={{ marginTop: 0 }}>Оплаты</label>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Счёт создаётся в «Мой налог» (СБП + чек автоматически). Сюда вставьте ссылку на
+            оплату и отметьте «Оплачено», когда деньги придут.
+          </p>
+
+          {studentPayments.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+              {studentPayments.map((p) => (
+                <div
+                  key={p.id}
+                  style={{ borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: 12 }}
+                >
+                  <div style={{ fontWeight: 600 }}>
+                    {rub(p.amountKopecks)} ₽ · {PAY_STATUS[p.status] || p.status}
+                  </div>
+                  {p.note && <div className="hint" style={{ marginTop: 2 }}>{p.note}</div>}
+                  {p.payLink && (
+                    <div style={{ marginTop: 4 }}>
+                      <a href={p.payLink} target="_blank" rel="noreferrer">
+                        Ссылка на оплату ↗
+                      </a>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                    {p.status !== "paid" ? (
+                      <form method="POST" action="/api/admin">
+                        <input type="hidden" name="key" value={key} />
+                        <input type="hidden" name="action" value="payment.paid" />
+                        <input type="hidden" name="studentId" value={student.id} />
+                        <input type="hidden" name="paymentId" value={p.id} />
+                        <button className="btn" type="submit">
+                          Отметить оплачено
+                        </button>
+                      </form>
+                    ) : (
+                      <form method="POST" action="/api/admin">
+                        <input type="hidden" name="key" value={key} />
+                        <input type="hidden" name="action" value="payment.unpaid" />
+                        <input type="hidden" name="studentId" value={student.id} />
+                        <input type="hidden" name="paymentId" value={p.id} />
+                        <button className="btn" type="submit">
+                          Снять оплату
+                        </button>
+                      </form>
+                    )}
+                    <form method="POST" action="/api/admin">
+                      <input type="hidden" name="key" value={key} />
+                      <input type="hidden" name="action" value="payment.delete" />
+                      <input type="hidden" name="studentId" value={student.id} />
+                      <input type="hidden" name="paymentId" value={p.id} />
+                      <button className="btn" type="submit">
+                        Удалить
+                      </button>
+                    </form>
+                  </div>
+                  <form method="POST" action="/api/admin" style={{ marginTop: 8 }}>
+                    <input type="hidden" name="key" value={key} />
+                    <input type="hidden" name="action" value="payment.link" />
+                    <input type="hidden" name="studentId" value={student.id} />
+                    <input type="hidden" name="paymentId" value={p.id} />
+                    <input
+                      name="payLink"
+                      defaultValue={p.payLink}
+                      placeholder="Ссылка на оплату из «Мой налог»"
+                    />
+                    <button className="btn" type="submit">
+                      Сохранить ссылку
+                    </button>
+                  </form>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form method="POST" action="/api/admin" style={{ borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: 12 }}>
+            <input type="hidden" name="key" value={key} />
+            <input type="hidden" name="action" value="payment.create" />
+            <input type="hidden" name="studentId" value={student.id} />
+            <label style={{ marginTop: 0 }}>Новый счёт</label>
+            <input name="amount" type="number" min={0} step={50} placeholder="Сумма, ₽" />
+            {student.rateKopecks > 0 && (
+              <p className="hint" style={{ marginTop: 4 }}>
+                Ставка: {rub(student.rateKopecks)} ₽/час
+              </p>
+            )}
+            <input name="note" placeholder="Комментарий (напр. «Март, 4 занятия»)" />
+            <input name="payLink" placeholder="Ссылка на оплату из «Мой налог» (необязательно)" />
+            {lessons.length > 0 && (
+              <>
+                <p className="hint" style={{ marginBottom: 4 }}>
+                  Привязать к занятиям (необязательно):
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+                  {lessons.map((l) => (
+                    <label key={l.id} className="check-row">
+                      <input type="checkbox" name="lessonId" value={l.id} />
+                      <span>
+                        {lessonWhen(l)} · {STATUS_LABEL[l.status] || l.status}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+            <button className="btn" type="submit">
+              Создать счёт
+            </button>
+          </form>
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>

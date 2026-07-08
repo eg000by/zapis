@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { updateStudent } from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
+import {
+  createPayment,
+  deletePayment,
+  setPayLink,
+  setPaymentStatus,
+} from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +33,27 @@ export async function POST(req: Request) {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
     } else if (action === "lesson.note") {
       await setLessonNote(String(form.get("lessonId") || ""), String(form.get("note") || ""));
+    } else if (action === "payment.create") {
+      const rub = Math.max(0, Math.round(Number(form.get("amount") || 0)));
+      const lessonIds = form.getAll("lessonId").map((v) => String(v)).filter(Boolean);
+      await createPayment({
+        studentId,
+        amountKopecks: rub * 100,
+        note: String(form.get("note") || ""),
+        payLink: String(form.get("payLink") || "").trim(),
+        lessonIds,
+      });
+    } else if (action === "payment.paid") {
+      await setPaymentStatus(String(form.get("paymentId") || ""), "paid");
+    } else if (action === "payment.unpaid") {
+      await setPaymentStatus(String(form.get("paymentId") || ""), "unpaid");
+    } else if (action === "payment.link") {
+      await setPayLink(
+        String(form.get("paymentId") || ""),
+        String(form.get("payLink") || "").trim()
+      );
+    } else if (action === "payment.delete") {
+      await deletePayment(String(form.get("paymentId") || ""));
     } else {
       return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
     }

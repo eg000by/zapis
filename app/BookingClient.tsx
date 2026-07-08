@@ -26,6 +26,13 @@ interface MyEvent {
   lessons: number;
 }
 
+interface MyPayment {
+  id: string;
+  amountKopecks: number;
+  note: string;
+  payLink: string;
+}
+
 // "13:00" в МСК из ISO-момента.
 function hmMsk(iso: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
@@ -76,6 +83,7 @@ export default function BookingClient({
 
   // Мои записи.
   const [my, setMy] = useState<MyEvent[] | null>(null);
+  const [payments, setPayments] = useState<MyPayment[]>([]);
   const [rescheduleFor, setRescheduleFor] = useState<MyEvent | null>(null);
   const [busyAction, setBusyAction] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -111,7 +119,10 @@ export default function BookingClient({
   function loadMy() {
     fetch(`/api/my?token=${encodeURIComponent(token)}`)
       .then((r) => r.json())
-      .then((d) => setMy(d.events || []))
+      .then((d) => {
+        setMy(d.events || []);
+        setPayments(d.payments || []);
+      })
       .catch(() => setMy([]));
   }
 
@@ -280,6 +291,35 @@ export default function BookingClient({
       {notice && (
         <div className="notice" onClick={() => setNotice(null)}>
           {notice}
+        </div>
+      )}
+
+      {payments.length > 0 && (
+        <div className="card my-card">
+          <div className="day-title">К оплате</div>
+          {payments.map((p) => (
+            <div key={p.id} className="my-row">
+              <div className="my-info">
+                <b>{(p.amountKopecks / 100).toLocaleString("ru-RU")} ₽</b>
+                {p.note && <span className="my-when">{p.note}</span>}
+              </div>
+              <div className="my-actions">
+                {p.payLink ? (
+                  <a
+                    className="mini"
+                    href={p.payLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                  >
+                    Оплатить по СБП ↗
+                  </a>
+                ) : (
+                  <span className="badge wait">ждём ссылку на оплату</span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
