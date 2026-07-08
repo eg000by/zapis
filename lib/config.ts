@@ -28,3 +28,6 @@ export const LINK_TTL_HOURS = 24;
 
 // Сколько недель длится еженедельное повторение записи (~полгода вперёд).
 export const RECURRENCE_WEEKS = 26;
+
+// Максимум занятий (часов) на одного человека в неделю.
+export const MAX_LESSONS_PER_WEEK = 4;

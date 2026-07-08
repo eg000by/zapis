@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient } from "@/lib/google";
-import { formatMsk } from "@/lib/slots";
+import { formatMskRange } from "@/lib/slots";
 import { answerCallback, editMessageText } from "@/lib/telegram";
 import { PENDING_PREFIX } from "@/lib/config";
 
@@ -77,7 +77,16 @@ export async function POST(req: Request) {
   const student = priv.student || priv.name || "";
   const subject = priv.subject || "";
   const tg = priv.tg || "";
-  const when = ev.start?.dateTime ? formatMsk(ev.start.dateTime) : "";
+  const hours =
+    ev.start?.dateTime && ev.end?.dateTime
+      ? Math.max(
+          1,
+          Math.round(
+            (new Date(ev.end.dateTime).getTime() - new Date(ev.start.dateTime).getTime()) / 3600000
+          )
+        )
+      : 1;
+  const when = ev.start?.dateTime ? formatMskRange(ev.start.dateTime, hours) : "";
   const cleanSummary = (ev.summary || `${student} — ${subject}`).replace(PENDING_PREFIX, "");
 
   try {

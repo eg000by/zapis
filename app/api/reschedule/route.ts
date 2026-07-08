@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
-import { buildRecurrence, formatMsk, weeklyOccurrences, windowBounds } from "@/lib/slots";
+import { buildRecurrence, formatMskRange, weeklyOccurrences, windowBounds } from "@/lib/slots";
 import { decodeToken, contactKey } from "@/lib/link";
 import { notifyRequest } from "@/lib/telegram";
 import { PENDING_PREFIX, SLOT_MINUTES, TIMEZONE } from "@/lib/config";
@@ -47,27 +47,35 @@ export async function POST(req: Request) {
   const student = priv.student || "";
   const subject = priv.subject || "";
 
+  // Сохраняем длительность блока: переносим весь блок, а не только первый час.
+  const evStart = ev.start?.dateTime;
+  const evEnd = ev.end?.dateTime;
+  const hours =
+    evStart && evEnd
+      ? Math.max(1, Math.round((new Date(evEnd).getTime() - new Date(evStart).getTime()) / 3600000))
+      : 1;
+
   try {
     const now = new Date();
     const { timeMin, timeMax } = windowBounds(now);
 
     const occ = weeklyOccurrences(startIso, weeks);
     let far = timeMax.getTime();
-    const lastEnd = new Date(occ[occ.length - 1]).getTime() + SLOT_MINUTES * 60000;
+    const lastEnd = new Date(occ[occ.length - 1]).getTime() + hours * SLOT_MINUTES * 60000;
     if (lastEnd > far) far = lastEnd;
 
     // Занятость без самой этой записи (иначе она конфликтовала бы с собой).
     const busy = await fetchBusy(timeMin, new Date(far + 60000), eventId);
 
-    const r = buildRecurrence(startIso, weeks, busy, now);
+    const r = buildRecurrence(startIso, weeks, busy, now, hours);
     if (!r.ok) {
       return NextResponse.json(
-        { error: `${formatMsk(startIso)}: ${r.reason || "слот недоступен"}` },
+        { error: `${formatMskRange(startIso, hours)}: ${r.reason || "слот недоступен"}` },
         { status: 409 }
       );
     }
 
-    const end = new Date(new Date(startIso).getTime() + SLOT_MINUTES * 60000);
+    const end = new Date(new Date(startIso).getTime() + hours * SLOT_MINUTES * 60000);
     await cal.events.patch({
       calendarId: CALENDAR_ID,
       eventId,
@@ -82,7 +90,7 @@ export async function POST(req: Request) {
     });
 
     const suffix = weeks > 1 ? " (еженедельно)" : "";
-    const when = `${formatMsk(startIso)}${suffix}`;
+    const when = `${formatMskRange(startIso, hours)}${suffix}`;
 
     try {
       await notifyRequest({

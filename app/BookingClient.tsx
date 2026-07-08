@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { groupConsecutive } from "@/lib/blocks";
 
 interface Slot {
   start: string;
@@ -21,9 +22,20 @@ interface MyEvent {
   start: string;
   recurring: boolean;
   weeks: number;
+  hours: number;
 }
 
-function fmtMsk(iso: string): string {
+// "13:00" в МСК из ISO-момента.
+function hmMsk(iso: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+// "Ср, 8 июля, 10:00 (МСК)" или, для блока, "…, 10:00–13:00 (МСК)".
+function fmtMsk(iso: string, hours = 1): string {
   const s = new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Moscow",
     weekday: "short",
@@ -32,7 +44,9 @@ function fmtMsk(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(iso));
-  return `${s} (МСК)`;
+  if (hours <= 1) return `${s} (МСК)`;
+  const end = new Date(new Date(iso).getTime() + hours * 3600000);
+  return `${s}–${hmMsk(end.toISOString())} (МСК)`;
 }
 
 export default function BookingClient({
@@ -69,6 +83,14 @@ export default function BookingClient({
     (days || []).forEach((d) => d.slots.forEach((s) => m.set(s.start, { time: s.time, title: d.title })));
     return m;
   }, [days]);
+
+  // Подряд идущие часы показываем одним блоком («10:00–13:00»).
+  const blocks = useMemo(() => groupConsecutive(selected), [selected]);
+
+  // Если в окне подтверждения убрали все слоты — закрываем окно.
+  useEffect(() => {
+    if (sheetOpen && selected.length === 0) setSheetOpen(false);
+  }, [sheetOpen, selected]);
 
   function loadSlots() {
     setDays(null);
@@ -121,6 +143,10 @@ export default function BookingClient({
     setSelected((cur) =>
       cur.includes(start) ? cur.filter((s) => s !== start) : [...cur, start]
     );
+  }
+
+  function removeSlots(slots: string[]) {
+    setSelected((cur) => cur.filter((s) => !slots.includes(s)));
   }
 
   async function pickForReschedule(start: string) {
@@ -263,7 +289,7 @@ export default function BookingClient({
               <div className="my-info">
                 <b>{ev.student} — {ev.subject}</b>
                 <span className="my-when">
-                  {fmtMsk(ev.start)}
+                  {fmtMsk(ev.start, ev.hours)}
                   {ev.recurring ? " · еженедельно" : ""}
                 </span>
                 <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
@@ -382,17 +408,27 @@ export default function BookingClient({
             <p className="when">{subject}</p>
 
             <div className="summary">
-              {selected.map((st) => (
-                <div key={st} className="summary-row">
-                  <div className="summary-when">
-                    {slotInfo.get(st)?.title}, {slotInfo.get(st)?.time} (МСК)
-                    <span className="summary-tag">{trial ? "разово" : "еженедельно"}</span>
+              {blocks.map((b) => {
+                const title = slotInfo.get(b.start)?.title || "";
+                const startLabel = slotInfo.get(b.start)?.time || hmMsk(b.start);
+                const timeLabel =
+                  b.slots.length > 1 ? `${startLabel}–${hmMsk(b.end)}` : startLabel;
+                return (
+                  <div key={b.start} className="summary-row">
+                    <div className="summary-when">
+                      {title}, {timeLabel} (МСК)
+                      <span className="summary-tag">{trial ? "разово" : "еженедельно"}</span>
+                    </div>
+                    <button
+                      className="chip-x"
+                      onClick={() => removeSlots(b.slots)}
+                      aria-label="Убрать"
+                    >
+                      ×
+                    </button>
                   </div>
-                  <button className="chip-x" onClick={() => toggleSlot(st)} aria-label="Убрать">
-                    ×
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <p className="sheet-note">
@@ -406,7 +442,7 @@ export default function BookingClient({
             <button className="btn" onClick={submit} disabled={submitting || selected.length === 0}>
               {submitting
                 ? "Отправляем…"
-                : `Записаться${selected.length > 1 ? ` (${selected.length})` : ""}`}
+                : `Записаться${blocks.length > 1 ? ` (${blocks.length})` : ""}`}
             </button>
             <button className="btn btn-ghost" onClick={() => setSheetOpen(false)} disabled={submitting}>
               Назад

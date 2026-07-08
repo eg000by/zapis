@@ -10,7 +10,7 @@ import {
   WORK_END_HOUR,
   WORK_START_HOUR,
 } from "./config";
-import { BusyEvent } from "./google";
+import type { BusyEvent } from "./google";
 
 const WEEKDAYS_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 const MONTHS_GEN = [
@@ -98,28 +98,30 @@ export function buildDays(busy: BusyEvent[], now = new Date()): DaySlots[] {
   return days;
 }
 
-// Проверяет, что конкретный слот (по ISO-началу) валиден и свободен.
+// Проверяет, что блок из `hours` подряд идущих часов (начиная с ISO-начала)
+// валиден и полностью свободен. Для обычного слота hours = 1.
 // Возвращает { ok, end } — end нужен для создания события.
 export function validateSlot(
   startIso: string,
   busy: BusyEvent[],
-  now = new Date()
+  now = new Date(),
+  hours = 1
 ): { ok: boolean; reason?: string; end?: Date } {
   const start = new Date(startIso);
   if (isNaN(start.getTime())) return { ok: false, reason: "Некорректное время" };
   if (start <= now) return { ok: false, reason: "Это время уже прошло" };
 
-  // Слот должен попадать в сетку рабочих часов МСК.
+  // Блок должен целиком попадать в сетку рабочих часов МСК.
   const shifted = new Date(start.getTime() + MSK_OFFSET_MINUTES * 60000);
   const hour = shifted.getUTCHours();
   const minute = shifted.getUTCMinutes();
   const weekday = shifted.getUTCDay();
-  if (minute !== 0 || hour < WORK_START_HOUR || hour >= WORK_END_HOUR) {
+  if (minute !== 0 || hour < WORK_START_HOUR || hour + hours > WORK_END_HOUR) {
     return { ok: false, reason: "Время вне рабочих часов" };
   }
   if (!WORK_DAYS.includes(weekday)) return { ok: false, reason: "Этот день недоступен" };
 
-  const end = new Date(start.getTime() + SLOT_MINUTES * 60000);
+  const end = new Date(start.getTime() + hours * SLOT_MINUTES * 60000);
   if (overlaps(start, end, busy)) return { ok: false, reason: "Слот уже занят" };
   return { ok: true, end };
 }
@@ -154,29 +156,39 @@ export function buildRecurrence(
   startIso: string,
   weeks: number,
   busy: BusyEvent[],
-  now = new Date()
-): { ok: boolean; reason?: string; recurrence?: string[] } {
+  now = new Date(),
+  hours = 1
+): { ok: boolean; reason?: string; recurrence?: string[]; end?: Date } {
   const occ = weeklyOccurrences(startIso, weeks);
-  const first = validateSlot(occ[0], busy, now);
+  const first = validateSlot(occ[0], busy, now, hours);
   if (!first.ok) return { ok: false, reason: first.reason };
-  if (weeks <= 1) return { ok: true };
+  if (weeks <= 1) return { ok: true, end: first.end };
 
   const exdates: string[] = [];
   for (let i = 1; i < occ.length; i++) {
-    if (!validateSlot(occ[i], busy, now).ok) exdates.push(mskWallStamp(occ[i]));
+    if (!validateSlot(occ[i], busy, now, hours).ok) exdates.push(mskWallStamp(occ[i]));
   }
   const recurrence = [`RRULE:FREQ=WEEKLY;COUNT=${weeks}`];
   if (exdates.length) recurrence.push(`EXDATE;TZID=${TIMEZONE}:${exdates.join(",")}`);
-  return { ok: true, recurrence };
+  return { ok: true, recurrence, end: first.end };
 }
 
-// Форматирует момент как "7 июля, 10:00 (МСК)" для сообщений.
+// Форматирует блок как "Ср, 7 июля, 10:00–13:00 (МСК)" для сообщений.
+// Для одного часа диапазон не показываем: "Ср, 7 июля, 10:00 (МСК)".
+export function formatMskRange(startIso: string, hours = 1): string {
+  const s = new Date(new Date(startIso).getTime() + MSK_OFFSET_MINUTES * 60000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const dd = s.getUTCDate();
+  const mm = s.getUTCMonth();
+  const wd = WEEKDAYS_SHORT[s.getUTCDay()];
+  const startLabel = `${p(s.getUTCHours())}:${p(s.getUTCMinutes())}`;
+  if (hours <= 1) return `${wd}, ${dd} ${MONTHS_GEN[mm]}, ${startLabel} (МСК)`;
+  const e = new Date(s.getTime() + hours * SLOT_MINUTES * 60000);
+  const endLabel = `${p(e.getUTCHours())}:${p(e.getUTCMinutes())}`;
+  return `${wd}, ${dd} ${MONTHS_GEN[mm]}, ${startLabel}–${endLabel} (МСК)`;
+}
+
+// Форматирует момент как "Ср, 7 июля, 10:00 (МСК)" для сообщений.
 export function formatMsk(startIso: string): string {
-  const shifted = new Date(new Date(startIso).getTime() + MSK_OFFSET_MINUTES * 60000);
-  const dd = shifted.getUTCDate();
-  const mm = shifted.getUTCMonth();
-  const hh = String(shifted.getUTCHours()).padStart(2, "0");
-  const min = String(shifted.getUTCMinutes()).padStart(2, "0");
-  const wd = WEEKDAYS_SHORT[shifted.getUTCDay()];
-  return `${wd}, ${dd} ${MONTHS_GEN[mm]}, ${hh}:${min} (МСК)`;
+  return formatMskRange(startIso, 1);
 }
