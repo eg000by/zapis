@@ -8,6 +8,7 @@ import {
   windowBounds,
 } from "@/lib/slots";
 import { decodeToken, contactKey } from "@/lib/link";
+import { updateLessonByEvent } from "@/lib/lessons";
 import { notifyRequest } from "@/lib/telegram";
 import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
 
@@ -96,6 +97,13 @@ export async function POST(req: Request) {
         extendedProperties: { private: { ...priv, status: "pending", lessons: String(lessons) } },
       },
     });
+
+    // CRM (best-effort): переносим занятие и возвращаем в статус ожидания.
+    try {
+      await updateLessonByEvent(eventId, { status: "pending", occurrenceStart: new Date(startIso) });
+    } catch (e) {
+      console.error("CRM lesson reschedule sync failed", e);
+    }
 
     const suffix = weeks > 1 ? " (еженедельно)" : "";
     const when = `${formatMskRange(startIso, lessons)}${suffix}`;

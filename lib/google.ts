@@ -73,6 +73,28 @@ export interface BookingEvent {
   lessons: number; // число занятий в блоке (для отображения диапазона и лимита)
 }
 
+// Множество id «живых» (не отменённых) событий владельца ссылки — для сверки CRM
+// с календарём (источник правды). Занятие в БД, чьё событие удалено/отменено —
+// уже не активно. Берём широкое окно (±~13 мес), чтобы захватить и прошлые занятия.
+export async function liveEventIdsForContact(key: string): Promise<Set<string>> {
+  const cal = calendarClient();
+  const now = Date.now();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
+    timeMin: new Date(now - 400 * 86400000).toISOString(),
+    timeMax: new Date(now + 400 * 86400000).toISOString(),
+    singleEvents: false,
+    maxResults: 250,
+  });
+  const ids = new Set<string>();
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled") continue;
+    if (ev.id) ids.add(ev.id);
+  }
+  return ids;
+}
+
 // Возвращает записи владельца ссылки (по contactKey), у которых есть будущие
 // занятия. Повторяющиеся серии возвращаются одной строкой (singleEvents=false).
 export async function listContactEvents(key: string, fromIso: string): Promise<BookingEvent[]> {

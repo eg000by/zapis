@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient } from "@/lib/google";
 import { decodeToken, contactKey } from "@/lib/link";
+import { setLessonStatusByEvent } from "@/lib/lessons";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,13 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error("/api/cancel error", e);
     return NextResponse.json({ error: "Не удалось отменить запись" }, { status: 500 });
+  }
+
+  // CRM (best-effort): помечаем занятие отменённым, чтобы карточка не показывала фантом.
+  try {
+    await setLessonStatusByEvent(eventId, "cancelled");
+  } catch (e) {
+    console.error("CRM lesson cancel sync failed", e);
   }
 
   return NextResponse.json({ ok: true });

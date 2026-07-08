@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { encodeToken } from "@/lib/link";
 import { SUBJECTS } from "@/lib/config";
 import { formatMskRange } from "@/lib/slots";
+import { liveEventIdsForContact } from "@/lib/google";
 import { getStudent, listStudents } from "@/lib/students";
 import { listStudentLessons } from "@/lib/lessons";
 import { listStudentPayments } from "@/lib/payments";
@@ -82,8 +83,21 @@ export default async function AdminPage({
     try {
       student = await getStudent(id);
       if (student) {
-        lessons = await listStudentLessons(student.id);
+        const all = await listStudentLessons(student.id);
         studentPayments = await listStudentPayments(student.id);
+        // Сверка с календарём (источник правды): занятие, чьё событие удалено/отменено
+        // (отмена на сайте, отклонение, удаление прямо в Google Calendar), не показываем.
+        let liveIds: Set<string> | null = null;
+        try {
+          liveIds = await liveEventIdsForContact(student.contactKey);
+        } catch (e) {
+          console.error("admin card calendar reconcile failed", e);
+        }
+        lessons = all.filter((l) => {
+          if (l.status === "cancelled") return false;
+          if (liveIds && l.calendarEventId && !liveIds.has(l.calendarEventId)) return false;
+          return true;
+        });
       }
     } catch (e) {
       console.error("admin student card", e);
