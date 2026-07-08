@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { groupConsecutive } from "@/lib/blocks";
+import { SLOT_MINUTES, SLOT_STEP_MINUTES } from "@/lib/config";
 
 interface Slot {
   start: string;
@@ -22,7 +23,7 @@ interface MyEvent {
   start: string;
   recurring: boolean;
   weeks: number;
-  hours: number;
+  lessons: number;
 }
 
 // "13:00" в МСК из ISO-момента.
@@ -34,8 +35,8 @@ function hmMsk(iso: string): string {
   }).format(new Date(iso));
 }
 
-// "Ср, 8 июля, 10:00 (МСК)" или, для блока, "…, 10:00–13:00 (МСК)".
-function fmtMsk(iso: string, hours = 1): string {
+// "Ср, 8 июля, 10:00 (МСК)" или, для блока, "…, 10:00–12:10 (МСК)".
+function fmtMsk(iso: string, lessons = 1): string {
   const s = new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Moscow",
     weekday: "short",
@@ -44,8 +45,9 @@ function fmtMsk(iso: string, hours = 1): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(iso));
-  if (hours <= 1) return `${s} (МСК)`;
-  const end = new Date(new Date(iso).getTime() + hours * 3600000);
+  if (lessons <= 1) return `${s} (МСК)`;
+  const spanMin = (lessons - 1) * SLOT_STEP_MINUTES + SLOT_MINUTES;
+  const end = new Date(new Date(iso).getTime() + spanMin * 60000);
   return `${s}–${hmMsk(end.toISOString())} (МСК)`;
 }
 
@@ -289,7 +291,7 @@ export default function BookingClient({
               <div className="my-info">
                 <b>{ev.student} — {ev.subject}</b>
                 <span className="my-when">
-                  {fmtMsk(ev.start, ev.hours)}
+                  {fmtMsk(ev.start, ev.lessons)}
                   {ev.recurring ? " · еженедельно" : ""}
                 </span>
                 <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>

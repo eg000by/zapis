@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
-import { buildRecurrence, formatMskRange, weeklyOccurrences, windowBounds } from "@/lib/slots";
+import {
+  blockSpanMinutes,
+  buildRecurrence,
+  formatMskRange,
+  weeklyOccurrences,
+  windowBounds,
+} from "@/lib/slots";
 import { decodeToken, contactKey } from "@/lib/link";
 import { notifyRequest } from "@/lib/telegram";
-import { PENDING_PREFIX, SLOT_MINUTES, TIMEZONE } from "@/lib/config";
+import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -47,13 +53,15 @@ export async function POST(req: Request) {
   const student = priv.student || "";
   const subject = priv.subject || "";
 
-  // Сохраняем длительность блока: переносим весь блок, а не только первый час.
+  // Сохраняем длину блока: переносим весь блок, а не только первое занятие.
+  // Число занятий берём из extendedProperties; для старых событий — из длительности.
   const evStart = ev.start?.dateTime;
   const evEnd = ev.end?.dateTime;
-  const hours =
-    evStart && evEnd
+  const lessons =
+    Number(priv.lessons) ||
+    (evStart && evEnd
       ? Math.max(1, Math.round((new Date(evEnd).getTime() - new Date(evStart).getTime()) / 3600000))
-      : 1;
+      : 1);
 
   try {
     const now = new Date();
@@ -61,21 +69,21 @@ export async function POST(req: Request) {
 
     const occ = weeklyOccurrences(startIso, weeks);
     let far = timeMax.getTime();
-    const lastEnd = new Date(occ[occ.length - 1]).getTime() + hours * SLOT_MINUTES * 60000;
+    const lastEnd = new Date(occ[occ.length - 1]).getTime() + blockSpanMinutes(lessons) * 60000;
     if (lastEnd > far) far = lastEnd;
 
     // Занятость без самой этой записи (иначе она конфликтовала бы с собой).
     const busy = await fetchBusy(timeMin, new Date(far + 60000), eventId);
 
-    const r = buildRecurrence(startIso, weeks, busy, now, hours);
+    const r = buildRecurrence(startIso, weeks, busy, now, lessons);
     if (!r.ok) {
       return NextResponse.json(
-        { error: `${formatMskRange(startIso, hours)}: ${r.reason || "слот недоступен"}` },
+        { error: `${formatMskRange(startIso, lessons)}: ${r.reason || "слот недоступен"}` },
         { status: 409 }
       );
     }
 
-    const end = new Date(new Date(startIso).getTime() + hours * SLOT_MINUTES * 60000);
+    const end = new Date(new Date(startIso).getTime() + blockSpanMinutes(lessons) * 60000);
     await cal.events.patch({
       calendarId: CALENDAR_ID,
       eventId,
@@ -85,12 +93,12 @@ export async function POST(req: Request) {
         start: { dateTime: startIso, timeZone: TIMEZONE },
         end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
         ...(r.recurrence ? { recurrence: r.recurrence } : {}),
-        extendedProperties: { private: { ...priv, status: "pending" } },
+        extendedProperties: { private: { ...priv, status: "pending", lessons: String(lessons) } },
       },
     });
 
     const suffix = weeks > 1 ? " (еженедельно)" : "";
-    const when = `${formatMskRange(startIso, hours)}${suffix}`;
+    const when = `${formatMskRange(startIso, lessons)}${suffix}`;
 
     try {
       await notifyRequest({

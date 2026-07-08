@@ -77,16 +77,17 @@ export async function POST(req: Request) {
   const student = priv.student || priv.name || "";
   const subject = priv.subject || "";
   const tg = priv.tg || "";
-  const hours =
-    ev.start?.dateTime && ev.end?.dateTime
+  const lessons =
+    Number(priv.lessons) ||
+    (ev.start?.dateTime && ev.end?.dateTime
       ? Math.max(
           1,
           Math.round(
             (new Date(ev.end.dateTime).getTime() - new Date(ev.start.dateTime).getTime()) / 3600000
           )
         )
-      : 1;
-  const when = ev.start?.dateTime ? formatMskRange(ev.start.dateTime, hours) : "";
+      : 1);
+  const when = ev.start?.dateTime ? formatMskRange(ev.start.dateTime, lessons) : "";
   const cleanSummary = (ev.summary || `${student} — ${subject}`).replace(PENDING_PREFIX, "");
 
   try {

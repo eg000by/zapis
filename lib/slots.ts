@@ -5,11 +5,18 @@ import {
   BOOKING_WINDOW_DAYS,
   MSK_OFFSET_MINUTES,
   SLOT_MINUTES,
+  SLOT_STEP_MINUTES,
   TIMEZONE,
   WORK_DAYS,
   WORK_END_HOUR,
   WORK_START_HOUR,
 } from "./config";
+
+// Длительность блока из `lessons` подряд идущих занятий, в минутах:
+// N уроков по SLOT_MINUTES с перерывами между ними (шаг SLOT_STEP_MINUTES).
+export function blockSpanMinutes(lessons: number): number {
+  return (Math.max(1, lessons) - 1) * SLOT_STEP_MINUTES + SLOT_MINUTES;
+}
 import type { BusyEvent } from "./google";
 
 const WEEKDAYS_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -74,13 +81,19 @@ export function buildDays(busy: BusyEvent[], now = new Date()): DaySlots[] {
     if (!WORK_DAYS.includes(weekday)) continue;
 
     const slots: Slot[] = [];
-    for (let hour = WORK_START_HOUR; hour < WORK_END_HOUR; hour++) {
-      const start = mskWallToInstant(yy, mm, dd, hour);
+    const startMin = WORK_START_HOUR * 60;
+    const endMin = WORK_END_HOUR * 60;
+    // Шаг сетки — SLOT_STEP_MINUTES (занятие + перерыв). Последний урок должен
+    // закончиться не позже WORK_END_HOUR.
+    for (let min = startMin; min + SLOT_MINUTES <= endMin; min += SLOT_STEP_MINUTES) {
+      const hr = Math.floor(min / 60);
+      const mn = min % 60;
+      const start = mskWallToInstant(yy, mm, dd, hr, mn);
       const end = new Date(start.getTime() + SLOT_MINUTES * 60000);
       if (start <= now) continue; // прошедшие слоты не показываем
       slots.push({
         start: start.toISOString(),
-        time: `${String(hour).padStart(2, "0")}:00`,
+        time: `${String(hr).padStart(2, "0")}:${String(mn).padStart(2, "0")}`,
         busy: overlaps(start, end, busy),
       });
     }
@@ -98,30 +111,36 @@ export function buildDays(busy: BusyEvent[], now = new Date()): DaySlots[] {
   return days;
 }
 
-// Проверяет, что блок из `hours` подряд идущих часов (начиная с ISO-начала)
-// валиден и полностью свободен. Для обычного слота hours = 1.
+// Проверяет, что блок из `lessons` подряд идущих занятий (начиная с ISO-начала)
+// валиден и полностью свободен. Для обычного слота lessons = 1.
+// Старт обязан попадать в сетку (кратен шагу от начала рабочего дня), а весь блок
+// (уроки + внутренние перерывы) — умещаться в рабочие часы.
 // Возвращает { ok, end } — end нужен для создания события.
 export function validateSlot(
   startIso: string,
   busy: BusyEvent[],
   now = new Date(),
-  hours = 1
+  lessons = 1
 ): { ok: boolean; reason?: string; end?: Date } {
   const start = new Date(startIso);
   if (isNaN(start.getTime())) return { ok: false, reason: "Некорректное время" };
   if (start <= now) return { ok: false, reason: "Это время уже прошло" };
 
-  // Блок должен целиком попадать в сетку рабочих часов МСК.
+  // Блок должен попадать в сетку рабочих часов МСК.
   const shifted = new Date(start.getTime() + MSK_OFFSET_MINUTES * 60000);
-  const hour = shifted.getUTCHours();
-  const minute = shifted.getUTCMinutes();
+  const minutesOfDay = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
   const weekday = shifted.getUTCDay();
-  if (minute !== 0 || hour < WORK_START_HOUR || hour + hours > WORK_END_HOUR) {
+  const offset = minutesOfDay - WORK_START_HOUR * 60;
+  const span = blockSpanMinutes(lessons);
+  if (offset < 0 || offset % SLOT_STEP_MINUTES !== 0) {
+    return { ok: false, reason: "Время вне сетки" };
+  }
+  if (WORK_START_HOUR * 60 + offset + span > WORK_END_HOUR * 60) {
     return { ok: false, reason: "Время вне рабочих часов" };
   }
   if (!WORK_DAYS.includes(weekday)) return { ok: false, reason: "Этот день недоступен" };
 
-  const end = new Date(start.getTime() + hours * SLOT_MINUTES * 60000);
+  const end = new Date(start.getTime() + span * 60000);
   if (overlaps(start, end, busy)) return { ok: false, reason: "Слот уже занят" };
   return { ok: true, end };
 }
@@ -157,33 +176,33 @@ export function buildRecurrence(
   weeks: number,
   busy: BusyEvent[],
   now = new Date(),
-  hours = 1
+  lessons = 1
 ): { ok: boolean; reason?: string; recurrence?: string[]; end?: Date } {
   const occ = weeklyOccurrences(startIso, weeks);
-  const first = validateSlot(occ[0], busy, now, hours);
+  const first = validateSlot(occ[0], busy, now, lessons);
   if (!first.ok) return { ok: false, reason: first.reason };
   if (weeks <= 1) return { ok: true, end: first.end };
 
   const exdates: string[] = [];
   for (let i = 1; i < occ.length; i++) {
-    if (!validateSlot(occ[i], busy, now, hours).ok) exdates.push(mskWallStamp(occ[i]));
+    if (!validateSlot(occ[i], busy, now, lessons).ok) exdates.push(mskWallStamp(occ[i]));
   }
   const recurrence = [`RRULE:FREQ=WEEKLY;COUNT=${weeks}`];
   if (exdates.length) recurrence.push(`EXDATE;TZID=${TIMEZONE}:${exdates.join(",")}`);
   return { ok: true, recurrence, end: first.end };
 }
 
-// Форматирует блок как "Ср, 7 июля, 10:00–13:00 (МСК)" для сообщений.
-// Для одного часа диапазон не показываем: "Ср, 7 июля, 10:00 (МСК)".
-export function formatMskRange(startIso: string, hours = 1): string {
+// Форматирует блок как "Ср, 7 июля, 10:00–12:10 (МСК)" для сообщений.
+// Для одного занятия диапазон не показываем: "Ср, 7 июля, 10:00 (МСК)".
+export function formatMskRange(startIso: string, lessons = 1): string {
   const s = new Date(new Date(startIso).getTime() + MSK_OFFSET_MINUTES * 60000);
   const p = (n: number) => String(n).padStart(2, "0");
   const dd = s.getUTCDate();
   const mm = s.getUTCMonth();
   const wd = WEEKDAYS_SHORT[s.getUTCDay()];
   const startLabel = `${p(s.getUTCHours())}:${p(s.getUTCMinutes())}`;
-  if (hours <= 1) return `${wd}, ${dd} ${MONTHS_GEN[mm]}, ${startLabel} (МСК)`;
-  const e = new Date(s.getTime() + hours * SLOT_MINUTES * 60000);
+  if (lessons <= 1) return `${wd}, ${dd} ${MONTHS_GEN[mm]}, ${startLabel} (МСК)`;
+  const e = new Date(s.getTime() + blockSpanMinutes(lessons) * 60000);
   const endLabel = `${p(e.getUTCHours())}:${p(e.getUTCMinutes())}`;
   return `${wd}, ${dd} ${MONTHS_GEN[mm]}, ${startLabel}–${endLabel} (МСК)`;
 }

@@ -70,7 +70,7 @@ export interface BookingEvent {
   start: string; // ISO начала (для повторяющихся — первое занятие)
   recurring: boolean;
   weeks: number;
-  hours: number; // длительность блока в часах
+  lessons: number; // число занятий в блоке (для отображения диапазона и лимита)
 }
 
 // Возвращает записи владельца ссылки (по contactKey), у которых есть будущие
@@ -90,12 +90,16 @@ export async function listContactEvents(key: string, fromIso: string): Promise<B
     if (ev.status === "cancelled") continue;
     const start = ev.start?.dateTime || ev.start?.date;
     if (!ev.id || !start) continue;
-    const end = ev.end?.dateTime || ev.end?.date;
-    const hours = end
-      ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 3600000))
-      : 1;
     const priv = ev.extendedProperties?.private || {};
     const weeks = Number(priv.weeks) || 1;
+    // Число занятий в блоке хранится в extendedProperties. Для старых событий
+    // (без поля) оцениваем по длительности из расчёта 60 мин на занятие.
+    const end = ev.end?.dateTime || ev.end?.date;
+    const lessons =
+      Number(priv.lessons) ||
+      (end
+        ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 3600000))
+        : 1);
     out.push({
       id: ev.id,
       student: priv.student || "",
@@ -104,7 +108,7 @@ export async function listContactEvents(key: string, fromIso: string): Promise<B
       start: new Date(start).toISOString(),
       recurring: Array.isArray(ev.recurrence) && ev.recurrence.length > 0,
       weeks,
-      hours,
+      lessons,
     });
   }
   out.sort((a, b) => a.start.localeCompare(b.start));

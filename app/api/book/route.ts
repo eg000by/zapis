@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient, fetchBusy, listContactEvents } from "@/lib/google";
-import { buildRecurrence, formatMskRange, weeklyOccurrences, windowBounds } from "@/lib/slots";
+import {
+  blockSpanMinutes,
+  buildRecurrence,
+  formatMskRange,
+  weeklyOccurrences,
+  windowBounds,
+} from "@/lib/slots";
 import { groupConsecutive } from "@/lib/blocks";
 import { decodeToken, contactKey } from "@/lib/link";
 import { notifyRequest } from "@/lib/telegram";
@@ -8,7 +14,6 @@ import {
   MAX_LESSONS_PER_WEEK,
   PENDING_PREFIX,
   RECURRENCE_WEEKS,
-  SLOT_MINUTES,
   SUBJECTS,
   TIMEZONE,
 } from "@/lib/config";
@@ -74,9 +79,9 @@ export async function POST(req: Request) {
     // до последнего занятия самой дальней серии.
     let far = timeMax.getTime();
     for (const b of blocks) {
-      const hours = b.slots.length;
+      const lessons = b.slots.length;
       const occ = weeklyOccurrences(b.start, weeks);
-      const last = new Date(occ[occ.length - 1]).getTime() + hours * SLOT_MINUTES * 60000;
+      const last = new Date(occ[occ.length - 1]).getTime() + blockSpanMinutes(lessons) * 60000;
       if (last > far) far = last;
     }
     const busy = await fetchBusy(timeMin, new Date(far + 60000));
@@ -84,16 +89,16 @@ export async function POST(req: Request) {
     const cal = calendarClient();
     const key = contactKey(contact);
 
-    // Лимит: не больше MAX_LESSONS_PER_WEEK часов на одного человека в неделю.
+    // Лимит: не больше MAX_LESSONS_PER_WEEK занятий на одного человека в неделю.
     // Считаем текущую загрузку по неделям (существующие записи этого человека).
     const load = new Map<number, number>();
-    const addLoad = (wk: number, h: number) => load.set(wk, (load.get(wk) || 0) + h);
+    const addLoad = (wk: number, n: number) => load.set(wk, (load.get(wk) || 0) + n);
     try {
       const mine = await listContactEvents(key, now.toISOString());
       for (const e of mine) {
         const w0 = weekKey(new Date(e.start).getTime());
         const span = e.recurring ? Math.max(1, e.weeks) : 1;
-        for (let i = 0; i < span; i++) addLoad(w0 + i, e.hours);
+        for (let i = 0; i < span; i++) addLoad(w0 + i, e.lessons);
       }
     } catch (e) {
       console.error("weekly-load lookup failed", e);
@@ -101,13 +106,13 @@ export async function POST(req: Request) {
 
     // Заранее считаем правила повторения (и проверяем первый слот каждой серии),
     // а также сверяем недельный лимит с учётом уже добавляемых блоков.
-    const plans: { startIso: string; hours: number; recurrence?: string[] }[] = [];
+    const plans: { startIso: string; lessons: number; recurrence?: string[] }[] = [];
     for (const b of blocks) {
-      const hours = b.slots.length;
+      const lessons = b.slots.length;
       const w0 = weekKey(new Date(b.start).getTime());
       const span = weeks > 1 ? weeks : 1;
       for (let i = 0; i < span; i++) {
-        if ((load.get(w0 + i) || 0) + hours > MAX_LESSONS_PER_WEEK) {
+        if ((load.get(w0 + i) || 0) + lessons > MAX_LESSONS_PER_WEEK) {
           return NextResponse.json(
             {
               error: `На неделю можно записать не больше ${MAX_LESSONS_PER_WEEK} занятий на человека. Отмените лишнее в разделе «Ваши записи» или выберите меньше времени.`,
@@ -117,24 +122,24 @@ export async function POST(req: Request) {
         }
       }
 
-      const r = buildRecurrence(b.start, weeks, busy, now, hours);
+      const r = buildRecurrence(b.start, weeks, busy, now, lessons);
       if (!r.ok) {
         return NextResponse.json(
-          { error: `${formatMskRange(b.start, hours)}: ${r.reason || "слот недоступен"}` },
+          { error: `${formatMskRange(b.start, lessons)}: ${r.reason || "слот недоступен"}` },
           { status: 409 }
         );
       }
-      plans.push({ startIso: b.start, hours, recurrence: r.recurrence });
+      plans.push({ startIso: b.start, lessons, recurrence: r.recurrence });
       // Учитываем этот блок в загрузке, чтобы несколько блоков считались вместе.
-      for (let i = 0; i < span; i++) addLoad(w0 + i, hours);
+      for (let i = 0; i < span; i++) addLoad(w0 + i, lessons);
     }
 
     const created: { when: string }[] = [];
 
     for (const plan of plans) {
       const startIso = plan.startIso;
-      const hours = plan.hours;
-      const end = new Date(new Date(startIso).getTime() + hours * SLOT_MINUTES * 60000);
+      const lessons = plan.lessons;
+      const end = new Date(new Date(startIso).getTime() + blockSpanMinutes(lessons) * 60000);
       const suffix = plan.recurrence ? " (еженедельно)" : "";
 
       const inserted = await cal.events.insert({
@@ -161,6 +166,7 @@ export async function POST(req: Request) {
               student,
               subject,
               weeks: String(weeks),
+              lessons: String(lessons),
             },
           },
         },
@@ -169,7 +175,7 @@ export async function POST(req: Request) {
       const eventId = inserted.data.id;
       if (!eventId) throw new Error("Событие не создано");
 
-      const when = `${formatMskRange(startIso, hours)}${suffix}`;
+      const when = `${formatMskRange(startIso, lessons)}${suffix}`;
       created.push({ when });
 
       try {

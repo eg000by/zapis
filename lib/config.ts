@@ -4,10 +4,17 @@
 export const TIMEZONE = "Europe/Moscow";
 export const MSK_OFFSET_MINUTES = 180; // МСК фиксировано = UTC+3
 
-// Рабочие часы (в МСК). Слоты генерируются на каждый час [START_HOUR, END_HOUR).
+// Рабочие часы (в МСК). Слоты генерируются с шагом SLOT_STEP_MINUTES,
+// начиная с WORK_START_HOUR; последний урок должен закончиться не позже WORK_END_HOUR.
 export const WORK_START_HOUR = 10;
-export const WORK_END_HOUR = 20; // последний слот начинается в 19:00
+export const WORK_END_HOUR = 20;
+// Длительность самого занятия (событие в календаре).
 export const SLOT_MINUTES = 60;
+// Перерыв после занятия.
+export const BREAK_MINUTES = 10;
+// Шаг сетки слотов = занятие + перерыв. Старты слотов идут через каждые 70 мин:
+// 10:00, 11:10, 12:20, … последний — 18:10 (урок 18:10–19:10).
+export const SLOT_STEP_MINUTES = SLOT_MINUTES + BREAK_MINUTES;
 
 // На сколько дней вперёд открыта запись.
 export const BOOKING_WINDOW_DAYS = 14;
