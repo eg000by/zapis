@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SUBJECTS } from "@/lib/config";
 
 interface Slot {
   start: string;
@@ -39,9 +38,13 @@ function fmtMsk(iso: string): string {
 export default function BookingClient({
   token,
   greetName,
+  subject,
+  trial,
 }: {
   token: string;
   greetName: string;
+  subject: string;
+  trial: boolean;
 }) {
   const [days, setDays] = useState<Day[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -50,10 +53,6 @@ export default function BookingClient({
   // Выбранные слоты (ISO начала), в порядке выбора.
   const [selected, setSelected] = useState<string[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
-
-  const [student, setStudent] = useState("");
-  const [subject, setSubject] = useState(SUBJECTS[0]);
-  const [repeat, setRepeat] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -92,6 +91,26 @@ export default function BookingClient({
       .catch(() => setMy([]));
   }
 
+  // Тихо обновляет сетку (без спиннера). Если prune — убирает из выбора слоты,
+  // которые только что заняли. Возвращает оставшиеся выбранные слоты.
+  async function refreshSlots(prune = false): Promise<string[]> {
+    try {
+      const d = await fetch("/api/slots").then((r) => r.json());
+      if (d.error) return selected;
+      const nd: Day[] = d.days || [];
+      setDays(nd);
+      setActiveDay((a) => Math.min(a, Math.max(0, nd.length - 1)));
+      if (!prune) return selected;
+      const free = new Set<string>();
+      nd.forEach((dd) => dd.slots.forEach((s) => !s.busy && free.add(s.start)));
+      const survivors = selected.filter((st) => free.has(st));
+      setSelected(survivors);
+      return survivors;
+    } catch {
+      return selected;
+    }
+  }
+
   useEffect(() => {
     loadSlots();
     loadMy();
@@ -116,7 +135,9 @@ export default function BookingClient({
       });
       const data = await res.json();
       if (!res.ok) {
-        setNotice(data.error || "Не удалось перенести запись.");
+        // Например, слот заняли за секунду до нас — обновляем сетку, старая бронь цела.
+        setNotice(data.error || "Не удалось перенести запись. Ваше прежнее время осталось за вами.");
+        await refreshSlots(false);
       } else {
         setNotice(`Перенесено на ${data.when}. Ждём подтверждения преподавателя.`);
         setRescheduleFor(null);
@@ -164,28 +185,25 @@ export default function BookingClient({
 
   async function submit() {
     if (selected.length === 0) return;
-    if (!student.trim()) {
-      setFormError("Впишите имя ученика");
-      return;
-    }
     setSubmitting(true);
     setFormError(null);
     try {
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token,
-          starts: selected,
-          student: student.trim(),
-          subject,
-          repeat,
-        }),
+        body: JSON.stringify({ token, starts: selected }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setFormError(data.error || "Не удалось записаться. Попробуйте другой слот.");
+        // Слот могли занять за секунду до нас — обновляем сетку и убираем занятое.
+        const survivors = await refreshSlots(true);
         setSubmitting(false);
+        if (survivors.length === 0) {
+          setSheetOpen(false);
+          setNotice("Выбранное время только что заняли. Пожалуйста, выберите другое.");
+        } else {
+          setFormError(data.error || "Это время уже заняли. Сетка обновлена — выберите другое.");
+        }
         return;
       }
       setDoneWhen(data.when || null);
@@ -224,7 +242,10 @@ export default function BookingClient({
     <div className="wrap">
       <div className="hero">
         <h1>Здравствуйте, {greetName}! 👋</h1>
-        <p>Выберите удобное время — и запишитесь на занятие.</p>
+        <p>
+          {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"} по
+          предмету «<b>{subject}</b>».
+        </p>
         <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>
       </div>
 
@@ -243,7 +264,7 @@ export default function BookingClient({
                 <b>{ev.student} — {ev.subject}</b>
                 <span className="my-when">
                   {fmtMsk(ev.start)}
-                  {ev.recurring ? " · еженедельно (полгода)" : ""}
+                  {ev.recurring ? " · еженедельно" : ""}
                 </span>
                 <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
                   {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
@@ -349,7 +370,7 @@ export default function BookingClient({
             Выбрано слотов: <b>{selected.length}</b>
           </span>
           <button className="picker-btn" onClick={() => { setSheetOpen(true); setFormError(null); }}>
-            Записать →
+            Записаться →
           </button>
         </div>
       )}
@@ -357,52 +378,35 @@ export default function BookingClient({
       {sheetOpen && (
         <div className="overlay" onClick={() => !submitting && setSheetOpen(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <h2>Запись на занятие</h2>
+            <h2>Подтверждение записи</h2>
+            <p className="when">{subject}</p>
 
-            <div className="chips">
+            <div className="summary">
               {selected.map((st) => (
-                <span key={st} className="chip">
-                  {slotInfo.get(st)?.title}, {slotInfo.get(st)?.time}
+                <div key={st} className="summary-row">
+                  <div className="summary-when">
+                    {slotInfo.get(st)?.title}, {slotInfo.get(st)?.time} (МСК)
+                    <span className="summary-tag">{trial ? "разово" : "еженедельно"}</span>
+                  </div>
                   <button className="chip-x" onClick={() => toggleSlot(st)} aria-label="Убрать">
                     ×
                   </button>
-                </span>
+                </div>
               ))}
             </div>
 
-            <label htmlFor="student">Имя ученика</label>
-            <input
-              id="student"
-              value={student}
-              onChange={(e) => setStudent(e.target.value)}
-              placeholder="Например, Егор"
-              autoFocus
-            />
-
-            <label htmlFor="subject">Предмет</label>
-            <select id="subject" value={subject} onChange={(e) => setSubject(e.target.value)}>
-              {SUBJECTS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={repeat}
-                onChange={(e) => setRepeat(e.target.checked)}
-              />
-              <span>Повторять каждую неделю (на полгода вперёд)</span>
-            </label>
+            <p className="sheet-note">
+              {trial
+                ? "Разовое пробное занятие. Отменить или перенести можно в разделе «Ваши записи»."
+                : "Время закрепится за вами каждую неделю. Перенести или отменить можно в разделе «Ваши записи»."}
+            </p>
 
             {formError && <div className="error-text">{formError}</div>}
 
             <button className="btn" onClick={submit} disabled={submitting || selected.length === 0}>
               {submitting
                 ? "Отправляем…"
-                : `Записать${selected.length > 1 ? ` (${selected.length})` : ""}`}
+                : `Записаться${selected.length > 1 ? ` (${selected.length})` : ""}`}
             </button>
             <button className="btn btn-ghost" onClick={() => setSheetOpen(false)} disabled={submitting}>
               Назад

@@ -22,7 +22,7 @@ export default function AdminResult({ link }: { link: string }) {
       <button className="btn" onClick={copy}>
         {copied ? "Скопировано ✓" : "Скопировать ссылку"}
       </button>
-      <p className="hint">Отправьте эту ссылку ученику. Имя и Telegram уже зашиты в неё.</p>
+      <p className="hint">Отправьте эту ссылку ученику. Имя, предмет и Telegram уже зашиты в неё — на сайте останется только выбрать время.</p>
     </div>
   );
 }

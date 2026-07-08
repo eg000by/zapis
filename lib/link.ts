@@ -6,8 +6,10 @@ import crypto from "crypto";
 import { LINK_TTL_HOURS } from "./config";
 
 export interface Contact {
-  name: string; // отображаемое имя, напр. "Егор" или "Мама Егора"
+  name: string; // имя ученика, напр. "Егор"
+  subject: string; // предмет — задаёт преподаватель при создании ссылки
   tg: string; // telegram, напр. "@egor" (может быть пустым)
+  trial: boolean; // пробное: разовая запись на один день, без еженедельного повтора
 }
 
 // Результат разбора токена: либо данные, либо причина отказа.
@@ -36,7 +38,16 @@ function sign(payload: string): string {
 
 export function encodeToken(info: Contact): string {
   const payload = b64urlEncode(
-    Buffer.from(JSON.stringify({ n: info.name, tg: info.tg, iat: Date.now() }), "utf8")
+    Buffer.from(
+      JSON.stringify({
+        n: info.name,
+        s: info.subject,
+        tg: info.tg,
+        tr: info.trial ? 1 : undefined,
+        iat: Date.now(),
+      }),
+      "utf8"
+    )
   );
   return `${payload}.${sign(payload)}`;
 }
@@ -53,7 +64,9 @@ export function decodeToken(token: string | undefined | null): DecodeResult {
   }
   try {
     const obj = JSON.parse(b64urlDecode(payload).toString("utf8"));
-    if (typeof obj.n !== "string") return { ok: false, reason: "invalid" };
+    // Требуем имя и предмет — старый формат ссылок (без предмета) считаем недействительным.
+    if (typeof obj.n !== "string" || !obj.n) return { ok: false, reason: "invalid" };
+    if (typeof obj.s !== "string" || !obj.s) return { ok: false, reason: "invalid" };
     if (LINK_TTL_HOURS > 0) {
       const iat = typeof obj.iat === "number" ? obj.iat : 0;
       // Токены без метки времени (старый формат) считаем протухшими.
@@ -61,7 +74,15 @@ export function decodeToken(token: string | undefined | null): DecodeResult {
         return { ok: false, reason: "expired" };
       }
     }
-    return { ok: true, info: { name: obj.n, tg: typeof obj.tg === "string" ? obj.tg : "" } };
+    return {
+      ok: true,
+      info: {
+        name: obj.n,
+        subject: obj.s,
+        tg: typeof obj.tg === "string" ? obj.tg : "",
+        trial: obj.tr === 1,
+      },
+    };
   } catch {
     return { ok: false, reason: "invalid" };
   }
@@ -70,6 +91,9 @@ export function decodeToken(token: string | undefined | null): DecodeResult {
 // Стабильный ключ владельца ссылки — кладём в событие, чтобы потом показать
 // именно его записи и разрешить переносить/отменять только их.
 export function contactKey(info: Contact): string {
-  const h = crypto.createHmac("sha256", secret()).update(`k:${info.name}\n${info.tg}`).digest();
+  const h = crypto
+    .createHmac("sha256", secret())
+    .update(`k:${info.name}\n${info.subject}\n${info.tg}`)
+    .digest();
   return b64urlEncode(h).slice(0, 16);
 }

@@ -81,15 +81,14 @@ export async function POST(req: Request) {
       },
     });
 
-    const suffix = weeks > 1 ? " (еженедельно, полгода)" : "";
+    const suffix = weeks > 1 ? " (еженедельно)" : "";
     const when = `${formatMsk(startIso)}${suffix}`;
 
     try {
       await notifyRequest({
         eventId,
-        name: contact.name,
+        name: student || contact.name,
         tg: contact.tg,
-        student,
         subject,
         when,
         header: "🔄 <b>Перенос записи</b> — нужно подтвердить",

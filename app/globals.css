@@ -237,7 +237,15 @@ body {
 .sheet .when {
   color: var(--accent);
   font-weight: 600;
-  margin: 0 0 18px;
+  margin: 0 0 14px;
+}
+.sheet-note {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 label {
@@ -483,6 +491,40 @@ select:focus {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* Итог выбранных слотов в форме подтверждения */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+.summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+.summary-when {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.summary-tag {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
 }
 
 /* Чипы выбранных слотов в форме */

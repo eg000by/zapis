@@ -20,12 +20,19 @@ export default function Page({
           <span className="emoji">{expired ? "⌛" : "🔗"}</span>
           <p>
             {expired ? (
-              <>Срок действия ссылки истёк.</>
+              <>
+                Срок действия ссылки истёк.
+                <br />
+                Напишите преподавателю — он пришлёт новую ссылку. Уже подтверждённые записи
+                остаются в силе.
+              </>
             ) : (
-              <>Похоже, ссылка неполная или неверная.</>
+              <>
+                Похоже, ссылка неполная или неверная.
+                <br />
+                Попросите преподавателя прислать вашу персональную ссылку для записи.
+              </>
             )}
-            <br />
-            Попросите преподавателя прислать вашу персональную ссылку для записи.
           </p>
         </div>
       </div>
@@ -35,5 +42,12 @@ export default function Page({
   const contact = decoded.info;
   const firstName = contact.name.trim().split(/\s+/).slice(-1)[0] || contact.name;
 
-  return <BookingClient token={token as string} greetName={firstName} />;
+  return (
+    <BookingClient
+      token={token as string}
+      greetName={firstName}
+      subject={contact.subject}
+      trial={contact.trial}
+    />
+  );
 }

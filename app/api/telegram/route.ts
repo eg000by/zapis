@@ -74,9 +74,8 @@ export async function POST(req: Request) {
   }
 
   const priv = ev.extendedProperties?.private || {};
-  const student = priv.student || "";
+  const student = priv.student || priv.name || "";
   const subject = priv.subject || "";
-  const name = priv.name || "";
   const tg = priv.tg || "";
   const when = ev.start?.dateTime ? formatMsk(ev.start.dateTime) : "";
   const cleanSummary = (ev.summary || `${student} — ${subject}`).replace(PENDING_PREFIX, "");
@@ -98,7 +97,7 @@ export async function POST(req: Request) {
         await editMessageText(
           chatId,
           messageId,
-          `✅ <b>Запись подтверждена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}\n👤 ${name}${tg ? ` (${tg})` : ""}`
+          `✅ <b>Запись подтверждена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
         );
       }
     } else if (action === "d") {
@@ -109,7 +108,7 @@ export async function POST(req: Request) {
         await editMessageText(
           chatId,
           messageId,
-          `❌ <b>Заявка отклонена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}\n👤 ${name}${tg ? ` (${tg})` : ""}`
+          `❌ <b>Заявка отклонена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
         );
       }
     }

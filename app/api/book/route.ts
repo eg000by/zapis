@@ -25,8 +25,9 @@ export async function POST(req: Request) {
   }
   const contact = decoded.info;
 
-  const student = String(body?.student || "").trim();
-  const subject = String(body?.subject || "").trim();
+  // Имя и предмет зашиты в ссылку — пользователь на сайте ничего о себе не вводит.
+  const student = contact.name.trim();
+  const subject = contact.subject.trim();
 
   // Принимаем и один слот (start), и несколько (starts).
   const rawStarts: string[] = Array.isArray(body?.starts)
@@ -36,13 +37,12 @@ export async function POST(req: Request) {
       : [];
   const starts = Array.from(new Set(rawStarts.filter(Boolean)));
 
-  // Повтор — фиксированный горизонт (~полгода). Либо разовая запись.
-  const repeat = Boolean(body?.repeat);
-  const weeks = repeat ? RECURRENCE_WEEKS : 1;
+  // Пробное — разовая запись; иначе еженедельный повтор на полгода вперёд.
+  const weeks = contact.trial ? 1 : RECURRENCE_WEEKS;
 
-  if (!student) return NextResponse.json({ error: "Укажите имя ученика" }, { status: 400 });
+  if (!student) return NextResponse.json({ error: "Некорректная ссылка" }, { status: 400 });
   if (!SUBJECTS.includes(subject)) {
-    return NextResponse.json({ error: "Выберите предмет" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректная ссылка: предмет" }, { status: 400 });
   }
   if (starts.length === 0) {
     return NextResponse.json({ error: "Выберите хотя бы один слот" }, { status: 400 });
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     for (const plan of plans) {
       const startIso = plan.startIso;
       const end = new Date(new Date(startIso).getTime() + SLOT_MINUTES * 60000);
-      const suffix = repeat ? " (еженедельно, полгода)" : "";
+      const suffix = plan.recurrence ? " (еженедельно)" : "";
 
       const inserted = await cal.events.insert({
         calendarId: CALENDAR_ID,
@@ -92,9 +92,8 @@ export async function POST(req: Request) {
             `Заявка через сайт записи (ожидает подтверждения).\n` +
             `Ученик: ${student}\n` +
             `Предмет: ${subject}\n` +
-            (repeat ? `Повтор: еженедельно, ~полгода\n` : "") +
-            `Записал(а): ${contact.name}` +
-            (contact.tg ? `\nTelegram: ${contact.tg}` : ""),
+            (plan.recurrence ? `Повтор: еженедельно\n` : `Пробное занятие (разовое)\n`) +
+            (contact.tg ? `Telegram: ${contact.tg}\n` : ""),
           start: { dateTime: startIso, timeZone: TIMEZONE },
           end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
           status: "tentative",
@@ -123,9 +122,8 @@ export async function POST(req: Request) {
       try {
         await notifyRequest({
           eventId,
-          name: contact.name,
+          name: student,
           tg: contact.tg,
-          student,
           subject,
           when,
         });

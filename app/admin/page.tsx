@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { encodeToken } from "@/lib/link";
+import { SUBJECTS } from "@/lib/config";
 import AdminResult from "./AdminResult";
 
 export const dynamic = "force-dynamic";
@@ -39,10 +40,12 @@ export default function AdminPage({
 
   const name = get("name").trim();
   const tg = get("tg").trim();
+  const subject = get("subject").trim() || SUBJECTS[0];
+  const trial = get("trial") === "on";
 
   let link = "";
-  if (name) {
-    const token = encodeToken({ name, tg });
+  if (name && SUBJECTS.includes(subject)) {
+    const token = encodeToken({ name, subject, tg, trial });
     link = `${baseUrl()}/?t=${encodeURIComponent(token)}`;
   }
 
@@ -56,11 +59,25 @@ export default function AdminPage({
       <form className="card" method="GET" style={{ marginTop: 16 }}>
         <input type="hidden" name="key" value={key} />
 
-        <label htmlFor="name">Имя (кому отправляете ссылку)</label>
+        <label htmlFor="name">Имя ученика</label>
         <input id="name" name="name" defaultValue={name} placeholder="Например, Егор" />
+
+        <label htmlFor="subject">Предмет</label>
+        <select id="subject" name="subject" defaultValue={subject}>
+          {SUBJECTS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
 
         <label htmlFor="tg">Telegram (необязательно)</label>
         <input id="tg" name="tg" defaultValue={tg} placeholder="@egor" />
+
+        <label className="check-row">
+          <input type="checkbox" name="trial" defaultChecked={trial} />
+          <span>Пробное — разовая запись на один день, без повтора</span>
+        </label>
 
         <button className="btn" type="submit">
           Создать ссылку

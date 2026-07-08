@@ -25,7 +25,6 @@ export async function notifyRequest(params: {
   eventId: string;
   name: string;
   tg: string;
-  student: string;
   subject: string;
   when: string;
   header?: string;
@@ -33,13 +32,12 @@ export async function notifyRequest(params: {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!chatId) throw new Error("TELEGRAM_CHAT_ID не задан");
 
-  const tgLine = params.tg ? `\nTelegram: ${params.tg}` : "";
+  const tgLine = params.tg ? `\n✈️ ${params.tg}` : "";
   const text =
     `${params.header || "🆕 <b>Новая заявка на запись</b>"}\n\n` +
-    `🧑‍🎓 Ученик: <b>${escapeHtml(params.student)}</b>\n` +
+    `🧑‍🎓 Ученик: <b>${escapeHtml(params.name)}</b>\n` +
     `📚 Предмет: ${escapeHtml(params.subject)}\n` +
-    `🕒 Время: <b>${escapeHtml(params.when)}</b>\n` +
-    `👤 Записал(а): ${escapeHtml(params.name)}${escapeHtml(tgLine)}`;
+    `🕒 Время: <b>${escapeHtml(params.when)}</b>${escapeHtml(tgLine)}`;
 
   await api("sendMessage", {
     chat_id: chatId,
