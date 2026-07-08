@@ -9,6 +9,8 @@ import {
 } from "@/lib/slots";
 import { groupConsecutive } from "@/lib/blocks";
 import { decodeToken, contactKey } from "@/lib/link";
+import { upsertStudent } from "@/lib/students";
+import { recordLesson } from "@/lib/lessons";
 import { notifyRequest } from "@/lib/telegram";
 import {
   MAX_LESSONS_PER_WEEK,
@@ -89,6 +91,16 @@ export async function POST(req: Request) {
     const cal = calendarClient();
     const key = contactKey(contact);
 
+    // CRM (best-effort): заводим/освежаем ученика в Postgres и кладём его id в событие.
+    // Календарь — источник правды, поэтому недоступность БД НЕ должна ломать запись.
+    let studentId: string | null = contact.studentId || null;
+    try {
+      const s = await upsertStudent({ name: student, subject, tg: contact.tg, contactKey: key });
+      studentId = s.id;
+    } catch (e) {
+      console.error("CRM upsert student failed", e);
+    }
+
     // Лимит: не больше MAX_LESSONS_PER_WEEK занятий на одного человека в неделю.
     // Считаем текущую загрузку по неделям (существующие записи этого человека).
     const load = new Map<number, number>();
@@ -167,6 +179,7 @@ export async function POST(req: Request) {
               subject,
               weeks: String(weeks),
               lessons: String(lessons),
+              ...(studentId ? { studentId } : {}),
             },
           },
         },
@@ -177,6 +190,21 @@ export async function POST(req: Request) {
 
       const when = `${formatMskRange(startIso, lessons)}${suffix}`;
       created.push({ when });
+
+      // Учёт занятия в CRM (best-effort).
+      if (studentId) {
+        try {
+          await recordLesson({
+            studentId,
+            calendarEventId: eventId,
+            occurrenceStart: new Date(startIso),
+            subject,
+            status: "pending",
+          });
+        } catch (e) {
+          console.error("CRM record lesson failed", e);
+        }
+      }
 
       try {
         await notifyRequest({

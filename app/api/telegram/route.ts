@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient } from "@/lib/google";
 import { formatMskRange } from "@/lib/slots";
 import { answerCallback, editMessageText } from "@/lib/telegram";
+import { setLessonStatusByEvent } from "@/lib/lessons";
 import { PENDING_PREFIX } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +103,11 @@ export async function POST(req: Request) {
           extendedProperties: { private: { status: "confirmed" } },
         },
       });
+      try {
+        await setLessonStatusByEvent(eventId, "confirmed");
+      } catch (e) {
+        console.error("CRM lesson status (confirm) failed", e);
+      }
       await answerCallback(cq.id, "Запись подтверждена ✅");
       if (chatId && messageId) {
         await editMessageText(
@@ -113,6 +119,11 @@ export async function POST(req: Request) {
     } else if (action === "d") {
       // Отклоняем: удаляем событие, слот освобождается.
       await cal.events.delete({ calendarId: CALENDAR_ID, eventId });
+      try {
+        await setLessonStatusByEvent(eventId, "cancelled");
+      } catch (e) {
+        console.error("CRM lesson status (decline) failed", e);
+      }
       await answerCallback(cq.id, "Заявка отклонена ❌");
       if (chatId && messageId) {
         await editMessageText(

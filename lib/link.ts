@@ -10,6 +10,7 @@ export interface Contact {
   subject: string; // предмет — задаёт преподаватель при создании ссылки
   tg: string; // telegram, напр. "@egor" (может быть пустым)
   trial: boolean; // пробное: разовая запись на один день, без еженедельного повтора
+  studentId?: string; // id ученика в БД (CRM); в старых ссылках отсутствует
 }
 
 // Результат разбора токена: либо данные, либо причина отказа.
@@ -44,6 +45,7 @@ export function encodeToken(info: Contact): string {
         s: info.subject,
         tg: info.tg,
         tr: info.trial ? 1 : undefined,
+        sid: info.studentId || undefined,
         iat: Date.now(),
       }),
       "utf8"
@@ -81,6 +83,7 @@ export function decodeToken(token: string | undefined | null): DecodeResult {
         subject: obj.s,
         tg: typeof obj.tg === "string" ? obj.tg : "",
         trial: obj.tr === 1,
+        studentId: typeof obj.sid === "string" ? obj.sid : undefined,
       },
     };
   } catch {
