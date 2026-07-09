@@ -6,11 +6,15 @@ import { setLessonStatusByEvent } from "@/lib/lessons";
 import { recolorEvent } from "@/lib/coloring";
 import {
   applyPendingInput,
+  cancelPending,
   deletePaymentBot,
+  finishNewStudent,
   markPaymentPaid,
+  pickSubjectForNew,
   promptDeletePayment,
   promptLessonNote,
   promptNewPayment,
+  promptNewStudent,
   promptPaymentLink,
   promptStudentNote,
   sendBookingLink,
@@ -64,9 +68,32 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
 
+  // Отмена текущего ввода (заметка/счёт/ссылка/новый ученик).
+  if (data === "cancel") {
+    await cancelPending(chatId);
+    await answerCallback(cq.id, "Отменено");
+    return ok();
+  }
+
   // Навигация CRM.
   if (data === "stus") {
     await showStudentsList(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  // Мастер добавления нового ученика.
+  if (data === "newstu") {
+    await promptNewStudent(chatId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("nsub:")) {
+    await pickSubjectForNew(chatId, Number(data.slice(5)));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "nskiptg") {
+    await finishNewStudent(chatId, "");
     await answerCallback(cq.id);
     return ok();
   }
@@ -138,22 +165,48 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   return ok();
 }
 
+const HELP =
+  "<b>🤖 Команды</b>\n\n" +
+  "👥 /students — ученики, оплаты, заметки, ссылки\n" +
+  "➕ /new — новый ученик + ссылка на запись\n" +
+  "✖️ /cancel — отменить текущий ввод\n" +
+  "❓ /help — эта справка\n\n" +
+  "<b>Внутри карточки ученика:</b>\n" +
+  "🔗 ссылка на запись · 💳 оплаты (создать / отметить / удалить счёт) · 📅 занятия и заметки.";
+
 async function handleMessage(msg: any): Promise<NextResponse> {
   const chatId = msg.chat?.id;
   if (!isOwner(chatId)) return ok();
   const text = String(msg.text || "").trim();
   if (!text) return ok();
 
-  if (text === "/start" || text.startsWith("/students")) {
+  if (text === "/start") {
+    await sendOwner(HELP);
     await showStudentsList(chatId, null);
     return ok();
   }
+  if (text.startsWith("/students")) {
+    await showStudentsList(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/new")) {
+    await promptNewStudent(chatId);
+    return ok();
+  }
+  if (text.startsWith("/help")) {
+    await sendOwner(HELP);
+    return ok();
+  }
+  if (text.startsWith("/cancel")) {
+    await cancelPending(chatId);
+    return ok();
+  }
 
-  // Бот ждёт ввод (текст заметки)?
+  // Бот ждёт ввод (имя/заметка/сумма/ссылка)?
   if (await applyPendingInput(chatId, text)) return ok();
 
   if (text.startsWith("/")) {
-    await sendOwner("Команды:\n/students — ученики, оплаты и заметки");
+    await sendOwner(HELP);
   }
   return ok();
 }

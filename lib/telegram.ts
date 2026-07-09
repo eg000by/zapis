@@ -105,3 +105,10 @@ export function forceReply(): unknown {
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+// Регистрирует меню команд бота (список по кнопке «/» в клиенте Telegram).
+export async function setMyCommands(
+  commands: { command: string; description: string }[]
+): Promise<void> {
+  await api("setMyCommands", { commands });
+}

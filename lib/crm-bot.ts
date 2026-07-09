@@ -3,13 +3,12 @@
 // оплаты + перекраска), занятия, заметки через forced reply. Всё — под владельцем.
 import {
   editMessageText,
-  forceReply,
   inlineKeyboard,
   sendOwner,
   escapeHtml,
   type TgButton,
 } from "./telegram";
-import { getStudent, listStudents, updateStudent } from "./students";
+import { getStudent, listStudents, updateStudent, upsertStudent } from "./students";
 import { getLesson, listStudentLessons, setLessonNote } from "./lessons";
 import {
   createPayment,
@@ -23,7 +22,8 @@ import {
 } from "./payments";
 import { recolorLesson, recolorPaymentLessons } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
-import { encodeToken } from "./link";
+import { contactKey, encodeToken } from "./link";
+import { SUBJECTS } from "./config";
 import { formatMskRange } from "./slots";
 import type { Lesson } from "./schema";
 
@@ -40,6 +40,10 @@ const PAY_STATUS: Record<string, string> = {
   paid: "🟢",
   canceled: "⚪",
 };
+
+// Кнопка отмены текущего ввода. force_reply нельзя совместить с инлайн-кнопкой,
+// поэтому у приглашений к вводу показываем инлайн-«Отмена» (callback "cancel").
+const cancelKb = () => inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]]);
 
 function lessonWhen(l: Lesson): string {
   if (!l.occurrenceStart) return "—";
@@ -65,13 +69,12 @@ export async function showStudentsList(
 ): Promise<void> {
   const all = await listStudents();
   const active = all.filter((s) => s.active);
-  const rows: TgButton[][] = active.map((s) => [
-    { text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` },
-  ]);
+  const rows: TgButton[][] = [[{ text: "➕ Новый ученик", data: "newstu" }]];
+  for (const s of active) rows.push([{ text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` }]);
   const text = active.length
-    ? "<b>👥 Ученики</b>\nВыберите ученика:"
-    : "<b>👥 Ученики</b>\n\nПока пусто. Создайте ученика на сайте /admin.";
-  await emit(chatId, messageId, text, rows.length ? inlineKeyboard(rows) : undefined);
+    ? "<b>👥 Ученики</b>\nВыберите ученика или добавьте нового:"
+    : "<b>👥 Ученики</b>\n\nПока пусто. Добавьте первого ученика кнопкой ниже.";
+  await emit(chatId, messageId, text, inlineKeyboard(rows));
 }
 
 export async function showStudentCard(
@@ -261,30 +264,124 @@ export async function sendBookingLink(chatId: number | string, studentId: string
   );
 }
 
+// ── Мастер добавления нового ученика (имя → предмет → telegram → ссылка) ──
+// Данные шага храним в botState.targetId как JSON, т.к. поле одно.
+
+export async function promptNewStudent(chatId: number | string): Promise<void> {
+  await setState(String(chatId), "stu.new.name", "{}");
+  await sendOwner("🧑‍🎓 Как зовут нового ученика? Пришлите имя одним сообщением.", cancelKb());
+}
+
+// Шаг 2: выбор предмета кнопками (предметы фиксированы в конфиге).
+async function askSubject(chatId: number | string, name: string): Promise<void> {
+  await setState(String(chatId), "stu.new.subject", JSON.stringify({ name }));
+  const rows: TgButton[][] = SUBJECTS.map((s, i) => [{ text: s, data: `nsub:${i}` }]);
+  rows.push([{ text: "✖️ Отмена", data: "cancel" }]);
+  await sendOwner(`📚 Предмет для <b>${escapeHtml(name)}</b>?`, inlineKeyboard(rows));
+}
+
+// Шаг 3 (из callback nsub:<i>): предмет выбран → спрашиваем telegram (необязательно).
+export async function pickSubjectForNew(chatId: number | string, index: number): Promise<void> {
+  const st = await getState(String(chatId));
+  if (!st || st.action !== "stu.new.subject") {
+    await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
+    return;
+  }
+  const subject = SUBJECTS[index];
+  if (!subject) {
+    await sendOwner("Неизвестный предмет, попробуйте ещё раз.");
+    return;
+  }
+  let name = "";
+  try {
+    name = JSON.parse(st.targetId).name || "";
+  } catch {}
+  await setState(String(chatId), "stu.new.tg", JSON.stringify({ name, subject }));
+  await sendOwner(
+    "✈️ Telegram ученика — пришлите <code>@username</code> сообщением или нажмите «Пропустить».",
+    inlineKeyboard([[{ text: "Пропустить", data: "nskiptg" }, { text: "✖️ Отмена", data: "cancel" }]])
+  );
+}
+
+// Финал: создаёт/освежает ученика в БД (contactKey — как на /admin) и шлёт ссылку.
+export async function finishNewStudent(chatId: number | string, tgRaw: string): Promise<void> {
+  const st = await getState(String(chatId));
+  if (!st || st.action !== "stu.new.tg") {
+    await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
+    return;
+  }
+  let name = "";
+  let subject = "";
+  try {
+    const o = JSON.parse(st.targetId);
+    name = o.name || "";
+    subject = o.subject || "";
+  } catch {}
+  if (!name || !subject) {
+    await clearState(String(chatId));
+    await sendOwner("Не хватило данных. Начните заново: /new");
+    return;
+  }
+  const skip = /^(-|нет|пропустить|skip)$/i.test(tgRaw.trim());
+  const tg = skip ? "" : tgRaw.trim();
+  const ck = contactKey({ name, subject, tg, trial: false });
+  const s = await upsertStudent({ name, subject, tg, contactKey: ck });
+  await clearState(String(chatId));
+  await sendOwner(`✅ Ученик <b>${escapeHtml(name)}</b> добавлен в базу.`);
+  await sendBookingLink(chatId, s.id);
+  await showStudentCard(chatId, null, s.id);
+}
+
+// Отменяет текущий ожидаемый ввод (заметка/счёт/ссылка/новый ученик) и по
+// возможности возвращает на предыдущий экран. Вызывается из кнопки «Отмена» и /cancel.
+export async function cancelPending(chatId: number | string): Promise<void> {
+  const st = await getState(String(chatId));
+  await clearState(String(chatId));
+  if (!st) {
+    await sendOwner("Нечего отменять.");
+    return;
+  }
+  await sendOwner("✖️ Отменено.");
+  try {
+    if (st.action === "student.note") {
+      await showStudentCard(chatId, null, st.targetId);
+    } else if (st.action === "lesson.note") {
+      const l = await getLesson(st.targetId);
+      if (l) await showLessons(chatId, null, l.studentId);
+    } else if (st.action === "payment.create") {
+      await showPayments(chatId, null, st.targetId);
+    } else if (st.action === "payment.link") {
+      const p = await getPayment(st.targetId);
+      if (p) await showPayments(chatId, null, p.studentId);
+    } else if (st.action.startsWith("stu.new")) {
+      await showStudentsList(chatId, null);
+    }
+  } catch (e) {
+    console.error("cancelPending navigate failed", e);
+  }
+}
+
 export async function promptNewPayment(chatId: number | string, studentId: string): Promise<void> {
   await setState(String(chatId), "payment.create", studentId);
   await sendOwner(
     "💳 Пришлите сумму счёта в рублях. Можно с комментарием одной строкой.\nНапример: <code>6000 Март, 4 занятия</code>",
-    forceReply()
+    cancelKb()
   );
 }
 
 export async function promptPaymentLink(chatId: number | string, paymentId: string): Promise<void> {
   await setState(String(chatId), "payment.link", paymentId);
-  await sendOwner(
-    "🔗 Пришлите ссылку на оплату из «Мой налог» для этого счёта:",
-    forceReply()
-  );
+  await sendOwner("🔗 Пришлите ссылку на оплату из «Мой налог» для этого счёта:", cancelKb());
 }
 
 export async function promptStudentNote(chatId: number | string, studentId: string): Promise<void> {
   await setState(String(chatId), "student.note", studentId);
-  await sendOwner("✍️ Пришлите текст заметки об ученике одним сообщением:", forceReply());
+  await sendOwner("✍️ Пришлите текст заметки об ученике одним сообщением:", cancelKb());
 }
 
 export async function promptLessonNote(chatId: number | string, lessonId: string): Promise<void> {
   await setState(String(chatId), "lesson.note", lessonId);
-  await sendOwner("✍️ Пришлите текст заметки по занятию одним сообщением:", forceReply());
+  await sendOwner("✍️ Пришлите текст заметки по занятию одним сообщением:", cancelKb());
 }
 
 // Если бот ждёт ввод (заметку) — сохраняет и подтверждает. Возвращает true, если обработал.
@@ -293,6 +390,18 @@ export async function applyPendingInput(chatId: number | string, text: string): 
   if (!st) return false;
   const value = text.trim();
 
+  if (st.action === "stu.new.name") {
+    if (!value) {
+      await sendOwner("Имя пустое — пришлите имя ученика.");
+      return true;
+    }
+    await askSubject(chatId, value);
+    return true;
+  }
+  if (st.action === "stu.new.tg") {
+    await finishNewStudent(chatId, value);
+    return true;
+  }
   if (st.action === "payment.create") {
     // "6000 Март, 4 занятия" → сумма 6000, комментарий "Март, 4 занятия".
     const m = value.match(/^(\d[\d\s]*)\s*(.*)$/s);
