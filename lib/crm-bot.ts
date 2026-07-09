@@ -225,6 +225,17 @@ export async function deletePaymentBot(paymentId: string): Promise<string | null
   return p.studentId;
 }
 
+// Базовый URL для ссылок из бота. У бота нет заголовков запроса (в отличие от /admin),
+// поэтому берём NEXT_PUBLIC_BASE_URL, а если он пуст/локальный — VERCEL_URL (его Vercel
+// всегда проставляет на деплое). Так ссылка соберётся независимо от настройки env.
+function botBaseUrl(): string {
+  const explicit = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  if (explicit && !explicit.includes("localhost")) return explicit;
+  const vercel = process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
+  return explicit; // локальная разработка (напр. http://localhost:3000) либо пусто
+}
+
 // Генерирует персональную ссылку на запись (тот же encodeToken, что и /admin) и шлёт её.
 export async function sendBookingLink(chatId: number | string, studentId: string): Promise<void> {
   const s = await getStudent(studentId);
@@ -232,9 +243,9 @@ export async function sendBookingLink(chatId: number | string, studentId: string
     await sendOwner("Ученик не найден.");
     return;
   }
-  const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  const base = botBaseUrl();
   if (!base) {
-    await sendOwner("Не задан NEXT_PUBLIC_BASE_URL — ссылку не собрать.");
+    await sendOwner("Не задан адрес сайта (NEXT_PUBLIC_BASE_URL / VERCEL_URL) — ссылку не собрать.");
     return;
   }
   const token = encodeToken({
