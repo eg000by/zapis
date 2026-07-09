@@ -44,6 +44,7 @@ export async function setEventColor(eventId: string, colorId: string | null): Pr
 export interface ColorOccurrence {
   instanceId: string; // id, на который вешаем цвет (инстанс повтора или само событие)
   start: Date;
+  hours: number; // длина блока в часах (для балансовой покраски «всё-или-ничего»)
   colorId: string | null; // текущий цвет (чтобы не патчить лишний раз)
 }
 
@@ -90,7 +91,15 @@ export async function listContactOccurrences(key: string): Promise<ColorOccurren
     if ((ev.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
     const start = ev.start?.dateTime || ev.start?.date;
     if (!start) continue;
-    out.push({ instanceId: ev.id, start: new Date(start), colorId: ev.colorId ?? null });
+    // Часы блока: из extendedProperties.lessons (наследуется инстансом от мастера),
+    // иначе оцениваем по длительности (60 мин = 1 час).
+    const end = ev.end?.dateTime || ev.end?.date;
+    const hours =
+      Number(ev.extendedProperties?.private?.lessons) ||
+      (end
+        ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 3600000))
+        : 1);
+    out.push({ instanceId: ev.id, start: new Date(start), hours, colorId: ev.colorId ?? null });
   }
   out.sort((a, b) => a.start.getTime() - b.start.getTime());
   return out;

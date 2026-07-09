@@ -28,11 +28,10 @@ export async function recolorStudent(studentId: string): Promise<void> {
   const s = await getStudent(studentId);
   if (!s) return;
 
-  // Число оплаченных занятий из баланса. Без ставки посчитать нельзя — тогда снимаем
-  // все цвета (paidCount=0 → прошлые красные, будущие нейтральные), чтобы не осталось
-  // ложного «оплачено» от прежней логики.
+  // Оплаченные ЧАСЫ из баланса (ставка — за час). Без ставки посчитать нельзя — тогда
+  // 0 (прошлые красные, будущие нейтральные), чтобы не осталось ложного «оплачено».
   const paidKopecks = await sumPaidKopecks(s.id);
-  const paidCount = s.rateKopecks > 0 ? Math.floor(paidKopecks / s.rateKopecks) : 0;
+  let remainingHours = s.rateKopecks > 0 ? Math.floor(paidKopecks / s.rateKopecks) : 0;
 
   // 1. Сбрасываем цвет самих серий/событий в нейтраль — чтобы будущие неоплаченные
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения
@@ -51,9 +50,19 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // уже нейтральные) и красим нужные.
   const occ = await listContactOccurrences(s.contactKey);
   const now = Date.now();
-  for (let i = 0; i < occ.length; i++) {
-    const o = occ[i];
-    const paid = i < paidCount;
+  // Баланс закрывает занятия по времени, с самых ранних. Блок = одно событие = один
+  // цвет, поделить нельзя — поэтому «всё-или-ничего»: блок считается оплаченным, только
+  // если остатка часов хватает на ВСЮ его длину. Как только не хватило — дальше всё
+  // неоплачено (не перескакиваем через большой блок к меньшему).
+  let exhausted = false;
+  for (const o of occ) {
+    let paid = false;
+    if (!exhausted && remainingHours >= o.hours) {
+      paid = true;
+      remainingHours -= o.hours;
+    } else {
+      exhausted = true;
+    }
     const past = o.start.getTime() < now;
     const target = paid
       ? past
