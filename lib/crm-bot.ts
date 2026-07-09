@@ -11,6 +11,7 @@ import {
 import { deleteStudent, getStudent, listStudents, updateStudent, upsertStudent } from "./students";
 import { getLesson, listStudentLessons, setLessonNote } from "./lessons";
 import {
+  autoAllocatePayment,
   createPayment,
   deletePayment,
   getPayment,
@@ -191,15 +192,34 @@ export async function showLessons(
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
 }
 
-// Отмечает счёт оплаченным + перекрашивает занятия. Возвращает studentId для навигации.
+// Отмечает счёт оплаченным, привязывает занятия по ставке (если не были привязаны)
+// и перекрашивает их в зелёный. Возвращает studentId для навигации.
 export async function markPaymentPaid(paymentId: string): Promise<string | null> {
   const p = await getPayment(paymentId);
   if (!p) return null;
   await setPaymentStatus(paymentId, "paid");
+  let allocated: string[] = [];
   try {
+    allocated = await autoAllocatePayment(paymentId);
     await recolorPaymentLessons(paymentId);
   } catch (e) {
     console.error("bot markPaid recolor failed", e);
+  }
+  // Если перекрашивать нечего — подскажем почему (частая причина: не задана ставка).
+  if (!allocated.length) {
+    try {
+      const links = await lessonIdsForPayment(paymentId);
+      if (!links.length) {
+        const s = await getStudent(p.studentId);
+        const why =
+          s && s.rateKopecks > 0
+            ? "нет подходящих неоплаченных занятий в базе"
+            : "не задана ставка ₽/час — задайте её на /admin, чтобы считать занятия";
+        await sendOwner(`ℹ️ Оплату отметил, но занятия в календаре не перекрашены: ${why}.`);
+      }
+    } catch (e) {
+      console.error("bot markPaid hint failed", e);
+    }
   }
   return p.studentId;
 }

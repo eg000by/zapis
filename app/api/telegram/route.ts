@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient } from "@/lib/google";
 import { formatMskRange } from "@/lib/slots";
-import { answerCallback, editMessageText, sendOwner } from "@/lib/telegram";
+import { answerCallback, editMessageText, escapeHtml, sendOwner } from "@/lib/telegram";
 import { setLessonStatusByEvent } from "@/lib/lessons";
 import { recolorEvent } from "@/lib/coloring";
 import {
@@ -188,6 +188,19 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
 
+  // Подтверждение/отклонение переноса (cr:<rev>:<eventId> / dr:<rev>:<eventId>).
+  // Ревизия отсекает подтверждение устаревшего уведомления о переносе.
+  if (data.startsWith("cr:") || data.startsWith("dr:")) {
+    const action = data.slice(0, 1) as "c" | "d";
+    const rest = data.slice(3);
+    const idx = rest.indexOf(":");
+    if (idx > 0) {
+      const rev = rest.slice(0, idx);
+      const eventId = rest.slice(idx + 1);
+      return await handleBookingAction(cq, action, eventId, chatId, messageId, rev);
+    }
+  }
+
   // Подтверждение/отклонение заявки (c:/d:).
   const [action, eventId] = splitAction(data);
   if ((action === "c" || action === "d") && eventId) {
@@ -250,7 +263,8 @@ async function handleBookingAction(
   action: "c" | "d",
   eventId: string,
   chatId: any,
-  messageId: number | undefined
+  messageId: number | undefined,
+  expectedRev: string | null = null
 ): Promise<NextResponse> {
   const cal = calendarClient();
 
@@ -264,6 +278,29 @@ async function handleBookingAction(
       await editMessageText(chatId, messageId, "⚠️ Заявка не найдена (возможно, уже обработана).");
     }
     return ok();
+  }
+
+  // Устаревшее уведомление: клиент позже перенёс запись на другое время, событие уже
+  // сдвинуто. Сверяем ревизию уведомления с текущей ревизией события. Для обычной заявки
+  // (без переносов) обе пустые — проверка проходит. Плоская кнопка c:/d: (expectedRev
+  // отсутствует) после переноса не совпадёт с rev события и тоже отсечётся.
+  {
+    const expected = expectedRev ?? "";
+    const curRev = String(ev.extendedProperties?.private?.rev || "");
+    if (curRev !== expected) {
+      const curLessons = Number(ev.extendedProperties?.private?.lessons) || 1;
+      const curWhen = ev.start?.dateTime ? formatMskRange(ev.start.dateTime, curLessons) : "";
+      await answerCallback(cq.id, "Этот выбор устарел");
+      if (chatId && messageId) {
+        await editMessageText(
+          chatId,
+          messageId,
+          `🔁 <b>Этот выбор переноса устарел</b>\n\nПозже выбрано другое время${curWhen ? `: <b>${escapeHtml(curWhen)}</b>` : ""}.\nПодтвердите актуальное уведомление.`,
+          { inline_keyboard: [] }
+        );
+      }
+      return ok();
+    }
   }
 
   // Пользователь мог отменить заявку сам — событие приходит со статусом "cancelled".

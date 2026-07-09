@@ -28,6 +28,9 @@ export async function notifyRequest(params: {
   subject: string;
   when: string;
   header?: string;
+  // Ревизия переноса: если задана, кнопки несут её (cr:/dr:), чтобы подтверждение
+  // устаревшего уведомления о переносе распознавалось и не применяло чужой слот.
+  rev?: number;
 }): Promise<void> {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!chatId) throw new Error("TELEGRAM_CHAT_ID не задан");
@@ -39,6 +42,11 @@ export async function notifyRequest(params: {
     `📚 Предмет: ${escapeHtml(params.subject)}\n` +
     `🕒 Время: <b>${escapeHtml(params.when)}</b>${escapeHtml(tgLine)}`;
 
+  const confirmData =
+    params.rev != null ? `cr:${params.rev}:${params.eventId}` : `c:${params.eventId}`;
+  const declineData =
+    params.rev != null ? `dr:${params.rev}:${params.eventId}` : `d:${params.eventId}`;
+
   await api("sendMessage", {
     chat_id: chatId,
     text,
@@ -46,8 +54,8 @@ export async function notifyRequest(params: {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "✅ Подтвердить", callback_data: `c:${params.eventId}` },
-          { text: "❌ Отклонить", callback_data: `d:${params.eventId}` },
+          { text: "✅ Подтвердить", callback_data: confirmData },
+          { text: "❌ Отклонить", callback_data: declineData },
         ],
       ],
     },

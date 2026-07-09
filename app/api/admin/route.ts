@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { deleteStudent, updateStudent } from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
 import {
+  autoAllocatePayment,
   createPayment,
   deletePayment,
   lessonIdsForPayment,
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
     } else if (action === "payment.paid") {
       const pid = String(form.get("paymentId") || "");
       await setPaymentStatus(pid, "paid");
+      await autoAllocatePayment(pid); // если занятия не привязаны — привяжем по ставке
       await recolorSafe(() => recolorPaymentLessons(pid)); // покрытые занятия → зелёный
     } else if (action === "payment.unpaid") {
       const pid = String(form.get("paymentId") || "");

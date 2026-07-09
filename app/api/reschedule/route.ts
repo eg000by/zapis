@@ -53,6 +53,10 @@ export async function POST(req: Request) {
   const weeks = Number(priv.weeks) || 1;
   const student = priv.student || "";
   const subject = priv.subject || "";
+  // Ревизия переноса: растёт с каждым повторным переносом до подтверждения. Кнопка
+  // подтверждения несёт эту ревизию, и старое уведомление при нажатии распознаётся
+  // как устаревшее (иначе подтверждение старого слота применяло бы последний слот).
+  const rev = (Number(priv.rev) || 0) + 1;
 
   // Сохраняем длину блока: переносим весь блок, а не только первое занятие.
   // Число занятий берём из extendedProperties; для старых событий — из длительности.
@@ -94,7 +98,9 @@ export async function POST(req: Request) {
         start: { dateTime: startIso, timeZone: TIMEZONE },
         end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
         ...(r.recurrence ? { recurrence: r.recurrence } : {}),
-        extendedProperties: { private: { ...priv, status: "pending", lessons: String(lessons) } },
+        extendedProperties: {
+          private: { ...priv, status: "pending", lessons: String(lessons), rev: String(rev) },
+        },
       },
     });
 
@@ -116,6 +122,7 @@ export async function POST(req: Request) {
         subject,
         when,
         header: "🔄 <b>Перенос записи</b> — нужно подтвердить",
+        rev,
       });
     } catch (e) {
       console.error("Telegram notify (reschedule) failed", e);
