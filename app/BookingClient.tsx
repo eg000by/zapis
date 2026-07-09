@@ -42,6 +42,21 @@ function hmMsk(iso: string): string {
   }).format(new Date(iso));
 }
 
+// "Понедельник, 14:40 (МСК)" — обезличенный слот недели (для повторяющихся записей:
+// каждая неделя повторяется, поэтому показываем день недели + время, без конкретной даты).
+function fmtSlotMsk(iso: string, lessons = 1): string {
+  const wd = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    weekday: "long",
+  }).format(new Date(iso));
+  const day = wd.charAt(0).toUpperCase() + wd.slice(1);
+  const start = hmMsk(iso);
+  if (lessons <= 1) return `${day}, ${start} (МСК)`;
+  const spanMin = (lessons - 1) * SLOT_STEP_MINUTES + SLOT_MINUTES;
+  const end = new Date(new Date(iso).getTime() + spanMin * 60000);
+  return `${day}, ${start}–${hmMsk(end.toISOString())} (МСК)`;
+}
+
 // "Ср, 8 июля, 10:00 (МСК)" или, для блока, "…, 10:00–12:10 (МСК)".
 function fmtMsk(iso: string, lessons = 1): string {
   const s = new Intl.DateTimeFormat("ru-RU", {
@@ -331,7 +346,7 @@ export default function BookingClient({
               <div className="my-info">
                 <b>{ev.student} — {ev.subject}</b>
                 <span className="my-when">
-                  {fmtMsk(ev.start, ev.lessons)}
+                  {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
                   {ev.recurring ? " · еженедельно" : ""}
                 </span>
                 <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>

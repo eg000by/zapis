@@ -178,6 +178,10 @@ export async function listContactEvents(key: string, fromIso: string): Promise<B
   const out: BookingEvent[] = [];
   for (const ev of items) {
     if (ev.status === "cancelled") continue;
+    // Инстансы-исключения повтора (напр. отдельно перекрашенный повтор) приходят
+    // отдельными объектами с recurringEventId — сам слот уже представлен мастер-серией,
+    // поэтому их пропускаем, иначе «Ваши записи» и подсчёт лимита дублируются.
+    if (ev.recurringEventId) continue;
     const start = ev.start?.dateTime || ev.start?.date;
     if (!ev.id || !start) continue;
     const priv = ev.extendedProperties?.private || {};
