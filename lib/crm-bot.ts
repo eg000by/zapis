@@ -12,9 +12,11 @@ import {
 import { getStudent, listStudents, updateStudent } from "./students";
 import { getLesson, listStudentLessons, setLessonNote } from "./lessons";
 import {
+  createPayment,
   getPayment,
   listStudentPayments,
   outstandingPayments,
+  setPayLink,
   setPaymentStatus,
 } from "./payments";
 import { recolorPaymentLessons } from "./coloring";
@@ -118,9 +120,14 @@ export async function showPayments(
       );
     }
   }
-  const rows: TgButton[][] = pays
-    .filter((p) => p.status !== "paid")
-    .map((p) => [{ text: `✅ Оплачено ${rub(p.amountKopecks)} ₽`, data: `payp:${p.id}` }]);
+  const rows: TgButton[][] = [[{ text: "➕ Новый счёт", data: `newp:${s.id}` }]];
+  for (const p of pays) {
+    if (p.status === "paid") continue;
+    rows.push([
+      { text: `✅ Оплачено ${rub(p.amountKopecks)} ₽`, data: `payp:${p.id}` },
+      { text: "🔗 Ссылка", data: `plink:${p.id}` },
+    ]);
+  }
   rows.push([{ text: "⬅️ Назад", data: `stu:${s.id}` }]);
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
 }
@@ -165,6 +172,22 @@ export async function markPaymentPaid(paymentId: string): Promise<string | null>
   return p.studentId;
 }
 
+export async function promptNewPayment(chatId: number | string, studentId: string): Promise<void> {
+  await setState(String(chatId), "payment.create", studentId);
+  await sendOwner(
+    "💳 Пришлите сумму счёта в рублях. Можно с комментарием одной строкой.\nНапример: <code>6000 Март, 4 занятия</code>",
+    forceReply()
+  );
+}
+
+export async function promptPaymentLink(chatId: number | string, paymentId: string): Promise<void> {
+  await setState(String(chatId), "payment.link", paymentId);
+  await sendOwner(
+    "🔗 Пришлите ссылку на оплату из «Мой налог» для этого счёта:",
+    forceReply()
+  );
+}
+
 export async function promptStudentNote(chatId: number | string, studentId: string): Promise<void> {
   await setState(String(chatId), "student.note", studentId);
   await sendOwner("✍️ Пришлите текст заметки об ученике одним сообщением:", forceReply());
@@ -180,6 +203,34 @@ export async function applyPendingInput(chatId: number | string, text: string): 
   const st = await getState(String(chatId));
   if (!st) return false;
   const value = text.trim();
+
+  if (st.action === "payment.create") {
+    // "6000 Март, 4 занятия" → сумма 6000, комментарий "Март, 4 занятия".
+    const m = value.match(/^(\d[\d\s]*)\s*(.*)$/s);
+    const rubles = m ? Number(m[1].replace(/\s/g, "")) : 0;
+    if (!rubles) {
+      // Сумму не распознали — просим повторить, состояние сохраняем.
+      await sendOwner("Не понял сумму. Пришлите число рублей, например <code>6000</code>.");
+      return true;
+    }
+    await createPayment({
+      studentId: st.targetId,
+      amountKopecks: rubles * 100,
+      note: (m?.[2] || "").trim(),
+    });
+    await clearState(String(chatId));
+    await sendOwner(`✅ Счёт на ${rub(rubles * 100)} ₽ создан. Прикрепите ссылку кнопкой «🔗 Ссылка».`);
+    await showPayments(chatId, null, st.targetId);
+    return true;
+  }
+  if (st.action === "payment.link") {
+    await setPayLink(st.targetId, value);
+    await clearState(String(chatId));
+    const p = await getPayment(st.targetId);
+    await sendOwner("✅ Ссылка на оплату сохранена.");
+    if (p) await showPayments(chatId, null, p.studentId);
+    return true;
+  }
   if (st.action === "student.note") {
     await updateStudent(st.targetId, { note: value });
     await clearState(String(chatId));

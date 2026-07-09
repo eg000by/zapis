@@ -8,6 +8,8 @@ import {
   applyPendingInput,
   markPaymentPaid,
   promptLessonNote,
+  promptNewPayment,
+  promptPaymentLink,
   promptStudentNote,
   showLessons,
   showPayments,
@@ -84,6 +86,16 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     const sid = await markPaymentPaid(data.slice(5));
     await answerCallback(cq.id, "Оплата отмечена ✅");
     if (sid) await showPayments(chatId, messageId, sid);
+    return ok();
+  }
+  if (data.startsWith("newp:")) {
+    await promptNewPayment(chatId, data.slice(5));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("plink:")) {
+    await promptPaymentLink(chatId, data.slice(6));
+    await answerCallback(cq.id);
     return ok();
   }
   if (data.startsWith("snote:")) {
