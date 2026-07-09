@@ -230,11 +230,15 @@ export async function deletePaymentBot(paymentId: string): Promise<string | null
 }
 
 // Базовый URL для ссылок из бота. У бота нет заголовков запроса (в отличие от /admin),
-// поэтому берём NEXT_PUBLIC_BASE_URL, а если он пуст/локальный — VERCEL_URL (его Vercel
-// всегда проставляет на деплое). Так ссылка соберётся независимо от настройки env.
+// поэтому берём его из env. Порядок: явный NEXT_PUBLIC_BASE_URL →
+// VERCEL_PROJECT_PRODUCTION_URL (стабильный production-домен проекта, напр.
+// zapis-ten.vercel.app; ОДИНАКОВ между деплоями) → VERCEL_URL (адрес конкретного
+// деплоя — уродливый и разный каждый раз; крайний фолбэк).
 function botBaseUrl(): string {
   const explicit = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
   if (explicit && !explicit.includes("localhost")) return explicit;
+  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (prod) return `https://${prod.replace(/\/$/, "")}`;
   const vercel = process.env.VERCEL_URL;
   if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
   return explicit; // локальная разработка (напр. http://localhost:3000) либо пусто
