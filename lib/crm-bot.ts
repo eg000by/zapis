@@ -13,14 +13,17 @@ import { getStudent, listStudents, updateStudent } from "./students";
 import { getLesson, listStudentLessons, setLessonNote } from "./lessons";
 import {
   createPayment,
+  deletePayment,
   getPayment,
+  lessonIdsForPayment,
   listStudentPayments,
   outstandingPayments,
   setPayLink,
   setPaymentStatus,
 } from "./payments";
-import { recolorPaymentLessons } from "./coloring";
+import { recolorLesson, recolorPaymentLessons } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
+import { encodeToken } from "./link";
 import { formatMskRange } from "./slots";
 import type { Lesson } from "./schema";
 
@@ -93,6 +96,7 @@ export async function showStudentCard(
 
   const keyboard = inlineKeyboard([
     [{ text: "💳 Оплаты", data: `pays:${s.id}` }, { text: "📅 Занятия", data: `les:${s.id}` }],
+    [{ text: "🔗 Ссылка на запись", data: `slink:${s.id}` }],
     [{ text: "📝 Заметка об ученике", data: `snote:${s.id}` }],
     [{ text: "⬅️ Все ученики", data: "stus" }],
   ]);
@@ -122,10 +126,14 @@ export async function showPayments(
   }
   const rows: TgButton[][] = [[{ text: "➕ Новый счёт", data: `newp:${s.id}` }]];
   for (const p of pays) {
-    if (p.status === "paid") continue;
+    if (p.status !== "paid") {
+      rows.push([
+        { text: `✅ Оплачено ${rub(p.amountKopecks)} ₽`, data: `payp:${p.id}` },
+        { text: "🔗 Ссылка", data: `plink:${p.id}` },
+      ]);
+    }
     rows.push([
-      { text: `✅ Оплачено ${rub(p.amountKopecks)} ₽`, data: `payp:${p.id}` },
-      { text: "🔗 Ссылка", data: `plink:${p.id}` },
+      { text: `🗑 Удалить счёт ${rub(p.amountKopecks)} ₽`, data: `delp:${p.id}` },
     ]);
   }
   rows.push([{ text: "⬅️ Назад", data: `stu:${s.id}` }]);
@@ -170,6 +178,76 @@ export async function markPaymentPaid(paymentId: string): Promise<string | null>
     console.error("bot markPaid recolor failed", e);
   }
   return p.studentId;
+}
+
+// Спрашивает подтверждение удаления счёта (действие необратимо).
+export async function promptDeletePayment(
+  chatId: number | string,
+  messageId: number | null,
+  paymentId: string
+): Promise<void> {
+  const p = await getPayment(paymentId);
+  if (!p) {
+    await emit(chatId, messageId, "Счёт не найден (возможно, уже удалён).");
+    return;
+  }
+  const text =
+    `🗑 <b>Удалить счёт?</b>\n\n${rub(p.amountKopecks)} ₽` +
+    `${p.note ? ` · ${escapeHtml(p.note)}` : ""}\n\nДействие необратимо.`;
+  const keyboard = inlineKeyboard([
+    [
+      { text: "❗ Удалить", data: `delpok:${p.id}` },
+      { text: "Отмена", data: `pays:${p.studentId}` },
+    ],
+  ]);
+  await emit(chatId, messageId, text, keyboard);
+}
+
+// Удаляет счёт и перекрашивает освободившиеся занятия. Возвращает studentId для навигации.
+export async function deletePaymentBot(paymentId: string): Promise<string | null> {
+  const p = await getPayment(paymentId);
+  if (!p) return null;
+  // Занятия фиксируем ДО удаления: после удаления связи lesson_payments исчезнут.
+  let lessonIds: string[] = [];
+  try {
+    lessonIds = await lessonIdsForPayment(paymentId);
+  } catch (e) {
+    console.error("bot delete payment: lessonIds failed", e);
+  }
+  await deletePayment(paymentId);
+  for (const id of lessonIds) {
+    try {
+      await recolorLesson(id);
+    } catch (e) {
+      console.error("bot delete payment recolor failed", e);
+    }
+  }
+  return p.studentId;
+}
+
+// Генерирует персональную ссылку на запись (тот же encodeToken, что и /admin) и шлёт её.
+export async function sendBookingLink(chatId: number | string, studentId: string): Promise<void> {
+  const s = await getStudent(studentId);
+  if (!s) {
+    await sendOwner("Ученик не найден.");
+    return;
+  }
+  const base = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  if (!base) {
+    await sendOwner("Не задан NEXT_PUBLIC_BASE_URL — ссылку не собрать.");
+    return;
+  }
+  const token = encodeToken({
+    name: s.name,
+    subject: s.subject,
+    tg: s.tg,
+    trial: false,
+    studentId: s.id,
+  });
+  const url = `${base}/?t=${encodeURIComponent(token)}`;
+  await sendOwner(
+    `🔗 <b>Ссылка на запись — ${escapeHtml(s.name)}</b>\n${escapeHtml(s.subject)}\n\n<code>${escapeHtml(url)}</code>\n\nОтправьте её ученику.`
+  );
 }
 
 export async function promptNewPayment(chatId: number | string, studentId: string): Promise<void> {

@@ -6,11 +6,14 @@ import { setLessonStatusByEvent } from "@/lib/lessons";
 import { recolorEvent } from "@/lib/coloring";
 import {
   applyPendingInput,
+  deletePaymentBot,
   markPaymentPaid,
+  promptDeletePayment,
   promptLessonNote,
   promptNewPayment,
   promptPaymentLink,
   promptStudentNote,
+  sendBookingLink,
   showLessons,
   showPayments,
   showStudentCard,
@@ -95,6 +98,22 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   if (data.startsWith("plink:")) {
     await promptPaymentLink(chatId, data.slice(6));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("slink:")) {
+    await sendBookingLink(chatId, data.slice(6));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("delpok:")) {
+    const sid = await deletePaymentBot(data.slice(7));
+    await answerCallback(cq.id, "Счёт удалён 🗑");
+    if (sid) await showPayments(chatId, messageId, sid);
+    return ok();
+  }
+  if (data.startsWith("delp:")) {
+    await promptDeletePayment(chatId, messageId, data.slice(5));
     await answerCallback(cq.id);
     return ok();
   }
