@@ -7,8 +7,8 @@ import { recolorEvent } from "@/lib/coloring";
 import {
   applyPendingInput,
   cancelPending,
+  chooseTrialForNew,
   deletePaymentBot,
-  finishNewStudent,
   markPaymentPaid,
   pickSubjectForNew,
   promptDeletePayment,
@@ -22,6 +22,7 @@ import {
   showPayments,
   showStudentCard,
   showStudentsList,
+  submitTgForNew,
 } from "@/lib/crm-bot";
 import { PENDING_PREFIX } from "@/lib/config";
 
@@ -93,7 +94,12 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
   if (data === "nskiptg") {
-    await finishNewStudent(chatId, "");
+    await submitTgForNew(chatId, "");
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("ntrial:")) {
+    await chooseTrialForNew(chatId, data.slice(7) === "1");
     await answerCallback(cq.id);
     return ok();
   }

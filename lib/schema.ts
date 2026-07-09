@@ -79,6 +79,16 @@ export const botState = pgTable("bot_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Короткая ссылка записи: прячет длинный подписанный токен за коротким кодом в URL
+// (/z/<code>), чтобы ссылка выглядела дружелюбно. Код стабилен на пару (ученик, trial).
+export const bookingLinks = pgTable("booking_links", {
+  code: text("code").primaryKey(),
+  token: text("token").notNull(), // тот же подписанный токен, что и в /?t=
+  studentId: uuid("student_id").references(() => students.id, { onDelete: "cascade" }),
+  trial: boolean("trial").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Student = typeof students.$inferSelect;
 export type NewStudent = typeof students.$inferInsert;
 export type Lesson = typeof lessons.$inferSelect;
@@ -86,3 +96,4 @@ export type NewLesson = typeof lessons.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
 export type BotState = typeof botState.$inferSelect;
+export type BookingLink = typeof bookingLinks.$inferSelect;

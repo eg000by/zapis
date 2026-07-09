@@ -16,7 +16,6 @@ import {
   MAX_LESSONS_PER_WEEK,
   PENDING_PREFIX,
   RECURRENCE_WEEKS,
-  SUBJECTS,
   TIMEZONE,
 } from "@/lib/config";
 
@@ -63,7 +62,9 @@ export async function POST(req: Request) {
   const weeks = contact.trial ? 1 : RECURRENCE_WEEKS;
 
   if (!student) return NextResponse.json({ error: "Некорректная ссылка" }, { status: 400 });
-  if (!SUBJECTS.includes(subject)) {
+  // Предмет приходит из подписанного HMAC-токена (подделать нельзя), поэтому не
+  // ограничиваем его списком SUBJECTS — допускаем произвольный («Другое» в боте).
+  if (!subject) {
     return NextResponse.json({ error: "Некорректная ссылка: предмет" }, { status: 400 });
   }
   if (starts.length === 0) {

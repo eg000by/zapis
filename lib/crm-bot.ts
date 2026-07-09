@@ -22,7 +22,8 @@ import {
 } from "./payments";
 import { recolorLesson, recolorPaymentLessons } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
-import { contactKey, encodeToken } from "./link";
+import { contactKey } from "./link";
+import { getOrCreateStudentLinkCode } from "./shortlink";
 import { SUBJECTS } from "./config";
 import { formatMskRange } from "./slots";
 import type { Lesson } from "./schema";
@@ -240,7 +241,12 @@ function botBaseUrl(): string {
 }
 
 // Генерирует персональную ссылку на запись (тот же encodeToken, что и /admin) и шлёт её.
-export async function sendBookingLink(chatId: number | string, studentId: string): Promise<void> {
+// trial=true — ссылка на разовое пробное занятие (иначе — регулярная еженедельная).
+export async function sendBookingLink(
+  chatId: number | string,
+  studentId: string,
+  trial = false
+): Promise<void> {
   const s = await getStudent(studentId);
   if (!s) {
     await sendOwner("Ученик не найден.");
@@ -251,20 +257,15 @@ export async function sendBookingLink(chatId: number | string, studentId: string
     await sendOwner("Не задан адрес сайта (NEXT_PUBLIC_BASE_URL / VERCEL_URL) — ссылку не собрать.");
     return;
   }
-  const token = encodeToken({
-    name: s.name,
-    subject: s.subject,
-    tg: s.tg,
-    trial: false,
-    studentId: s.id,
-  });
-  const url = `${base}/?t=${encodeURIComponent(token)}`;
+  const code = await getOrCreateStudentLinkCode(s.id, trial);
+  const url = `${base}/z/${code}`;
   await sendOwner(
-    `🔗 <b>Ссылка на запись — ${escapeHtml(s.name)}</b>\n${escapeHtml(s.subject)}\n\n<code>${escapeHtml(url)}</code>\n\nОтправьте её ученику.`
+    `🔗 <b>Ссылка на запись — ${escapeHtml(s.name)}</b>\n${escapeHtml(s.subject)}${trial ? " · пробное (разовое)" : ""}\n\n<code>${escapeHtml(url)}</code>\n\nОтправьте её ученику.`
   );
 }
 
-// ── Мастер добавления нового ученика (имя → предмет → telegram → ссылка) ──
+// ── Мастер добавления нового ученика ──
+// имя → предмет (для «Другое» — своё название) → telegram → пробное/регулярное → ссылка.
 // Данные шага храним в botState.targetId как JSON, т.к. поле одно.
 
 export async function promptNewStudent(chatId: number | string): Promise<void> {
@@ -272,7 +273,7 @@ export async function promptNewStudent(chatId: number | string): Promise<void> {
   await sendOwner("🧑‍🎓 Как зовут нового ученика? Пришлите имя одним сообщением.", cancelKb());
 }
 
-// Шаг 2: выбор предмета кнопками (предметы фиксированы в конфиге).
+// Шаг 2: выбор предмета кнопками (последний пункт «Другое» — со своим названием).
 async function askSubject(chatId: number | string, name: string): Promise<void> {
   await setState(String(chatId), "stu.new.subject", JSON.stringify({ name }));
   const rows: TgButton[][] = SUBJECTS.map((s, i) => [{ text: s, data: `nsub:${i}` }]);
@@ -280,7 +281,37 @@ async function askSubject(chatId: number | string, name: string): Promise<void> 
   await sendOwner(`📚 Предмет для <b>${escapeHtml(name)}</b>?`, inlineKeyboard(rows));
 }
 
-// Шаг 3 (из callback nsub:<i>): предмет выбран → спрашиваем telegram (необязательно).
+// Шаг 3: telegram ученика (необязательно). Вызывается после выбора/ввода предмета.
+async function askTg(chatId: number | string, name: string, subject: string): Promise<void> {
+  await setState(String(chatId), "stu.new.tg", JSON.stringify({ name, subject }));
+  await sendOwner(
+    "✈️ Telegram ученика — пришлите <code>@username</code> сообщением или нажмите «Пропустить».",
+    inlineKeyboard([[{ text: "Пропустить", data: "nskiptg" }, { text: "✖️ Отмена", data: "cancel" }]])
+  );
+}
+
+// Шаг 4: тип занятий. Вызывается после ввода/пропуска telegram.
+async function askTrial(
+  chatId: number | string,
+  name: string,
+  subject: string,
+  tg: string
+): Promise<void> {
+  await setState(String(chatId), "stu.new.trial", JSON.stringify({ name, subject, tg }));
+  await sendOwner(
+    "🎯 Тип занятий?\n<b>Регулярное</b> — запись повторяется каждую неделю.\n" +
+      "<b>Пробное</b> — разовая запись на один день.",
+    inlineKeyboard([
+      [
+        { text: "🔁 Регулярное", data: "ntrial:0" },
+        { text: "🎯 Пробное", data: "ntrial:1" },
+      ],
+      [{ text: "✖️ Отмена", data: "cancel" }],
+    ])
+  );
+}
+
+// Обработка выбора предмета из callback nsub:<i>. «Другое» → просим своё название.
 export async function pickSubjectForNew(chatId: number | string, index: number): Promise<void> {
   const st = await getState(String(chatId));
   if (!st || st.action !== "stu.new.subject") {
@@ -296,15 +327,16 @@ export async function pickSubjectForNew(chatId: number | string, index: number):
   try {
     name = JSON.parse(st.targetId).name || "";
   } catch {}
-  await setState(String(chatId), "stu.new.tg", JSON.stringify({ name, subject }));
-  await sendOwner(
-    "✈️ Telegram ученика — пришлите <code>@username</code> сообщением или нажмите «Пропустить».",
-    inlineKeyboard([[{ text: "Пропустить", data: "nskiptg" }, { text: "✖️ Отмена", data: "cancel" }]])
-  );
+  if (subject === "Другое") {
+    await setState(String(chatId), "stu.new.subjcustom", JSON.stringify({ name }));
+    await sendOwner("✍️ Напишите название предмета одним сообщением:", cancelKb());
+    return;
+  }
+  await askTg(chatId, name, subject);
 }
 
-// Финал: создаёт/освежает ученика в БД (contactKey — как на /admin) и шлёт ссылку.
-export async function finishNewStudent(chatId: number | string, tgRaw: string): Promise<void> {
+// Telegram получен (текст или «Пропустить») → переходим к выбору типа занятий.
+export async function submitTgForNew(chatId: number | string, tgRaw: string): Promise<void> {
   const st = await getState(String(chatId));
   if (!st || st.action !== "stu.new.tg") {
     await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
@@ -324,11 +356,36 @@ export async function finishNewStudent(chatId: number | string, tgRaw: string): 
   }
   const skip = /^(-|нет|пропустить|skip)$/i.test(tgRaw.trim());
   const tg = skip ? "" : tgRaw.trim();
-  const ck = contactKey({ name, subject, tg, trial: false });
+  await askTrial(chatId, name, subject, tg);
+}
+
+// Финал (из callback ntrial:<0|1>): создаёт/освежает ученика в БД и шлёт ссылку.
+export async function chooseTrialForNew(chatId: number | string, trial: boolean): Promise<void> {
+  const st = await getState(String(chatId));
+  if (!st || st.action !== "stu.new.trial") {
+    await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
+    return;
+  }
+  let name = "";
+  let subject = "";
+  let tg = "";
+  try {
+    const o = JSON.parse(st.targetId);
+    name = o.name || "";
+    subject = o.subject || "";
+    tg = o.tg || "";
+  } catch {}
+  if (!name || !subject) {
+    await clearState(String(chatId));
+    await sendOwner("Не хватило данных. Начните заново: /new");
+    return;
+  }
+  // trial влияет и на contactKey (как на /admin), и на саму ссылку — держим их согласованными.
+  const ck = contactKey({ name, subject, tg, trial });
   const s = await upsertStudent({ name, subject, tg, contactKey: ck });
   await clearState(String(chatId));
-  await sendOwner(`✅ Ученик <b>${escapeHtml(name)}</b> добавлен в базу.`);
-  await sendBookingLink(chatId, s.id);
+  await sendOwner(`✅ Ученик <b>${escapeHtml(name)}</b> добавлен${trial ? " · пробное" : ""}.`);
+  await sendBookingLink(chatId, s.id, trial);
   await showStudentCard(chatId, null, s.id);
 }
 
@@ -398,8 +455,20 @@ export async function applyPendingInput(chatId: number | string, text: string): 
     await askSubject(chatId, value);
     return true;
   }
+  if (st.action === "stu.new.subjcustom") {
+    if (!value) {
+      await sendOwner("Название пустое — пришлите название предмета.");
+      return true;
+    }
+    let name = "";
+    try {
+      name = JSON.parse(st.targetId).name || "";
+    } catch {}
+    await askTg(chatId, name, value);
+    return true;
+  }
   if (st.action === "stu.new.tg") {
-    await finishNewStudent(chatId, value);
+    await submitTgForNew(chatId, value);
     return true;
   }
   if (st.action === "payment.create") {

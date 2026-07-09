@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { encodeToken } from "@/lib/link";
+import { getOrCreateStudentLinkCode } from "@/lib/shortlink";
 import { SUBJECTS } from "@/lib/config";
 import { formatMskRange } from "@/lib/slots";
 import { liveEventIdsForContact } from "@/lib/google";
@@ -118,14 +119,21 @@ export default async function AdminPage({
       );
     }
 
-    const token = encodeToken({
-      name: student.name,
-      subject: student.subject,
-      tg: student.tg,
-      trial: false,
-      studentId: student.id,
-    });
-    const personalLink = `${baseUrl()}/?t=${encodeURIComponent(token)}`;
+    let personalLink = "";
+    try {
+      const code = await getOrCreateStudentLinkCode(student.id, false);
+      personalLink = `${baseUrl()}/z/${code}`;
+    } catch (e) {
+      console.error("admin short link failed", e);
+      const token = encodeToken({
+        name: student.name,
+        subject: student.subject,
+        tg: student.tg,
+        trial: false,
+        studentId: student.id,
+      });
+      personalLink = `${baseUrl()}/?t=${encodeURIComponent(token)}`;
+    }
 
     return (
       <div className="wrap">
@@ -369,8 +377,19 @@ export default async function AdminPage({
     } catch (e) {
       console.error("admin create student", e);
     }
-    const token = encodeToken({ name, subject, tg, trial, studentId });
-    createdLink = `${baseUrl()}/?t=${encodeURIComponent(token)}`;
+    if (studentId) {
+      try {
+        const code = await getOrCreateStudentLinkCode(studentId, trial);
+        createdLink = `${baseUrl()}/z/${code}`;
+      } catch (e) {
+        console.error("admin create short link failed", e);
+      }
+    }
+    if (!createdLink) {
+      // Фолбэк (нет БД/studentId) — старый длинный формат, чтобы ссылка всё же была.
+      const token = encodeToken({ name, subject, tg, trial, studentId });
+      createdLink = `${baseUrl()}/?t=${encodeURIComponent(token)}`;
+    }
   }
 
   let students: Student[] = [];
