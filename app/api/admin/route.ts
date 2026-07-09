@@ -2,14 +2,12 @@ import { NextResponse } from "next/server";
 import { deleteStudent, updateStudent } from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
 import {
-  autoAllocatePayment,
   createPayment,
   deletePayment,
-  lessonIdsForPayment,
   setPayLink,
   setPaymentStatus,
 } from "@/lib/payments";
-import { recolorLesson, recolorPaymentLessons } from "@/lib/coloring";
+import { recolorStudent } from "@/lib/coloring";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +40,7 @@ export async function POST(req: Request) {
     } else if (action === "student.rate") {
       const rub = Math.max(0, Math.round(Number(form.get("rate") || 0)));
       await updateStudent(studentId, { rateKopecks: rub * 100 });
+      await recolorSafe(() => recolorStudent(studentId)); // ставка меняет число оплаченных
     } else if (action === "student.active") {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
     } else if (action === "student.delete") {
@@ -52,36 +51,26 @@ export async function POST(req: Request) {
       await setLessonNote(String(form.get("lessonId") || ""), String(form.get("note") || ""));
     } else if (action === "payment.create") {
       const rub = Math.max(0, Math.round(Number(form.get("amount") || 0)));
-      const lessonIds = form.getAll("lessonId").map((v) => String(v)).filter(Boolean);
       await createPayment({
         studentId,
         amountKopecks: rub * 100,
         note: String(form.get("note") || ""),
         payLink: String(form.get("payLink") || "").trim(),
-        lessonIds,
       });
     } else if (action === "payment.paid") {
-      const pid = String(form.get("paymentId") || "");
-      await setPaymentStatus(pid, "paid");
-      await autoAllocatePayment(pid); // если занятия не привязаны — привяжем по ставке
-      await recolorSafe(() => recolorPaymentLessons(pid)); // покрытые занятия → зелёный
+      await setPaymentStatus(String(form.get("paymentId") || ""), "paid");
+      await recolorSafe(() => recolorStudent(studentId)); // пересчёт баланса → цвета
     } else if (action === "payment.unpaid") {
-      const pid = String(form.get("paymentId") || "");
-      await setPaymentStatus(pid, "unpaid");
-      await recolorSafe(() => recolorPaymentLessons(pid)); // красный, если подтверждено
+      await setPaymentStatus(String(form.get("paymentId") || ""), "unpaid");
+      await recolorSafe(() => recolorStudent(studentId));
     } else if (action === "payment.link") {
       await setPayLink(
         String(form.get("paymentId") || ""),
         String(form.get("payLink") || "").trim()
       );
     } else if (action === "payment.delete") {
-      const pid = String(form.get("paymentId") || "");
-      // Занятия платежа фиксируем до удаления (связи уйдут каскадом), потом красим заново.
-      const affected = await lessonIdsForPayment(pid);
-      await deletePayment(pid);
-      await recolorSafe(async () => {
-        for (const lid of affected) await recolorLesson(lid);
-      });
+      await deletePayment(String(form.get("paymentId") || ""));
+      await recolorSafe(() => recolorStudent(studentId)); // меньше баланс → пересчёт цветов
     } else {
       return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
     }

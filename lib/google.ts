@@ -28,15 +28,72 @@ export interface BusyEvent {
   end: Date;
 }
 
-// Ставит цвет события (colorId Google Calendar). Для повторяющейся серии красит
-// всю серию (патч мастер-события). patch меняет только цвет, остальное не трогает.
-export async function setEventColor(eventId: string, colorId: string): Promise<void> {
+// Ставит (или снимает при colorId=null) цвет события/инстанса Google Calendar.
+// Для мастера повторяющейся серии красит всю серию; для отдельного инстанса —
+// только его (создаётся исключение). patch меняет только цвет, остальное не трогает.
+export async function setEventColor(eventId: string, colorId: string | null): Promise<void> {
   const cal = calendarClient();
   await cal.events.patch({
     calendarId: CALENDAR_ID,
     eventId,
     requestBody: { colorId },
   });
+}
+
+// Одно занятие (инстанс серии или одиночное событие) для поштучной покраски.
+export interface ColorOccurrence {
+  instanceId: string; // id, на который вешаем цвет (инстанс повтора или само событие)
+  start: Date;
+  colorId: string | null; // текущий цвет (чтобы не патчить лишний раз)
+}
+
+// Мастер-события ученика (повторяющиеся — одной строкой) для сброса цвета серии.
+export async function listContactMasters(
+  key: string
+): Promise<{ id: string; colorId: string | null }[]> {
+  const cal = calendarClient();
+  const now = Date.now();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
+    timeMin: new Date(now - 400 * 86400000).toISOString(),
+    timeMax: new Date(now + 400 * 86400000).toISOString(),
+    singleEvents: false,
+    maxResults: 250,
+  });
+  const out: { id: string; colorId: string | null }[] = [];
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled" || !ev.id) continue;
+    if ((ev.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
+    out.push({ id: ev.id, colorId: ev.colorId ?? null });
+  }
+  return out;
+}
+
+// Все подтверждённые занятия ученика поштучно (повторы развёрнуты в инстансы),
+// по возрастанию времени — для балансовой покраски оплачено/нет × прошлое/будущее.
+export async function listContactOccurrences(key: string): Promise<ColorOccurrence[]> {
+  const cal = calendarClient();
+  const now = Date.now();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
+    timeMin: new Date(now - 400 * 86400000).toISOString(),
+    timeMax: new Date(now + 400 * 86400000).toISOString(),
+    singleEvents: true, // разворачивает серии в отдельные инстансы (свой id и colorId)
+    orderBy: "startTime",
+    maxResults: 2500,
+  });
+  const out: ColorOccurrence[] = [];
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled" || !ev.id) continue;
+    if ((ev.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
+    const start = ev.start?.dateTime || ev.start?.date;
+    if (!start) continue;
+    out.push({ instanceId: ev.id, start: new Date(start), colorId: ev.colorId ?? null });
+  }
+  out.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return out;
 }
 
 // Возвращает занятые интервалы (абсолютные моменты) за окно [timeMin, timeMax).

@@ -1,15 +1,7 @@
 // Схема БД (Drizzle). Единый источник схемы — миграции в папке drizzle/.
 // Postgres — система учёта (ученики, занятия, позже оплаты). Календарь остаётся
 // источником правды для расписания; связь — через contactKey и calendar_event_id.
-import {
-  boolean,
-  integer,
-  pgTable,
-  primaryKey,
-  text,
-  timestamp,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const students = pgTable("students", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -52,23 +44,6 @@ export const payments = pgTable("payments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   paidAt: timestamp("paid_at", { withTimezone: true }),
 });
-
-// Связь платёж ↔ занятия (многие-ко-многим): один счёт может покрывать комплект
-// занятий или одно конкретное. Нужна для расчёта «оплачено ли занятие» (цвета, Фаза 3).
-export const lessonPayments = pgTable(
-  "lesson_payments",
-  {
-    paymentId: uuid("payment_id")
-      .notNull()
-      .references(() => payments.id, { onDelete: "cascade" }),
-    lessonId: uuid("lesson_id")
-      .notNull()
-      .references(() => lessons.id, { onDelete: "cascade" }),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.paymentId, t.lessonId] }),
-  })
-);
 
 // Состояние диалога Telegram-бота (для пошагового ввода, напр. текста заметки).
 // Одна строка на чат владельца; действие + цель, что бот ждёт следующим сообщением.

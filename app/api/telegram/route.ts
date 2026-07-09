@@ -3,7 +3,7 @@ import { CALENDAR_ID, calendarClient } from "@/lib/google";
 import { formatMskRange } from "@/lib/slots";
 import { answerCallback, editMessageText, escapeHtml, sendOwner } from "@/lib/telegram";
 import { setLessonStatusByEvent } from "@/lib/lessons";
-import { recolorEvent } from "@/lib/coloring";
+import { recolorStudent } from "@/lib/coloring";
 import {
   applyPendingInput,
   cancelPending,
@@ -346,8 +346,8 @@ async function handleBookingAction(
       });
       try {
         await setLessonStatusByEvent(eventId, "confirmed");
-        // Подтверждённое, но неоплаченное занятие красим красным (Фаза 3).
-        await recolorEvent(eventId);
+        // Пересчитываем цвета всех занятий ученика (баланс оплат × прошлое/будущее).
+        if (priv.studentId) await recolorStudent(priv.studentId);
       } catch (e) {
         console.error("CRM lesson status/color (confirm) failed", e);
       }

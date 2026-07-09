@@ -297,23 +297,6 @@ export default async function AdminPage({
             )}
             <input name="note" placeholder="Комментарий (напр. «Март, 4 занятия»)" />
             <input name="payLink" placeholder="Ссылка на оплату из «Мой налог» (необязательно)" />
-            {lessons.length > 0 && (
-              <>
-                <p className="hint" style={{ marginBottom: 4 }}>
-                  Привязать к занятиям (необязательно):
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
-                  {lessons.map((l) => (
-                    <label key={l.id} className="check-row">
-                      <input type="checkbox" name="lessonId" value={l.id} />
-                      <span>
-                        {lessonWhen(l)} · {STATUS_LABEL[l.status] || l.status}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
             <button className="btn" type="submit">
               Создать счёт
             </button>

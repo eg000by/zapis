@@ -29,6 +29,13 @@
       "when": 1783602427251,
       "tag": "0003_easy_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783635711758,
+      "tag": "0004_parallel_lightspeed",
+      "breakpoints": true
     }
   ]
 }
