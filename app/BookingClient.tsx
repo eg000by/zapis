@@ -395,8 +395,7 @@ export default function BookingClient({
                 className={`day-chip ${i === activeDay ? "active" : ""}`}
                 onClick={() => setActiveDay(i)}
               >
-                <small>{d.weekday}</small>
-                <b>{Number(d.date.slice(8, 10))}</b>
+                <b>{d.weekday}</b>
               </button>
             ))}
           </div>

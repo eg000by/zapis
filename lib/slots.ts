@@ -2,6 +2,7 @@
 // Для проверки пересечений с занятостью используем абсолютные моменты (UTC),
 // поэтому события календаря в любой таймзоне учитываются корректно.
 import {
+  AVAILABILITY_WEEKS,
   BOOKING_WINDOW_DAYS,
   MSK_OFFSET_MINUTES,
   SLOT_MINUTES,
@@ -20,6 +21,11 @@ export function blockSpanMinutes(lessons: number): number {
 import type { BusyEvent } from "./google";
 
 const WEEKDAYS_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+const WEEKDAYS_FULL = [
+  "Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота",
+];
+// Порядок обезличенной недели: понедельник → воскресенье.
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const MONTHS_GEN = [
   "января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
@@ -64,46 +70,69 @@ export function windowBounds(now = new Date()): { timeMin: Date; timeMax: Date }
   return { timeMin, timeMax };
 }
 
-// Строит сетку дней со слотами. Прошедшие слоты не включаются.
-// В результат попадают только дни, где есть хотя бы один будущий слот.
-export function buildDays(busy: BusyEvent[], now = new Date()): DaySlots[] {
+// Окно занятости для обезличенной недели: нужно покрыть ближайшее наступление
+// каждого слота (до 7 дней вперёд) и ещё AVAILABILITY_WEEKS−1 повторений.
+export function weekWindowBounds(now = new Date()): { timeMin: Date; timeMax: Date } {
   const { y, m, d } = mskNowParts(now);
+  const timeMin = now;
+  // +7 дней на ближайшее наступление + недели повторений + сутки запаса.
+  const timeMax = mskWallToInstant(y, m, d + 7 + AVAILABILITY_WEEKS * 7 + 1, 0);
+  return { timeMin, timeMax };
+}
+
+// Ближайшее будущее наступление слота (день недели + время hh:mm) в МСК.
+function nextOccurrence(weekday: number, hh: number, mm: number, now: Date): Date {
+  const { y, m, d } = mskNowParts(now);
+  const todayWd = new Date(Date.UTC(y, m, d, 12)).getUTCDay();
+  const delta = (weekday - todayWd + 7) % 7;
+  let cand = mskWallToInstant(y, m, d + delta, hh, mm);
+  // Если сегодняшнее наступление уже прошло — берём это же время через неделю.
+  if (cand.getTime() <= now.getTime()) cand = new Date(cand.getTime() + 7 * 86400000);
+  return cand;
+}
+
+// Строит «обезличенную» неделю: дни Пн–Вс (из WORK_DAYS) с одинаковой сеткой слотов.
+// start слота — ISO ближайшего будущего наступления (для записи серия начнётся с него).
+// Слот занят, если хотя бы одно из ближайших AVAILABILITY_WEEKS наступлений занято.
+export function buildWeek(busy: BusyEvent[], now = new Date()): DaySlots[] {
   const days: DaySlots[] = [];
+  const startMin = WORK_START_HOUR * 60;
+  const endMin = WORK_END_HOUR * 60;
 
-  for (let i = 0; i < BOOKING_WINDOW_DAYS; i++) {
-    // Опорная дата МСК (полдень, чтобы не съехать на границах месяца).
-    const ref = new Date(Date.UTC(y, m, d + i, 12));
-    const yy = ref.getUTCFullYear();
-    const mm = ref.getUTCMonth();
-    const dd = ref.getUTCDate();
-    const weekday = ref.getUTCDay();
-
+  for (const weekday of WEEK_ORDER) {
     if (!WORK_DAYS.includes(weekday)) continue;
 
     const slots: Slot[] = [];
-    const startMin = WORK_START_HOUR * 60;
-    const endMin = WORK_END_HOUR * 60;
     // Шаг сетки — SLOT_STEP_MINUTES (занятие + перерыв). Последний урок должен
     // закончиться не позже WORK_END_HOUR.
     for (let min = startMin; min + SLOT_MINUTES <= endMin; min += SLOT_STEP_MINUTES) {
       const hr = Math.floor(min / 60);
       const mn = min % 60;
-      const start = mskWallToInstant(yy, mm, dd, hr, mn);
-      const end = new Date(start.getTime() + SLOT_MINUTES * 60000);
-      if (start <= now) continue; // прошедшие слоты не показываем
+      const first = nextOccurrence(weekday, hr, mn, now);
+
+      let isBusy = false;
+      for (let w = 0; w < AVAILABILITY_WEEKS; w++) {
+        const s = new Date(first.getTime() + w * 7 * 86400000);
+        const e = new Date(s.getTime() + SLOT_MINUTES * 60000);
+        if (overlaps(s, e, busy)) {
+          isBusy = true;
+          break;
+        }
+      }
+
       slots.push({
-        start: start.toISOString(),
+        start: first.toISOString(),
         time: `${String(hr).padStart(2, "0")}:${String(mn).padStart(2, "0")}`,
-        busy: overlaps(start, end, busy),
+        busy: isBusy,
       });
     }
 
     if (slots.length === 0) continue;
 
     days.push({
-      date: `${yy}-${String(mm + 1).padStart(2, "0")}-${String(dd).padStart(2, "0")}`,
+      date: `wd-${weekday}`, // синтетический стабильный ключ (не дата)
       weekday: WEEKDAYS_SHORT[weekday],
-      title: `${WEEKDAYS_SHORT[weekday]}, ${dd} ${MONTHS_GEN[mm]}`,
+      title: WEEKDAYS_FULL[weekday],
       slots,
     });
   }
