@@ -8,7 +8,7 @@ import {
   escapeHtml,
   type TgButton,
 } from "./telegram";
-import { getStudent, listStudents, updateStudent, upsertStudent } from "./students";
+import { deleteStudent, getStudent, listStudents, updateStudent, upsertStudent } from "./students";
 import { getLesson, listStudentLessons, setLessonNote } from "./lessons";
 import {
   createPayment,
@@ -66,12 +66,28 @@ async function emit(
 
 export async function showStudentsList(
   chatId: number | string,
-  messageId: number | null
+  messageId: number | null,
+  archived = false
 ): Promise<void> {
   const all = await listStudents();
   const active = all.filter((s) => s.active);
+  const inArchive = all.filter((s) => !s.active);
+
+  if (archived) {
+    const rows: TgButton[][] = inArchive.map((s) => [
+      { text: `🗄 ${s.name} · ${s.subject}`, data: `stu:${s.id}` },
+    ]);
+    rows.push([{ text: "⬅️ Активные", data: "stus" }]);
+    const text = inArchive.length
+      ? "<b>🗄 Архив</b>\nВыберите ученика, чтобы вернуть его в активные:"
+      : "<b>🗄 Архив</b>\n\nАрхив пуст.";
+    await emit(chatId, messageId, text, inlineKeyboard(rows));
+    return;
+  }
+
   const rows: TgButton[][] = [[{ text: "➕ Новый ученик", data: "newstu" }]];
   for (const s of active) rows.push([{ text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` }]);
+  if (inArchive.length) rows.push([{ text: `🗄 Архив (${inArchive.length})`, data: "stusarch" }]);
   const text = active.length
     ? "<b>👥 Ученики</b>\nВыберите ученика или добавьте нового:"
     : "<b>👥 Ученики</b>\n\nПока пусто. Добавьте первого ученика кнопкой ниже.";
@@ -102,6 +118,10 @@ export async function showStudentCard(
     [{ text: "💳 Оплаты", data: `pays:${s.id}` }, { text: "📅 Занятия", data: `les:${s.id}` }],
     [{ text: "🔗 Ссылка на запись", data: `slink:${s.id}` }],
     [{ text: "📝 Заметка об ученике", data: `snote:${s.id}` }],
+    [
+      { text: s.active ? "🗄 В архив" : "♻️ Вернуть из архива", data: `arch:${s.id}` },
+      { text: "🗑 Удалить", data: `delstu:${s.id}` },
+    ],
     [{ text: "⬅️ Все ученики", data: "stus" }],
   ]);
   await emit(chatId, messageId, lines.join("\n"), keyboard);
@@ -227,6 +247,64 @@ export async function deletePaymentBot(paymentId: string): Promise<string | null
     }
   }
   return p.studentId;
+}
+
+// Спрашивает подтверждение удаления ученика (необратимо, каскадом уходят занятия/оплаты/ссылки).
+export async function promptDeleteStudent(
+  chatId: number | string,
+  messageId: number | null,
+  studentId: string
+): Promise<void> {
+  const s = await getStudent(studentId);
+  if (!s) {
+    await emit(chatId, messageId, "Ученик не найден (возможно, уже удалён).");
+    return;
+  }
+  let lessonsCount = 0;
+  let paysCount = 0;
+  try {
+    lessonsCount = (await listStudentLessons(s.id, 1000)).length;
+    paysCount = (await listStudentPayments(s.id)).length;
+  } catch (e) {
+    console.error("promptDeleteStudent counts failed", e);
+  }
+  const text =
+    `🗑 <b>Удалить ученика?</b>\n\n🧑‍🎓 ${escapeHtml(s.name)} · ${escapeHtml(s.subject)}\n` +
+    `Вместе с ним удалятся: занятий — ${lessonsCount}, счетов — ${paysCount}, ссылка на запись.\n` +
+    `События в Google Calendar останутся.\n\n<b>Действие необратимо.</b>`;
+  const keyboard = inlineKeyboard([
+    [
+      { text: "❗ Удалить навсегда", data: `delstuok:${s.id}` },
+      { text: "Отмена", data: `stu:${s.id}` },
+    ],
+  ]);
+  await emit(chatId, messageId, text, keyboard);
+}
+
+// Переключает архив/активность ученика и перерисовывает карточку. Возвращает
+// новое состояние (true = теперь в архиве) или null, если ученик не найден.
+export async function toggleStudentArchive(
+  chatId: number | string,
+  messageId: number | null,
+  studentId: string
+): Promise<boolean | null> {
+  const s = await getStudent(studentId);
+  if (!s) {
+    await emit(chatId, messageId, "Ученик не найден.");
+    return null;
+  }
+  const nowArchived = s.active; // был активен → уходит в архив
+  await updateStudent(studentId, { active: !s.active });
+  await showStudentCard(chatId, messageId, studentId);
+  return nowArchived;
+}
+
+// Удаляет ученика из БД (каскад). Возвращает true при успехе — для навигации в список.
+export async function deleteStudentBot(studentId: string): Promise<boolean> {
+  const s = await getStudent(studentId);
+  if (!s) return false;
+  await deleteStudent(studentId);
+  return true;
 }
 
 // Базовый URL для ссылок из бота. У бота нет заголовков запроса (в отличие от /admin),

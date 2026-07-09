@@ -45,3 +45,10 @@ export async function updateStudent(
 ): Promise<void> {
   await db().update(students).set(fields).where(eq(students.id, id));
 }
+
+// Полное удаление ученика из учёта. Каскадом (FK onDelete: cascade) уходят его
+// занятия, оплаты, связи lesson_payments и короткие ссылки записи. События в Google
+// Calendar остаются нетронутыми — там источник правды расписания. Действие необратимо.
+export async function deleteStudent(id: string): Promise<void> {
+  await db().delete(students).where(eq(students.id, id));
+}

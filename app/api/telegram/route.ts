@@ -9,9 +9,11 @@ import {
   cancelPending,
   chooseTrialForNew,
   deletePaymentBot,
+  deleteStudentBot,
   markPaymentPaid,
   pickSubjectForNew,
   promptDeletePayment,
+  promptDeleteStudent,
   promptLessonNote,
   promptNewPayment,
   promptNewStudent,
@@ -23,6 +25,7 @@ import {
   showStudentCard,
   showStudentsList,
   submitTgForNew,
+  toggleStudentArchive,
 } from "@/lib/crm-bot";
 import { PENDING_PREFIX } from "@/lib/config";
 
@@ -80,6 +83,19 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   if (data === "stus") {
     await showStudentsList(chatId, messageId);
     await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "stusarch") {
+    await showStudentsList(chatId, messageId, true);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("arch:")) {
+    const nowArchived = await toggleStudentArchive(chatId, messageId, data.slice(5));
+    await answerCallback(
+      cq.id,
+      nowArchived == null ? "" : nowArchived ? "В архиве 🗄" : "Снова активен ♻️"
+    );
     return ok();
   }
   // Мастер добавления нового ученика.
@@ -150,6 +166,17 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  if (data.startsWith("delstuok:")) {
+    const done = await deleteStudentBot(data.slice(9));
+    await answerCallback(cq.id, done ? "Ученик удалён 🗑" : "Ученик не найден");
+    await showStudentsList(chatId, messageId);
+    return ok();
+  }
+  if (data.startsWith("delstu:")) {
+    await promptDeleteStudent(chatId, messageId, data.slice(7));
+    await answerCallback(cq.id);
+    return ok();
+  }
   if (data.startsWith("snote:")) {
     await promptStudentNote(chatId, data.slice(6));
     await answerCallback(cq.id);
@@ -178,7 +205,7 @@ const HELP =
   "✖️ /cancel — отменить текущий ввод\n" +
   "❓ /help — эта справка\n\n" +
   "<b>Внутри карточки ученика:</b>\n" +
-  "🔗 ссылка на запись · 💳 оплаты (создать / отметить / удалить счёт) · 📅 занятия и заметки.";
+  "🔗 ссылка на запись · 💳 оплаты (создать / отметить / удалить счёт) · 📅 занятия и заметки · 🗄 архив · 🗑 удалить ученика.";
 
 async function handleMessage(msg: any): Promise<NextResponse> {
   const chatId = msg.chat?.id;

@@ -77,6 +77,7 @@ export default async function AdminPage({
   // ── Карточка ученика ────────────────────────────────────────────────
   if (view === "student") {
     const id = get("id");
+    const confirmDelete = get("confirm") === "delete";
     let student: Student | null = null;
     let lessons: Lesson[] = [];
     let studentPayments: Payment[] = [];
@@ -352,6 +353,41 @@ export default async function AdminPage({
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        <div className="card" style={{ marginTop: 16, borderColor: "#dc2626" }}>
+          <label style={{ marginTop: 0, color: "#dc2626" }}>Удалить ученика</label>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Необратимо удаляет ученика вместе со всеми его занятиями, оплатами и ссылками на
+            запись из базы. События в Google Calendar остаются — при необходимости удалите их
+            там отдельно. Чаще безопаснее «В архив».
+          </p>
+          {confirmDelete ? (
+            <form method="POST" action="/api/admin">
+              <input type="hidden" name="key" value={key} />
+              <input type="hidden" name="action" value="student.delete" />
+              <input type="hidden" name="studentId" value={student.id} />
+              <p style={{ fontWeight: 600, margin: "0 0 8px" }}>
+                Точно удалить «{student.name}»? Это нельзя отменить.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" type="submit" style={{ background: "#dc2626" }}>
+                  Да, удалить навсегда
+                </button>
+                <a className="btn" href={link({ view: "student", id: student.id })}>
+                  Отмена
+                </a>
+              </div>
+            </form>
+          ) : (
+            <a
+              className="btn"
+              href={link({ view: "student", id: student.id, confirm: "delete" })}
+              style={{ background: "#dc2626", display: "inline-block" }}
+            >
+              Удалить ученика…
+            </a>
           )}
         </div>
       </div>

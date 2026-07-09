@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { updateStudent } from "@/lib/students";
+import { deleteStudent, updateStudent } from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
 import {
   createPayment,
@@ -43,6 +43,10 @@ export async function POST(req: Request) {
       await updateStudent(studentId, { rateKopecks: rub * 100 });
     } else if (action === "student.active") {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
+    } else if (action === "student.delete") {
+      // Необратимо: каскадом уходят занятия, оплаты и ссылки ученика. После —
+      // редирект в общий список (карточки уже нет), см. ветку ниже.
+      await deleteStudent(studentId);
     } else if (action === "lesson.note") {
       await setLessonNote(String(form.get("lessonId") || ""), String(form.get("note") || ""));
     } else if (action === "payment.create") {
@@ -86,7 +90,8 @@ export async function POST(req: Request) {
 
   const back = new URL("/admin", req.url);
   back.searchParams.set("key", key);
-  if (studentId) {
+  // После удаления ученика карточки уже нет — возвращаемся в общий список.
+  if (studentId && action !== "student.delete") {
     back.searchParams.set("view", "student");
     back.searchParams.set("id", studentId);
   }
