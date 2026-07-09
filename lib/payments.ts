@@ -51,6 +51,17 @@ export async function outstandingPayments(studentId: string): Promise<Payment[]>
     .orderBy(desc(payments.createdAt));
 }
 
+// Оплачено ли занятие: есть ли покрывающий его платёж со статусом paid.
+export async function isLessonPaid(lessonId: string): Promise<boolean> {
+  const rows = await db()
+    .select({ id: payments.id })
+    .from(lessonPayments)
+    .innerJoin(payments, eq(lessonPayments.paymentId, payments.id))
+    .where(and(eq(lessonPayments.lessonId, lessonId), eq(payments.status, "paid")))
+    .limit(1);
+  return rows.length > 0;
+}
+
 // Занятия, покрытые платежом (для расчёта «оплачено ли занятие», Фаза 3).
 export async function lessonIdsForPayment(paymentId: string): Promise<string[]> {
   const rows = await db()

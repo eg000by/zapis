@@ -25,6 +25,15 @@ export async function recordLesson(input: {
   return row;
 }
 
+export async function getLesson(id: string): Promise<Lesson | null> {
+  const [row] = await db().select().from(lessons).where(eq(lessons.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getLessonsByEvent(calendarEventId: string): Promise<Lesson[]> {
+  return db().select().from(lessons).where(eq(lessons.calendarEventId, calendarEventId));
+}
+
 export async function listStudentLessons(studentId: string, limit = 30): Promise<Lesson[]> {
   return db()
     .select()

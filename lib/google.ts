@@ -28,6 +28,17 @@ export interface BusyEvent {
   end: Date;
 }
 
+// Ставит цвет события (colorId Google Calendar). Для повторяющейся серии красит
+// всю серию (патч мастер-события). patch меняет только цвет, остальное не трогает.
+export async function setEventColor(eventId: string, colorId: string): Promise<void> {
+  const cal = calendarClient();
+  await cal.events.patch({
+    calendarId: CALENDAR_ID,
+    eventId,
+    requestBody: { colorId },
+  });
+}
+
 // Возвращает занятые интервалы (абсолютные моменты) за окно [timeMin, timeMax).
 // Учитываются подтверждённые и предварительные (tentative) события — оба держат слот.
 // excludeId — id события, которое не учитываем (нужно при переносе: чтобы запись

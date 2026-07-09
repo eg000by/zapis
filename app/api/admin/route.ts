@@ -4,11 +4,23 @@ import { setLessonNote } from "@/lib/lessons";
 import {
   createPayment,
   deletePayment,
+  lessonIdsForPayment,
   setPayLink,
   setPaymentStatus,
 } from "@/lib/payments";
+import { recolorLesson, recolorPaymentLessons } from "@/lib/coloring";
 
 export const dynamic = "force-dynamic";
+
+// Перекраска событий — best-effort: сбой цвета в календаре не должен ломать
+// сохранение оплаты (иначе внешний try вернул бы 500).
+async function recolorSafe(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    console.error("recolor failed", e);
+  }
+}
 
 // Правки CRM с сайта /admin (заметки, ставка, активность). Закрыто ADMIN_SECRET.
 // Обёртка над тем же сервисным слоем lib/*, что и будущий Telegram-бот (паритет).
@@ -44,16 +56,26 @@ export async function POST(req: Request) {
         lessonIds,
       });
     } else if (action === "payment.paid") {
-      await setPaymentStatus(String(form.get("paymentId") || ""), "paid");
+      const pid = String(form.get("paymentId") || "");
+      await setPaymentStatus(pid, "paid");
+      await recolorSafe(() => recolorPaymentLessons(pid)); // покрытые занятия → зелёный
     } else if (action === "payment.unpaid") {
-      await setPaymentStatus(String(form.get("paymentId") || ""), "unpaid");
+      const pid = String(form.get("paymentId") || "");
+      await setPaymentStatus(pid, "unpaid");
+      await recolorSafe(() => recolorPaymentLessons(pid)); // красный, если подтверждено
     } else if (action === "payment.link") {
       await setPayLink(
         String(form.get("paymentId") || ""),
         String(form.get("payLink") || "").trim()
       );
     } else if (action === "payment.delete") {
-      await deletePayment(String(form.get("paymentId") || ""));
+      const pid = String(form.get("paymentId") || "");
+      // Занятия платежа фиксируем до удаления (связи уйдут каскадом), потом красим заново.
+      const affected = await lessonIdsForPayment(pid);
+      await deletePayment(pid);
+      await recolorSafe(async () => {
+        for (const lid of affected) await recolorLesson(lid);
+      });
     } else {
       return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
     }

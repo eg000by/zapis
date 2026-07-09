@@ -3,6 +3,7 @@ import { CALENDAR_ID, calendarClient } from "@/lib/google";
 import { formatMskRange } from "@/lib/slots";
 import { answerCallback, editMessageText } from "@/lib/telegram";
 import { setLessonStatusByEvent } from "@/lib/lessons";
+import { recolorEvent } from "@/lib/coloring";
 import { PENDING_PREFIX } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -105,8 +106,10 @@ export async function POST(req: Request) {
       });
       try {
         await setLessonStatusByEvent(eventId, "confirmed");
+        // Подтверждённое, но неоплаченное занятие красим красным (Фаза 3).
+        await recolorEvent(eventId);
       } catch (e) {
-        console.error("CRM lesson status (confirm) failed", e);
+        console.error("CRM lesson status/color (confirm) failed", e);
       }
       await answerCallback(cq.id, "Запись подтверждена ✅");
       if (chatId && messageId) {
