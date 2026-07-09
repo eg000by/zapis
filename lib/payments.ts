@@ -34,6 +34,11 @@ export async function createPayment(input: {
   return p;
 }
 
+export async function getPayment(id: string): Promise<Payment | null> {
+  const [row] = await db().select().from(payments).where(eq(payments.id, id)).limit(1);
+  return row ?? null;
+}
+
 export async function listStudentPayments(studentId: string): Promise<Payment[]> {
   return db()
     .select()

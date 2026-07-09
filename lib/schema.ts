@@ -70,9 +70,19 @@ export const lessonPayments = pgTable(
   })
 );
 
+// Состояние диалога Telegram-бота (для пошагового ввода, напр. текста заметки).
+// Одна строка на чат владельца; действие + цель, что бот ждёт следующим сообщением.
+export const botState = pgTable("bot_state", {
+  chatId: text("chat_id").primaryKey(),
+  action: text("action").notNull(), // напр. "student.note" | "lesson.note"
+  targetId: text("target_id").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Student = typeof students.$inferSelect;
 export type NewStudent = typeof students.$inferInsert;
 export type Lesson = typeof lessons.$inferSelect;
 export type NewLesson = typeof lessons.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
+export type BotState = typeof botState.$inferSelect;

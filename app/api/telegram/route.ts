@@ -1,54 +1,142 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient } from "@/lib/google";
 import { formatMskRange } from "@/lib/slots";
-import { answerCallback, editMessageText } from "@/lib/telegram";
+import { answerCallback, editMessageText, sendOwner } from "@/lib/telegram";
 import { setLessonStatusByEvent } from "@/lib/lessons";
 import { recolorEvent } from "@/lib/coloring";
+import {
+  applyPendingInput,
+  markPaymentPaid,
+  promptLessonNote,
+  promptStudentNote,
+  showLessons,
+  showPayments,
+  showStudentCard,
+  showStudentsList,
+} from "@/lib/crm-bot";
 import { PENDING_PREFIX } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
-// Webhook Telegram: обрабатывает нажатия кнопок Подтвердить/Отклонить.
+const ok = () => NextResponse.json({ ok: true });
+
+function isOwner(chatId: unknown): boolean {
+  const owner = process.env.TELEGRAM_CHAT_ID;
+  return !owner || String(chatId) === String(owner);
+}
+
+// Webhook Telegram: подтверждение/отклонение заявок + управление CRM (Фаза 4).
 export async function POST(req: Request) {
   // Защита webhook секретным токеном (задаётся при setWebhook).
   const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
-  if (expected) {
-    const got = req.headers.get("x-telegram-bot-api-secret-token");
-    if (got !== expected) {
-      return NextResponse.json({ ok: false }, { status: 401 });
-    }
+  if (expected && req.headers.get("x-telegram-bot-api-secret-token") !== expected) {
+    return NextResponse.json({ ok: false }, { status: 401 });
   }
 
   let update: any;
   try {
     update = await req.json();
   } catch {
-    return NextResponse.json({ ok: true });
+    return ok();
   }
 
-  const cq = update?.callback_query;
-  if (!cq) return NextResponse.json({ ok: true });
+  try {
+    if (update?.callback_query) return await handleCallback(update.callback_query);
+    if (update?.message) return await handleMessage(update.message);
+  } catch (e) {
+    console.error("telegram handler error", e);
+  }
+  return ok();
+}
 
+async function handleCallback(cq: any): Promise<NextResponse> {
   const data: string = cq.data || "";
   const chatId = cq.message?.chat?.id;
   const messageId = cq.message?.message_id;
 
-  // Только владелец бота (заданный chat_id) может подтверждать.
-  const ownerChat = process.env.TELEGRAM_CHAT_ID;
-  if (ownerChat && String(chatId) !== String(ownerChat)) {
+  if (!isOwner(chatId)) {
     await answerCallback(cq.id, "Нет доступа");
-    return NextResponse.json({ ok: true });
+    return ok();
   }
 
+  // Навигация CRM.
+  if (data === "stus") {
+    await showStudentsList(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("stu:")) {
+    await showStudentCard(chatId, messageId, data.slice(4));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("pays:")) {
+    await showPayments(chatId, messageId, data.slice(5));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("les:")) {
+    await showLessons(chatId, messageId, data.slice(4));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("payp:")) {
+    const sid = await markPaymentPaid(data.slice(5));
+    await answerCallback(cq.id, "Оплата отмечена ✅");
+    if (sid) await showPayments(chatId, messageId, sid);
+    return ok();
+  }
+  if (data.startsWith("snote:")) {
+    await promptStudentNote(chatId, data.slice(6));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("lnote:")) {
+    await promptLessonNote(chatId, data.slice(6));
+    await answerCallback(cq.id);
+    return ok();
+  }
+
+  // Подтверждение/отклонение заявки (c:/d:).
   const [action, eventId] = splitAction(data);
-  if (!action || !eventId) {
-    await answerCallback(cq.id, "Неизвестная команда");
-    return NextResponse.json({ ok: true });
+  if ((action === "c" || action === "d") && eventId) {
+    return await handleBookingAction(cq, action, eventId, chatId, messageId);
   }
 
+  await answerCallback(cq.id, "Неизвестная команда");
+  return ok();
+}
+
+async function handleMessage(msg: any): Promise<NextResponse> {
+  const chatId = msg.chat?.id;
+  if (!isOwner(chatId)) return ok();
+  const text = String(msg.text || "").trim();
+  if (!text) return ok();
+
+  if (text === "/start" || text.startsWith("/students")) {
+    await showStudentsList(chatId, null);
+    return ok();
+  }
+
+  // Бот ждёт ввод (текст заметки)?
+  if (await applyPendingInput(chatId, text)) return ok();
+
+  if (text.startsWith("/")) {
+    await sendOwner("Команды:\n/students — ученики, оплаты и заметки");
+  }
+  return ok();
+}
+
+// Подтверждение/отклонение заявки (существующая логика).
+async function handleBookingAction(
+  cq: any,
+  action: "c" | "d",
+  eventId: string,
+  chatId: any,
+  messageId: number | undefined
+): Promise<NextResponse> {
   const cal = calendarClient();
 
-  // Читаем событие. Если его нет — заявку уже обработали/удалили.
   let ev;
   try {
     const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId });
@@ -58,11 +146,10 @@ export async function POST(req: Request) {
     if (chatId && messageId) {
       await editMessageText(chatId, messageId, "⚠️ Заявка не найдена (возможно, уже обработана).");
     }
-    return NextResponse.json({ ok: true });
+    return ok();
   }
 
-  // Пользователь мог отменить заявку сам — тогда событие уже удалено и приходит
-  // со статусом "cancelled". Не воскрешаем его при подтверждении.
+  // Пользователь мог отменить заявку сам — событие приходит со статусом "cancelled".
   if (ev.status === "cancelled") {
     await answerCallback(cq.id, "Заявку отменил сам пользователь");
     if (chatId && messageId) {
@@ -72,7 +159,7 @@ export async function POST(req: Request) {
         "🚫 <b>Пользователь отменил эту заявку</b> — подтверждать нечего."
       );
     }
-    return NextResponse.json({ ok: true });
+    return ok();
   }
 
   const priv = ev.extendedProperties?.private || {};
@@ -94,7 +181,6 @@ export async function POST(req: Request) {
 
   try {
     if (action === "c") {
-      // Подтверждаем: убираем пометку, статус confirmed.
       await cal.events.patch({
         calendarId: CALENDAR_ID,
         eventId,
@@ -119,8 +205,7 @@ export async function POST(req: Request) {
           `✅ <b>Запись подтверждена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
         );
       }
-    } else if (action === "d") {
-      // Отклоняем: удаляем событие, слот освобождается.
+    } else {
       await cal.events.delete({ calendarId: CALENDAR_ID, eventId });
       try {
         await setLessonStatusByEvent(eventId, "cancelled");
@@ -141,7 +226,7 @@ export async function POST(req: Request) {
     await answerCallback(cq.id, "Ошибка при обработке");
   }
 
-  return NextResponse.json({ ok: true });
+  return ok();
 }
 
 function splitAction(data: string): [string | null, string | null] {
