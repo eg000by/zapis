@@ -99,21 +99,6 @@ function nextOccIso(ev: MyEvent, now: number): string | null {
   return new Date(t).toISOString();
 }
 
-// Ближайшие конкретные наступления серии (для выбора даты разового переноса).
-function upcomingOccs(ev: MyEvent, now: number, count = 6): string[] {
-  const base = new Date(ev.start).getTime();
-  let t = base;
-  while (t < now) t += WEEK_MS;
-  const out: string[] = [];
-  for (let guard = 0; out.length < count && guard < 80; guard++) {
-    const idx = Math.round((t - base) / WEEK_MS);
-    if (ev.weeks && idx >= ev.weeks) break;
-    out.push(new Date(t).toISOString());
-    t += WEEK_MS;
-  }
-  return out;
-}
-
 export default function BookingClient({
   token,
   greetName,
@@ -146,6 +131,9 @@ export default function BookingClient({
   const [rsKind, setRsKind] = useState<"move" | "cancel" | null>(null);
   const [rsMode, setRsMode] = useState<"all" | "once" | null>(null);
   const [rsOcc, setRsOcc] = useState<string | null>(null);
+  // Реальные ближайшие даты серии (из календаря) для выбора одного занятия;
+  // null — идёт загрузка.
+  const [rsDates, setRsDates] = useState<string[] | null>(null);
   // Ученик с записями открыл сетку, чтобы записаться на дополнительное время.
   const [pickingNew, setPickingNew] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
@@ -256,6 +244,20 @@ export default function BookingClient({
     setRsKind(null);
     setRsMode(null);
     setRsOcc(null);
+    setRsDates(null);
+  }
+
+  // Загружает реальные ближайшие даты серии (учитывает отменённые/перенесённые недели).
+  async function loadOccurrences(ev: MyEvent) {
+    setRsDates(null);
+    try {
+      const d = await fetch(
+        `/api/occurrences?token=${encodeURIComponent(token)}&eventId=${encodeURIComponent(ev.id)}`
+      ).then((r) => r.json());
+      setRsDates(d.occurrences || []);
+    } catch {
+      setRsDates([]);
+    }
   }
   function cancelReschedule() {
     resetRs();
@@ -548,7 +550,7 @@ export default function BookingClient({
                     disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
                     onClick={() => returnEvent(ev)}
                   >
-                    ↩️ Вернуть
+                    Вернуть
                   </button>
                 )}
                 <button
@@ -588,7 +590,13 @@ export default function BookingClient({
 
           {rsMode === null && (
             <div className="choice-row">
-              <button className="mini" onClick={() => setRsMode("once")}>
+              <button
+                className="mini"
+                onClick={() => {
+                  setRsMode("once");
+                  loadOccurrences(rsEvent);
+                }}
+              >
                 📅 Только одно занятие
               </button>
               {rsKind === "cancel" ? (
@@ -616,10 +624,14 @@ export default function BookingClient({
           {rsMode === "once" && !rsOcc && (
             <>
               <span className="my-when">
-                Какое занятие {rsKind === "cancel" ? "отменяем" : "переносим"}?
+                {rsDates === null
+                  ? "Загрузка занятий…"
+                  : rsDates.length === 0
+                    ? "Нет ближайших занятий."
+                    : `Какое занятие ${rsKind === "cancel" ? "отменяем" : "переносим"}?`}
               </span>
               <div className="choice-row">
-                {upcomingOccs(rsEvent, Date.now()).map((iso) => (
+                {(rsDates || []).map((iso) => (
                   <button
                     key={iso}
                     className={`mini${rsKind === "cancel" ? " danger" : ""}`}
