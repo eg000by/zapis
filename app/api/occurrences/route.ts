@@ -8,6 +8,11 @@ export const dynamic = "force-dynamic";
 // разовом переносе/отмене. В отличие от наивного «+7 дней», берём инстансы из Google
 // Calendar: уже отменённые недели (EXDATE) не возвращаются, а перенесённые занятия
 // (moved) исключаем — они управляются собственной строкой «Перенос».
+//
+// Важно: используем events.list(singleEvents,orderBy=startTime), а НЕ events.instances().
+// Когда все занятия серии стали исключениями (напр. после покраски), instances() отдаёт
+// их не по порядку — и обрезание по maxResults пропускало ближайшие даты. Разворот через
+// events.list возвращает инстансы строго по возрастанию времени.
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const decoded = decodeToken(url.searchParams.get("token"));
@@ -32,24 +37,27 @@ export async function GET(req: Request) {
 
   const now = new Date();
   try {
-    const res = await cal.events.instances({
+    const res = await cal.events.list({
       calendarId: CALENDAR_ID,
-      eventId,
+      privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
       timeMin: now.toISOString(),
-      maxResults: 15,
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 60,
     });
     const occurrences: string[] = [];
     for (const i of res.data.items || []) {
       if (i.status === "cancelled") continue;
+      // Только инстансы этой серии (базовые повторы + её исключения).
+      if (i.recurringEventId !== eventId && i.id !== eventId) continue;
       if (i.extendedProperties?.private?.moved === "1") continue;
       const s = i.start?.dateTime || i.start?.date;
       if (!s || new Date(s).getTime() < now.getTime()) continue;
       occurrences.push(new Date(s).toISOString());
+      if (occurrences.length >= 8) break;
     }
-    occurrences.sort();
-    return NextResponse.json({ occurrences: occurrences.slice(0, 8) });
+    return NextResponse.json({ occurrences });
   } catch (e) {
-    // Одиночное (не повторяющееся) событие — instances() недоступен; занятий для выбора нет.
     console.error("/api/occurrences error", e);
     return NextResponse.json({ occurrences: [] });
   }
