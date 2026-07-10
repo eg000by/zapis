@@ -140,8 +140,10 @@ export default function BookingClient({
   // Мои записи.
   const [my, setMy] = useState<MyEvent[] | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
-  // Перенос: выбранная запись + режим (all — вся серия, once — одно занятие) + дата занятия.
+  // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
+  // once — одно занятие) + дата занятия.
   const [rsEvent, setRsEvent] = useState<MyEvent | null>(null);
+  const [rsKind, setRsKind] = useState<"move" | "cancel" | null>(null);
   const [rsMode, setRsMode] = useState<"all" | "once" | null>(null);
   const [rsOcc, setRsOcc] = useState<string | null>(null);
   // Ученик с записями открыл сетку, чтобы записаться на дополнительное время.
@@ -159,9 +161,10 @@ export default function BookingClient({
   const blocks = useMemo(() => groupConsecutive(selected), [selected]);
 
   const hasBookings = !!(my && my.length > 0);
-  // Сетка выбирает новое время переноса, когда выбраны и запись, и режим (и дата — для once).
-  const rescheduling = !!rsEvent && (rsMode === "all" || (rsMode === "once" && !!rsOcc));
-  // Промежуточный экран переноса: выбор режима / даты занятия.
+  // Сетка выбирает новое время переноса, когда выбраны запись, режим move и режим (и дата — для once).
+  const rescheduling =
+    !!rsEvent && rsKind === "move" && (rsMode === "all" || (rsMode === "once" && !!rsOcc));
+  // Промежуточный экран (выбор «одно занятие / вся серия» и даты) — для переноса и отмены.
   const rsChoosing = !!rsEvent && !rescheduling;
   // Сетку слотов показываем: когда записей ещё нет, либо при переносе, либо когда
   // ученик явно захотел записаться ещё. Иначе (уже есть записи) — прячем.
@@ -246,10 +249,24 @@ export default function BookingClient({
     setSelected((cur) => cur.filter((s) => !slots.includes(s)));
   }
 
+  // Сбрасывает состояние переноса/отмены (не трогая notice — чтобы не стирать сообщение
+  // об успехе). cancelReschedule дополнительно чистит notice — для явного «Закрыть».
+  function resetRs() {
+    setRsEvent(null);
+    setRsKind(null);
+    setRsMode(null);
+    setRsOcc(null);
+  }
+  function cancelReschedule() {
+    resetRs();
+    setNotice(null);
+  }
+
   // Начать перенос записи. Для повторяющейся серии сперва спросим режим (разово/еженедельно);
   // для разового занятия или уже перенесённого — сразу к выбору нового времени.
   function startReschedule(ev: MyEvent) {
     setRsEvent(ev);
+    setRsKind("move");
     setSelected([]);
     setPickingNew(false);
     if (ev.moved) {
@@ -268,13 +285,6 @@ export default function BookingClient({
       setRsOcc(null);
       setNotice(null);
     }
-  }
-
-  function cancelReschedule() {
-    setRsEvent(null);
-    setRsMode(null);
-    setRsOcc(null);
-    setNotice(null);
   }
 
   async function pickForReschedule(start: string) {
@@ -299,8 +309,8 @@ export default function BookingClient({
         setNotice(data.error || "Не удалось перенести запись. Ваше прежнее время осталось за вами.");
         await refreshSlots(false);
       } else {
+        resetRs();
         setNotice(`Перенесено на ${data.when}. Ждём подтверждения преподавателя.`);
-        cancelReschedule();
         loadSlots();
         loadMy();
       }
@@ -311,23 +321,68 @@ export default function BookingClient({
     }
   }
 
-  async function cancelEvent(ev: MyEvent) {
-    const label = ev.moved
-      ? `Отменить перенесённое занятие «${ev.student} — ${ev.subject}»?`
-      : `Отменить запись «${ev.student} — ${ev.subject}»?`;
-    if (!confirm(label)) return;
+  // Начать отмену. Разовое/перенесённое занятие отменяем сразу (с подтверждением);
+  // для повторяющейся серии спросим — одно занятие или всю серию.
+  function startCancel(ev: MyEvent) {
+    if (ev.moved) {
+      if (confirm(`Отменить перенесённое занятие «${ev.student} — ${ev.subject}»?`)) {
+        doCancel(ev, "once");
+      }
+      return;
+    }
+    if (!ev.recurring) {
+      if (confirm(`Отменить запись «${ev.student} — ${ev.subject}»?`)) doCancel(ev, "all");
+      return;
+    }
+    setRsEvent(ev);
+    setRsKind("cancel");
+    setRsMode(null);
+    setRsOcc(null);
+    setSelected([]);
+    setPickingNew(false);
+    setNotice(null);
+  }
+
+  async function doCancel(ev: MyEvent, mode: "all" | "once", occStart?: string) {
     setBusyAction(true);
     setNotice(null);
     try {
       const res = await fetch("/api/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, eventId: ev.id }),
+        body: JSON.stringify({ token, eventId: ev.id, mode, ...(occStart ? { occStart } : {}) }),
       });
       const data = await res.json();
       if (!res.ok) setNotice(data.error || "Не удалось отменить запись.");
       else {
-        setNotice("Запись отменена.");
+        resetRs();
+        setNotice(mode === "once" ? "Занятие отменено." : "Запись отменена.");
+        loadSlots();
+        loadMy();
+      }
+    } catch {
+      setNotice("Ошибка сети. Попробуйте ещё раз.");
+    } finally {
+      setBusyAction(false);
+    }
+  }
+
+  // Вернуть разово перенесённое занятие на его исходное (до переноса) время.
+  async function returnEvent(ev: MyEvent) {
+    const where = ev.origStart ? ` (${fmtMsk(ev.origStart, ev.lessons)})` : "";
+    if (!confirm(`Вернуть занятие на прежнее время${where}?`)) return;
+    setBusyAction(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/return", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, eventId: ev.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) setNotice(data.error || "Не удалось вернуть занятие.");
+      else {
+        setNotice(`Занятие возвращено на ${data.when}.`);
         loadSlots();
         loadMy();
       }
@@ -487,7 +542,20 @@ export default function BookingClient({
                 >
                   Перенести
                 </button>
-                <button className="mini danger" disabled={busyAction} onClick={() => cancelEvent(ev)}>
+                {ev.moved && (
+                  <button
+                    className="mini"
+                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                    onClick={() => returnEvent(ev)}
+                  >
+                    ↩️ Вернуть
+                  </button>
+                )}
+                <button
+                  className="mini danger"
+                  disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                  onClick={() => startCancel(ev)}
+                >
                   Отменить
                 </button>
               </div>
@@ -509,13 +577,13 @@ export default function BookingClient({
         </div>
       )}
 
-      {/* Промежуточный экран переноса серии: выбор режима, затем даты занятия. */}
-      {rsChoosing && (
+      {/* Промежуточный экран: выбор «одно занятие / вся серия» и, для одного, — даты. */}
+      {rsChoosing && rsEvent && (
         <div className="reschedule-bar column">
           <span>
-            Переносим: <b>{rsEvent!.student} — {rsEvent!.subject}</b>
+            {rsKind === "cancel" ? "Отменяем" : "Переносим"}: <b>{rsEvent.student} — {rsEvent.subject}</b>
             {" · "}
-            {fmtSlotMsk(rsEvent!.start, rsEvent!.lessons)}
+            {fmtSlotMsk(rsEvent.start, rsEvent.lessons)}
           </span>
 
           {rsMode === null && (
@@ -523,33 +591,52 @@ export default function BookingClient({
               <button className="mini" onClick={() => setRsMode("once")}>
                 📅 Только одно занятие
               </button>
-              <button className="mini" onClick={() => { setRsMode("all"); setRsOcc(null); }}>
-                🔁 Каждую неделю
-              </button>
-              <button className="mini danger" onClick={cancelReschedule}>
-                Отмена
+              {rsKind === "cancel" ? (
+                <button
+                  className="mini danger"
+                  onClick={() => {
+                    if (confirm(`Отменить всю серию «${rsEvent.student} — ${rsEvent.subject}»?`)) {
+                      doCancel(rsEvent, "all");
+                    }
+                  }}
+                >
+                  🗑 Всю серию
+                </button>
+              ) : (
+                <button className="mini" onClick={() => { setRsMode("all"); setRsOcc(null); }}>
+                  🔁 Каждую неделю
+                </button>
+              )}
+              <button className="mini" onClick={cancelReschedule}>
+                Закрыть
               </button>
             </div>
           )}
 
           {rsMode === "once" && !rsOcc && (
             <>
-              <span className="my-when">Какое занятие переносим?</span>
+              <span className="my-when">
+                Какое занятие {rsKind === "cancel" ? "отменяем" : "переносим"}?
+              </span>
               <div className="choice-row">
-                {upcomingOccs(rsEvent!, Date.now()).map((iso) => (
+                {upcomingOccs(rsEvent, Date.now()).map((iso) => (
                   <button
                     key={iso}
-                    className="mini"
+                    className={`mini${rsKind === "cancel" ? " danger" : ""}`}
                     onClick={() => {
-                      setRsOcc(iso);
-                      setNotice("Выберите новое время ниже для переноса.");
+                      if (rsKind === "cancel") {
+                        if (confirm(`Отменить занятие ${fmtDateMsk(iso)}?`)) doCancel(rsEvent, "once", iso);
+                      } else {
+                        setRsOcc(iso);
+                        setNotice("Выберите новое время ниже для переноса.");
+                      }
                     }}
                   >
                     {fmtDateMsk(iso)}
                   </button>
                 ))}
-                <button className="mini danger" onClick={cancelReschedule}>
-                  Отмена
+                <button className="mini" onClick={cancelReschedule}>
+                  Закрыть
                 </button>
               </div>
             </>
