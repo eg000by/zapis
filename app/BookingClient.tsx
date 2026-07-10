@@ -35,8 +35,6 @@ interface MyPayment {
   payLink: string;
 }
 
-const WEEK_MS = 7 * 86400000;
-
 // "13:00" в МСК из ISO-момента.
 function hmMsk(iso: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
@@ -87,18 +85,6 @@ function fmtDateMsk(iso: string): string {
   }).format(new Date(iso));
 }
 
-// Ближайшее будущее наступление записи (ISO) или null, если серия закончилась.
-// Для разовых/перенесённых занятий — их собственное время, если оно в будущем.
-function nextOccIso(ev: MyEvent, now: number): string | null {
-  const base = new Date(ev.start).getTime();
-  if (!ev.recurring) return base >= now ? new Date(base).toISOString() : null;
-  let t = base;
-  while (t < now) t += WEEK_MS;
-  const idx = Math.round((t - base) / WEEK_MS);
-  if (ev.weeks && idx >= ev.weeks) return null;
-  return new Date(t).toISOString();
-}
-
 export default function BookingClient({
   token,
   greetName,
@@ -125,6 +111,8 @@ export default function BookingClient({
   // Мои записи.
   const [my, setMy] = useState<MyEvent[] | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
+  // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
+  const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
   // once — одно занятие) + дата занятия.
   const [rsEvent, setRsEvent] = useState<MyEvent | null>(null);
@@ -158,20 +146,6 @@ export default function BookingClient({
   // ученик явно захотел записаться ещё. Иначе (уже есть записи) — прячем.
   const showGrid = !hasBookings || rescheduling || pickingNew;
 
-  // Ближайшее занятие по всем записям (одна общая плашка сверху).
-  const nextLesson = useMemo(() => {
-    if (!my) return null;
-    const now = Date.now();
-    let best: number | null = null;
-    for (const ev of my) {
-      const iso = nextOccIso(ev, now);
-      if (!iso) continue;
-      const t = new Date(iso).getTime();
-      if (best === null || t < best) best = t;
-    }
-    return best !== null ? new Date(best).toISOString() : null;
-  }, [my]);
-
   // Если в окне подтверждения убрали все слоты — закрываем окно.
   useEffect(() => {
     if (sheetOpen && selected.length === 0) setSheetOpen(false);
@@ -197,6 +171,7 @@ export default function BookingClient({
       .then((d) => {
         setMy(d.events || []);
         setPayments(d.payments || []);
+        setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
   }

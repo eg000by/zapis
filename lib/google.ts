@@ -174,6 +174,29 @@ export async function liveEventIdsForContact(key: string): Promise<Set<string>> 
   return ids;
 }
 
+// Ближайшее будущее занятие владельца ссылки (ISO начала) — конкретная дата, с учётом
+// отменённых недель (EXDATE) и переносов. Разворачиваем все занятия в инстансы по времени
+// и берём первый непрошедший. null — предстоящих занятий нет.
+export async function nextOccurrenceForContact(key: string): Promise<string | null> {
+  const cal = calendarClient();
+  const now = new Date();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
+    timeMin: now.toISOString(),
+    singleEvents: true,
+    orderBy: "startTime",
+    maxResults: 30,
+  });
+  for (const i of res.data.items || []) {
+    if (i.status === "cancelled") continue;
+    const s = i.start?.dateTime || i.start?.date;
+    if (!s || new Date(s).getTime() < now.getTime()) continue;
+    return new Date(s).toISOString();
+  }
+  return null;
+}
+
 // Возвращает записи владельца ссылки (по contactKey), у которых есть будущие
 // занятия. Повторяющиеся серии возвращаются одной строкой (singleEvents=false).
 export async function listContactEvents(key: string, fromIso: string): Promise<BookingEvent[]> {

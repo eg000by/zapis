@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
-import { listContactEvents } from "@/lib/google";
+import { listContactEvents, nextOccurrenceForContact } from "@/lib/google";
 import { getStudentByContactKey } from "@/lib/students";
 import { outstandingPayments } from "@/lib/payments";
 
@@ -16,6 +16,13 @@ export async function GET(req: Request) {
   try {
     const key = contactKey(decoded.info);
     const events = await listContactEvents(key, new Date().toISOString());
+    // Ближайшее занятие (конкретная дата) — с учётом отмен и переносов.
+    let nextLesson: string | null = null;
+    try {
+      nextLesson = await nextOccurrenceForContact(key);
+    } catch (e) {
+      console.error("/api/my nextLesson lookup failed", e);
+    }
 
     // Счета к оплате — best-effort: недоступность БД не должна ломать список записей.
     let payments: { id: string; amountKopecks: number; note: string; payLink: string }[] = [];
@@ -37,7 +44,7 @@ export async function GET(req: Request) {
       console.error("/api/my payments lookup failed", e);
     }
 
-    return NextResponse.json({ events, payments });
+    return NextResponse.json({ events, payments, nextLesson });
   } catch (e) {
     console.error("/api/my error", e);
     return NextResponse.json({ error: "Не удалось загрузить записи" }, { status: 500 });
