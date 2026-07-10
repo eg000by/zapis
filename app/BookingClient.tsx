@@ -24,6 +24,8 @@ interface MyEvent {
   recurring: boolean;
   weeks: number;
   lessons: number;
+  moved: boolean; // разовый перенос одного занятия серии
+  origStart: string; // исходное время до переноса (для moved)
 }
 
 interface MyPayment {
@@ -32,6 +34,8 @@ interface MyPayment {
   note: string;
   payLink: string;
 }
+
+const WEEK_MS = 7 * 86400000;
 
 // "13:00" в МСК из ISO-момента.
 function hmMsk(iso: string): string {
@@ -73,6 +77,43 @@ function fmtMsk(iso: string, lessons = 1): string {
   return `${s}–${hmMsk(end.toISOString())} (МСК)`;
 }
 
+// "Ср, 8 июля" — короткая дата без времени (для списка дат разового переноса).
+function fmtDateMsk(iso: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    weekday: "short",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(iso));
+}
+
+// Ближайшее будущее наступление записи (ISO) или null, если серия закончилась.
+// Для разовых/перенесённых занятий — их собственное время, если оно в будущем.
+function nextOccIso(ev: MyEvent, now: number): string | null {
+  const base = new Date(ev.start).getTime();
+  if (!ev.recurring) return base >= now ? new Date(base).toISOString() : null;
+  let t = base;
+  while (t < now) t += WEEK_MS;
+  const idx = Math.round((t - base) / WEEK_MS);
+  if (ev.weeks && idx >= ev.weeks) return null;
+  return new Date(t).toISOString();
+}
+
+// Ближайшие конкретные наступления серии (для выбора даты разового переноса).
+function upcomingOccs(ev: MyEvent, now: number, count = 6): string[] {
+  const base = new Date(ev.start).getTime();
+  let t = base;
+  while (t < now) t += WEEK_MS;
+  const out: string[] = [];
+  for (let guard = 0; out.length < count && guard < 80; guard++) {
+    const idx = Math.round((t - base) / WEEK_MS);
+    if (ev.weeks && idx >= ev.weeks) break;
+    out.push(new Date(t).toISOString());
+    t += WEEK_MS;
+  }
+  return out;
+}
+
 export default function BookingClient({
   token,
   greetName,
@@ -99,7 +140,12 @@ export default function BookingClient({
   // Мои записи.
   const [my, setMy] = useState<MyEvent[] | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
-  const [rescheduleFor, setRescheduleFor] = useState<MyEvent | null>(null);
+  // Перенос: выбранная запись + режим (all — вся серия, once — одно занятие) + дата занятия.
+  const [rsEvent, setRsEvent] = useState<MyEvent | null>(null);
+  const [rsMode, setRsMode] = useState<"all" | "once" | null>(null);
+  const [rsOcc, setRsOcc] = useState<string | null>(null);
+  // Ученик с записями открыл сетку, чтобы записаться на дополнительное время.
+  const [pickingNew, setPickingNew] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -111,6 +157,29 @@ export default function BookingClient({
 
   // Подряд идущие часы показываем одним блоком («10:00–13:00»).
   const blocks = useMemo(() => groupConsecutive(selected), [selected]);
+
+  const hasBookings = !!(my && my.length > 0);
+  // Сетка выбирает новое время переноса, когда выбраны и запись, и режим (и дата — для once).
+  const rescheduling = !!rsEvent && (rsMode === "all" || (rsMode === "once" && !!rsOcc));
+  // Промежуточный экран переноса: выбор режима / даты занятия.
+  const rsChoosing = !!rsEvent && !rescheduling;
+  // Сетку слотов показываем: когда записей ещё нет, либо при переносе, либо когда
+  // ученик явно захотел записаться ещё. Иначе (уже есть записи) — прячем.
+  const showGrid = !hasBookings || rescheduling || pickingNew;
+
+  // Ближайшее занятие по всем записям (одна общая плашка сверху).
+  const nextLesson = useMemo(() => {
+    if (!my) return null;
+    const now = Date.now();
+    let best: number | null = null;
+    for (const ev of my) {
+      const iso = nextOccIso(ev, now);
+      if (!iso) continue;
+      const t = new Date(iso).getTime();
+      if (best === null || t < best) best = t;
+    }
+    return best !== null ? new Date(best).toISOString() : null;
+  }, [my]);
 
   // Если в окне подтверждения убрали все слоты — закрываем окно.
   useEffect(() => {
@@ -177,15 +246,52 @@ export default function BookingClient({
     setSelected((cur) => cur.filter((s) => !slots.includes(s)));
   }
 
+  // Начать перенос записи. Для повторяющейся серии сперва спросим режим (разово/еженедельно);
+  // для разового занятия или уже перенесённого — сразу к выбору нового времени.
+  function startReschedule(ev: MyEvent) {
+    setRsEvent(ev);
+    setSelected([]);
+    setPickingNew(false);
+    if (ev.moved) {
+      // Уже перенесённое одиночное занятие — двигаем его же ещё раз.
+      setRsMode("once");
+      setRsOcc(ev.origStart || ev.start);
+      setNotice("Выберите новое время для этого занятия.");
+    } else if (!ev.recurring) {
+      // Разовое (пробное) занятие — переносим целиком.
+      setRsMode("all");
+      setRsOcc(null);
+      setNotice("Выберите новое время ниже для переноса.");
+    } else {
+      // Повторяющаяся серия — спросим, что именно переносим.
+      setRsMode(null);
+      setRsOcc(null);
+      setNotice(null);
+    }
+  }
+
+  function cancelReschedule() {
+    setRsEvent(null);
+    setRsMode(null);
+    setRsOcc(null);
+    setNotice(null);
+  }
+
   async function pickForReschedule(start: string) {
-    if (!rescheduleFor) return;
+    if (!rsEvent) return;
     setBusyAction(true);
     setNotice(null);
     try {
       const res = await fetch("/api/reschedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, eventId: rescheduleFor.id, start }),
+        body: JSON.stringify({
+          token,
+          eventId: rsEvent.id,
+          start,
+          mode: rsMode || "all",
+          ...(rsMode === "once" && rsOcc ? { occStart: rsOcc } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -194,7 +300,7 @@ export default function BookingClient({
         await refreshSlots(false);
       } else {
         setNotice(`Перенесено на ${data.when}. Ждём подтверждения преподавателя.`);
-        setRescheduleFor(null);
+        cancelReschedule();
         loadSlots();
         loadMy();
       }
@@ -206,7 +312,10 @@ export default function BookingClient({
   }
 
   async function cancelEvent(ev: MyEvent) {
-    if (!confirm(`Отменить запись «${ev.student} — ${ev.subject}»?`)) return;
+    const label = ev.moved
+      ? `Отменить перенесённое занятие «${ev.student} — ${ev.subject}»?`
+      : `Отменить запись «${ev.student} — ${ev.subject}»?`;
+    if (!confirm(label)) return;
     setBusyAction(true);
     setNotice(null);
     try {
@@ -230,7 +339,7 @@ export default function BookingClient({
   }
 
   function onSlotClick(s: Slot) {
-    if (rescheduleFor) {
+    if (rescheduling) {
       pickForReschedule(s.start);
       return;
     }
@@ -263,6 +372,7 @@ export default function BookingClient({
       setDoneWhen(data.when || null);
       setSheetOpen(false);
       setSelected([]);
+      setPickingNew(false);
       setSubmitting(false);
       loadSlots();
       loadMy();
@@ -300,12 +410,18 @@ export default function BookingClient({
           {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"} по
           предмету «<b>{subject}</b>».
         </p>
-        <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>
+        {showGrid && <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>}
       </div>
 
       {notice && (
         <div className="notice" onClick={() => setNotice(null)}>
           {notice}
+        </div>
+      )}
+
+      {nextLesson && (
+        <div className="next-lesson">
+          📌 Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
         </div>
       )}
 
@@ -345,10 +461,20 @@ export default function BookingClient({
             <div key={ev.id} className="my-row">
               <div className="my-info">
                 <b>{ev.student} — {ev.subject}</b>
-                <span className="my-when">
-                  {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
-                  {ev.recurring ? " · еженедельно" : ""}
-                </span>
+                {ev.moved ? (
+                  <>
+                    <span className="my-when">
+                      {ev.origStart ? `${fmtMsk(ev.origStart, ev.lessons)} → ` : ""}
+                      {fmtMsk(ev.start, ev.lessons)}
+                    </span>
+                    <span className="badge move">🔄 перенос</span>
+                  </>
+                ) : (
+                  <span className="my-when">
+                    {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
+                    {ev.recurring ? " · еженедельно" : ""}
+                  </span>
+                )}
                 <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
                   {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
                 </span>
@@ -356,12 +482,8 @@ export default function BookingClient({
               <div className="my-actions">
                 <button
                   className="mini"
-                  disabled={busyAction}
-                  onClick={() => {
-                    setRescheduleFor(ev);
-                    setSelected([]);
-                    setNotice("Выберите новое время ниже для переноса.");
-                  }}
+                  disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                  onClick={() => startReschedule(ev)}
                 >
                   Перенести
                 </button>
@@ -371,37 +493,99 @@ export default function BookingClient({
               </div>
             </div>
           ))}
+          {!rsEvent && !pickingNew && (
+            <button
+              className="mini"
+              style={{ marginTop: 12 }}
+              disabled={busyAction}
+              onClick={() => {
+                setPickingNew(true);
+                setNotice("Выберите время для новой записи ниже.");
+              }}
+            >
+              ＋ Записаться на другое время
+            </button>
+          )}
         </div>
       )}
 
-      {rescheduleFor && (
+      {/* Промежуточный экран переноса серии: выбор режима, затем даты занятия. */}
+      {rsChoosing && (
+        <div className="reschedule-bar column">
+          <span>
+            Переносим: <b>{rsEvent!.student} — {rsEvent!.subject}</b>
+            {" · "}
+            {fmtSlotMsk(rsEvent!.start, rsEvent!.lessons)}
+          </span>
+
+          {rsMode === null && (
+            <div className="choice-row">
+              <button className="mini" onClick={() => setRsMode("once")}>
+                📅 Только одно занятие
+              </button>
+              <button className="mini" onClick={() => { setRsMode("all"); setRsOcc(null); }}>
+                🔁 Каждую неделю
+              </button>
+              <button className="mini danger" onClick={cancelReschedule}>
+                Отмена
+              </button>
+            </div>
+          )}
+
+          {rsMode === "once" && !rsOcc && (
+            <>
+              <span className="my-when">Какое занятие переносим?</span>
+              <div className="choice-row">
+                {upcomingOccs(rsEvent!, Date.now()).map((iso) => (
+                  <button
+                    key={iso}
+                    className="mini"
+                    onClick={() => {
+                      setRsOcc(iso);
+                      setNotice("Выберите новое время ниже для переноса.");
+                    }}
+                  >
+                    {fmtDateMsk(iso)}
+                  </button>
+                ))}
+                <button className="mini danger" onClick={cancelReschedule}>
+                  Отмена
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Активный перенос: сетка ниже выбирает новое время. */}
+      {rescheduling && (
         <div className="reschedule-bar">
           <span>
-            Переносим: <b>{rescheduleFor.student} — {rescheduleFor.subject}</b>. Выберите новое время.
+            Переносим {rsMode === "once" && rsOcc ? <b>{fmtDateMsk(rsOcc)}</b> : "серию"}: выберите новое время.
           </span>
-          <button className="mini" onClick={() => { setRescheduleFor(null); setNotice(null); }}>
+          <button className="mini" onClick={cancelReschedule}>
             Отмена
           </button>
         </div>
       )}
 
-      {loadError && (
+      {loadError && showGrid && (
         <div className="center-note">
           <span className="emoji">😕</span>
           <p>{loadError}</p>
         </div>
       )}
 
-      {!loadError && days === null && <div className="spinner" />}
+      {showGrid && !loadError && days === null && <div className="spinner" />}
 
-      {!loadError && days !== null && days.length === 0 && (
+      {showGrid && !loadError && days !== null && days.length === 0 && (
         <div className="center-note">
           <span className="emoji">📭</span>
           <p>Свободных слотов на ближайшее время нет. Загляните чуть позже.</p>
         </div>
       )}
 
-      {!loadError && days !== null && days.length > 0 && (
+      {showGrid && !loadError && days !== null && days.length > 0 && (
         <>
           <div className="day-nav">
             {days.map((d, i) => (
@@ -437,16 +621,29 @@ export default function BookingClient({
               )}
             </div>
             <p className="hint">
-              {rescheduleFor
+              {rescheduling
                 ? "Нажмите на свободное время — запись переедет на него."
                 : "Можно выбрать несколько слотов. Серые — уже заняты."}
             </p>
+            {pickingNew && !rescheduling && (
+              <button
+                className="mini"
+                disabled={busyAction}
+                onClick={() => {
+                  setPickingNew(false);
+                  setSelected([]);
+                  setNotice(null);
+                }}
+              >
+                Свернуть выбор времени
+              </button>
+            )}
           </div>
         </>
       )}
 
       {/* Нижняя панель выбора */}
-      {!rescheduleFor && selected.length > 0 && !sheetOpen && (
+      {!rescheduling && selected.length > 0 && !sheetOpen && (
         <div className="picker-bar">
           <span>
             Выбрано слотов: <b>{selected.length}</b>

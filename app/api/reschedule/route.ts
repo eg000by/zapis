@@ -50,13 +50,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Это не ваша запись" }, { status: 403 });
   }
 
+  // Режим переноса: "all" — вся еженедельная серия (по умолчанию); "once" — только одно
+  // занятие серии (ученик заболел на этой неделе): двигаем один инстанс-исключение, серия
+  // остаётся на месте. occStart — исходное время того занятия, которое переносим.
+  const mode = body?.mode === "once" ? "once" : "all";
+  const occStartIso = String(body?.occStart || "");
+
   const weeks = Number(priv.weeks) || 1;
   const student = priv.student || "";
   const subject = priv.subject || "";
-  // Ревизия переноса: растёт с каждым повторным переносом до подтверждения. Кнопка
-  // подтверждения несёт эту ревизию, и старое уведомление при нажатии распознаётся
-  // как устаревшее (иначе подтверждение старого слота применяло бы последний слот).
-  const rev = (Number(priv.rev) || 0) + 1;
 
   // Сохраняем длину блока: переносим весь блок, а не только первое занятие.
   // Число занятий берём из extendedProperties; для старых событий — из длительности.
@@ -71,6 +73,98 @@ export async function POST(req: Request) {
   try {
     const now = new Date();
     const { timeMin, timeMax } = windowBounds(now);
+
+    // ── Разовый перенос одного занятия серии ──────────────────────────────────
+    if (mode === "once") {
+      // Находим конкретное занятие серии. Если eventId уже указывает на исключение-инстанс
+      // (повторный перенос того же занятия) — двигаем его напрямую; иначе ищем наступление
+      // мастер-серии по времени occStart.
+      let inst = ev;
+      if (!ev.recurringEventId) {
+        if (!occStartIso) {
+          return NextResponse.json({ error: "Не выбрано занятие для переноса" }, { status: 400 });
+        }
+        const w0 = new Date(occStartIso).getTime();
+        const res2 = await cal.events.instances({
+          calendarId: CALENDAR_ID,
+          eventId,
+          timeMin: new Date(w0 - 60000).toISOString(),
+          timeMax: new Date(w0 + 60000).toISOString(),
+          maxResults: 5,
+        });
+        const found = (res2.data.items || []).find((i) => i.status !== "cancelled" && i.id);
+        if (!found) {
+          return NextResponse.json(
+            { error: "Это занятие не найдено (возможно, уже перенесено)." },
+            { status: 404 }
+          );
+        }
+        inst = found;
+      }
+      const instPriv = inst.extendedProperties?.private || {};
+      // Исходное время до переноса: при повторном переносе сохраняем самое первое (чтобы
+      // отклонение вернуло занятие на его настоящее место в серии).
+      const origStart = instPriv.origStart || occStartIso || inst.start?.dateTime || "";
+      const rev = (Number(instPriv.rev) || 0) + 1;
+
+      const far = Math.max(
+        timeMax.getTime(),
+        new Date(startIso).getTime() + blockSpanMinutes(lessons) * 60000
+      );
+      // Исключаем всю серию из занятости (иначе занятие конфликтовало бы само с собой).
+      const busy = await fetchBusy(timeMin, new Date(far + 60000), eventId);
+      const v = buildRecurrence(startIso, 1, busy, now, lessons);
+      if (!v.ok) {
+        return NextResponse.json(
+          { error: `${formatMskRange(startIso, lessons)}: ${v.reason || "слот недоступен"}` },
+          { status: 409 }
+        );
+      }
+
+      const end = new Date(new Date(startIso).getTime() + blockSpanMinutes(lessons) * 60000);
+      await cal.events.patch({
+        calendarId: CALENDAR_ID,
+        eventId: inst.id!,
+        requestBody: {
+          summary: `${PENDING_PREFIX}${student} — ${subject}`,
+          status: "tentative",
+          start: { dateTime: startIso, timeZone: TIMEZONE },
+          end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
+          extendedProperties: {
+            private: {
+              status: "pending",
+              moved: "1",
+              origStart,
+              lessons: String(lessons),
+              rev: String(rev),
+            },
+          },
+        },
+      });
+
+      const when = `${formatMskRange(startIso, lessons)} (разовый перенос)`;
+      try {
+        await notifyRequest({
+          eventId: inst.id!,
+          name: student || contact.name,
+          tg: contact.tg,
+          subject,
+          when,
+          header: "🔄 <b>Перенос одного занятия</b> — нужно подтвердить",
+          rev,
+        });
+      } catch (e) {
+        console.error("Telegram notify (reschedule once) failed", e);
+      }
+
+      return NextResponse.json({ ok: true, when });
+    }
+
+    // ── Перенос всей еженедельной серии ───────────────────────────────────────
+    // Ревизия переноса: растёт с каждым повторным переносом до подтверждения. Кнопка
+    // подтверждения несёт эту ревизию, и старое уведомление при нажатии распознаётся
+    // как устаревшее (иначе подтверждение старого слота применяло бы последний слот).
+    const rev = (Number(priv.rev) || 0) + 1;
 
     const occ = weeklyOccurrences(startIso, weeks);
     let far = timeMax.getTime();

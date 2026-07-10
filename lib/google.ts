@@ -148,6 +148,8 @@ export interface BookingEvent {
   recurring: boolean;
   weeks: number;
   lessons: number; // число занятий в блоке (для отображения диапазона и лимита)
+  moved: boolean; // разовый перенос одного занятия серии (исключение-инстанс)
+  origStart: string; // для moved — исходное время занятия до переноса (ISO), иначе ""
 }
 
 // Множество id «живых» (не отменённых) событий владельца ссылки — для сверки CRM
@@ -187,13 +189,15 @@ export async function listContactEvents(key: string, fromIso: string): Promise<B
   const out: BookingEvent[] = [];
   for (const ev of items) {
     if (ev.status === "cancelled") continue;
+    const priv = ev.extendedProperties?.private || {};
+    const moved = priv.moved === "1";
     // Инстансы-исключения повтора (напр. отдельно перекрашенный повтор) приходят
     // отдельными объектами с recurringEventId — сам слот уже представлен мастер-серией,
     // поэтому их пропускаем, иначе «Ваши записи» и подсчёт лимита дублируются.
-    if (ev.recurringEventId) continue;
+    // Исключение — разовый перенос (moved): его показываем отдельной строкой «Перенос».
+    if (ev.recurringEventId && !moved) continue;
     const start = ev.start?.dateTime || ev.start?.date;
     if (!ev.id || !start) continue;
-    const priv = ev.extendedProperties?.private || {};
     const weeks = Number(priv.weeks) || 1;
     // Число занятий в блоке хранится в extendedProperties. Для старых событий
     // (без поля) оцениваем по длительности из расчёта 60 мин на занятие.
@@ -212,6 +216,8 @@ export async function listContactEvents(key: string, fromIso: string): Promise<B
       recurring: Array.isArray(ev.recurrence) && ev.recurrence.length > 0,
       weeks,
       lessons,
+      moved,
+      origStart: moved && priv.origStart ? new Date(priv.origStart).toISOString() : "",
     });
   }
   out.sort((a, b) => a.start.localeCompare(b.start));

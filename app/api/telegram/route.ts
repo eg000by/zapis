@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient } from "@/lib/google";
-import { formatMskRange } from "@/lib/slots";
+import { blockSpanMinutes, formatMskRange } from "@/lib/slots";
 import { answerCallback, editMessageText, escapeHtml, sendOwner } from "@/lib/telegram";
 import { setLessonStatusByEvent } from "@/lib/lessons";
 import { recolorStudent } from "@/lib/coloring";
@@ -27,7 +27,7 @@ import {
   submitTgForNew,
   toggleStudentArchive,
 } from "@/lib/crm-bot";
-import { PENDING_PREFIX } from "@/lib/config";
+import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -332,6 +332,10 @@ async function handleBookingAction(
       : 1);
   const when = ev.start?.dateTime ? formatMskRange(ev.start.dateTime, lessons) : "";
   const cleanSummary = (ev.summary || `${student} — ${subject}`).replace(PENDING_PREFIX, "");
+  // Разовый перенос одного занятия серии (исключение-инстанс). При отклонении его нельзя
+  // удалять (пропало бы занятие той недели) — возвращаем на исходное время.
+  const moved = priv.moved === "1";
+  const movedTag = moved ? " · разовый перенос" : "";
 
   try {
     if (action === "c") {
@@ -356,7 +360,35 @@ async function handleBookingAction(
         await editMessageText(
           chatId,
           messageId,
-          `✅ <b>Запись подтверждена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
+          `✅ <b>Запись подтверждена</b>${movedTag}\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
+        );
+      }
+    } else if (moved && priv.origStart) {
+      // Отклонение разового переноса: возвращаем занятие на исходное время серии.
+      const oEnd = new Date(new Date(priv.origStart).getTime() + blockSpanMinutes(lessons) * 60000);
+      await cal.events.patch({
+        calendarId: CALENDAR_ID,
+        eventId,
+        requestBody: {
+          summary: cleanSummary,
+          status: "confirmed",
+          start: { dateTime: priv.origStart, timeZone: TIMEZONE },
+          end: { dateTime: oEnd.toISOString(), timeZone: TIMEZONE },
+          extendedProperties: { private: { status: "confirmed", moved: "", origStart: "", rev: "" } },
+        },
+      });
+      try {
+        if (priv.studentId) await recolorStudent(priv.studentId);
+      } catch (e) {
+        console.error("CRM color (decline moved) failed", e);
+      }
+      const origWhen = formatMskRange(priv.origStart, lessons);
+      await answerCallback(cq.id, "Перенос отклонён ❌");
+      if (chatId && messageId) {
+        await editMessageText(
+          chatId,
+          messageId,
+          `↩️ <b>Разовый перенос отклонён</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\nЗанятие осталось на прежнем времени:\n🕒 ${origWhen}`
         );
       }
     } else {
