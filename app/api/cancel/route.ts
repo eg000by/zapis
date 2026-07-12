@@ -77,7 +77,14 @@ export async function POST(req: Request) {
         timeMax: new Date(w0 + 60000).toISOString(),
         maxResults: 5,
       });
-      const inst = (insts.data.items || []).find((i) => i.status !== "cancelled" && i.id);
+      // Ищем именно наступление серии на occStart: сверяем originalStartTime, чтобы не
+      // удалить другой (ранее перенесённый) инстанс, случайно стоящий на этом времени.
+      const inst = (insts.data.items || []).find((i) => {
+        if (i.status === "cancelled" || !i.id) return false;
+        if (i.extendedProperties?.private?.moved === "1") return false;
+        const orig = i.originalStartTime?.dateTime || i.start?.dateTime;
+        return !!orig && Math.abs(new Date(orig).getTime() - w0) < 60000;
+      });
       if (!inst) {
         return NextResponse.json(
           { error: "Это занятие не найдено (возможно, уже отменено)." },

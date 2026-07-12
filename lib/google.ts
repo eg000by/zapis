@@ -190,6 +190,8 @@ export async function nextOccurrenceForContact(key: string): Promise<string | nu
   });
   for (const i of res.data.items || []) {
     if (i.status === "cancelled") continue;
+    // Только подтверждённые: неподтверждённая заявка/перенос — ещё не «ближайшее занятие».
+    if ((i.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
     const s = i.start?.dateTime || i.start?.date;
     if (!s || new Date(s).getTime() < now.getTime()) continue;
     return new Date(s).toISOString();

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { CALENDAR_ID, calendarClient } from "@/lib/google";
-import { blockSpanMinutes, formatMskRange } from "@/lib/slots";
+import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
+import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/lib/slots";
 import { answerCallback, editMessageText, escapeHtml, sendOwner } from "@/lib/telegram";
-import { setLessonStatusByEvent } from "@/lib/lessons";
+import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { recolorStudent } from "@/lib/coloring";
 import {
   applyPendingInput,
@@ -365,7 +365,26 @@ async function handleBookingAction(
       }
     } else if (moved && priv.origStart) {
       // Отклонение разового переноса: возвращаем занятие на исходное время серии.
+      // Сначала проверяем, что прежний слот всё ещё свободен (его мог занять другой
+      // ученик, пока перенос ждал решения) — иначе получилась бы двойная бронь.
+      const now = new Date();
+      const { timeMin, timeMax } = windowBounds(now);
+      const far = Math.max(
+        timeMax.getTime(),
+        new Date(priv.origStart).getTime() + blockSpanMinutes(lessons) * 60000
+      );
+      const busy = await fetchBusy(timeMin, new Date(far + 60000), eventId);
+      const v = validateSlot(priv.origStart, busy, now, lessons);
+      if (!v.ok) {
+        await answerCallback(
+          cq.id,
+          `Вернуть нельзя: ${v.reason || "прежнее время недоступно"}. Подтвердите перенос или отмените занятие.`
+        );
+        return ok();
+      }
       const oEnd = new Date(new Date(priv.origStart).getTime() + blockSpanMinutes(lessons) * 60000);
+      // rev НЕ сбрасываем: счётчик ревизий монотонный на всю жизнь события, иначе
+      // старая карточка cr:1 из чата прошла бы анти-stale проверку следующего цикла.
       await cal.events.patch({
         calendarId: CALENDAR_ID,
         eventId,
@@ -374,7 +393,7 @@ async function handleBookingAction(
           status: "confirmed",
           start: { dateTime: priv.origStart, timeZone: TIMEZONE },
           end: { dateTime: oEnd.toISOString(), timeZone: TIMEZONE },
-          extendedProperties: { private: { status: "confirmed", moved: "", origStart: "", rev: "" } },
+          extendedProperties: { private: { status: "confirmed", moved: "", origStart: "" } },
         },
       });
       try {
@@ -389,6 +408,58 @@ async function handleBookingAction(
           chatId,
           messageId,
           `↩️ <b>Разовый перенос отклонён</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\nЗанятие осталось на прежнем времени:\n🕒 ${origWhen}`
+        );
+      }
+    } else if (priv.prevStart) {
+      // Отклонение переноса записи/серии: возвращаем на прежнее время (раньше здесь
+      // удалялась вся серия). Проверяем ближайшее будущее наступление прежнего слота —
+      // сам DTSTART давно идущей серии может быть в прошлом.
+      const isSeries = Array.isArray(ev.recurrence) && ev.recurrence.length > 0;
+      const now = new Date();
+      const { timeMin, timeMax } = windowBounds(now);
+      let f = new Date(priv.prevStart).getTime();
+      if (isSeries) {
+        while (f <= now.getTime()) f += 7 * 86400000;
+      }
+      const far = Math.max(timeMax.getTime(), f + blockSpanMinutes(lessons) * 60000);
+      const busy = await fetchBusy(timeMin, new Date(far + 60000), eventId);
+      const v = validateSlot(new Date(f).toISOString(), busy, now, lessons);
+      if (!v.ok) {
+        await answerCallback(
+          cq.id,
+          `Вернуть нельзя: ${v.reason || "прежнее время недоступно"}. Подтвердите перенос или отмените запись.`
+        );
+        return ok();
+      }
+      const oEnd = new Date(new Date(priv.prevStart).getTime() + blockSpanMinutes(lessons) * 60000);
+      // recurrence не трогаем (RRULE с COUNT остаётся), rev не сбрасываем (монотонный).
+      await cal.events.patch({
+        calendarId: CALENDAR_ID,
+        eventId,
+        requestBody: {
+          summary: cleanSummary,
+          status: "confirmed",
+          start: { dateTime: priv.prevStart, timeZone: TIMEZONE },
+          end: { dateTime: oEnd.toISOString(), timeZone: TIMEZONE },
+          extendedProperties: { private: { status: "confirmed", prevStart: "" } },
+        },
+      });
+      try {
+        await updateLessonByEvent(eventId, {
+          status: "confirmed",
+          occurrenceStart: new Date(priv.prevStart),
+        });
+        if (priv.studentId) await recolorStudent(priv.studentId);
+      } catch (e) {
+        console.error("CRM sync (decline reschedule) failed", e);
+      }
+      const backWhen = `${formatMskRange(new Date(f).toISOString(), lessons)}${isSeries ? " (еженедельно)" : ""}`;
+      await answerCallback(cq.id, "Перенос отклонён ❌");
+      if (chatId && messageId) {
+        await editMessageText(
+          chatId,
+          messageId,
+          `↩️ <b>Перенос отклонён</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\nЗапись осталась на прежнем времени:\n🕒 ${backWhen}`
         );
       }
     } else {

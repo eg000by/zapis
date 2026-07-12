@@ -4,7 +4,7 @@ import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/
 import { decodeToken, contactKey } from "@/lib/link";
 import { escapeHtml, sendOwner } from "@/lib/telegram";
 import { recolorStudent } from "@/lib/coloring";
-import { TIMEZONE } from "@/lib/config";
+import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -72,8 +72,10 @@ export async function POST(req: Request) {
     }
 
     const end = new Date(new Date(origStart).getTime() + blockSpanMinutes(lessons) * 60000);
-    const cleanSummary = (ev.summary || `${student} — ${subject}`).replace("⏳ ", "");
+    const cleanSummary = (ev.summary || `${student} — ${subject}`).replace(PENDING_PREFIX, "");
     // Возвращаем на исходное время и подтверждаем сразу (это был утверждённый слот серии).
+    // rev не сбрасываем: счётчик ревизий монотонный, иначе старая карточка cr:1 из чата
+    // прошла бы анти-stale проверку следующего цикла переноса.
     await cal.events.patch({
       calendarId: CALENDAR_ID,
       eventId,
@@ -82,7 +84,7 @@ export async function POST(req: Request) {
         status: "confirmed",
         start: { dateTime: origStart, timeZone: TIMEZONE },
         end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
-        extendedProperties: { private: { status: "confirmed", moved: "", origStart: "", rev: "" } },
+        extendedProperties: { private: { status: "confirmed", moved: "", origStart: "" } },
       },
     });
 

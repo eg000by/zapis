@@ -22,7 +22,6 @@ interface MyEvent {
   status: string;
   start: string;
   recurring: boolean;
-  weeks: number;
   lessons: number;
   moved: boolean; // разовый перенос одного занятия серии
   origStart: string; // исходное время до переноса (для moved)
@@ -268,6 +267,17 @@ export default function BookingClient({
     if (!rsEvent) return;
     setBusyAction(true);
     setNotice(null);
+    // Для разового переноса слот сетки (ближайшее наступление дня недели) сдвигаем
+    // в неделю переносимого занятия: занятие «через 3 недели» не должно уезжать на
+    // текущую неделю. Если так получилось прошлое время — берём неделей позже.
+    let target = start;
+    if (rsMode === "once" && rsOcc) {
+      const WEEK = 7 * 86400000;
+      const shift = Math.round((new Date(rsOcc).getTime() - new Date(start).getTime()) / WEEK);
+      let t = new Date(start).getTime() + shift * WEEK;
+      if (t <= Date.now()) t += WEEK;
+      target = new Date(t).toISOString();
+    }
     try {
       const res = await fetch("/api/reschedule", {
         method: "POST",
@@ -275,7 +285,7 @@ export default function BookingClient({
         body: JSON.stringify({
           token,
           eventId: rsEvent.id,
-          start,
+          start: target,
           mode: rsMode || "all",
           ...(rsMode === "once" && rsOcc ? { occStart: rsOcc } : {}),
         }),
@@ -699,21 +709,25 @@ export default function BookingClient({
                 ? "Нажмите на свободное время — запись переедет на него."
                 : "Можно выбрать несколько слотов. Серые — уже заняты."}
             </p>
-            {pickingNew && !rescheduling && (
-              <button
-                className="mini"
-                disabled={busyAction}
-                onClick={() => {
-                  setPickingNew(false);
-                  setSelected([]);
-                  setNotice(null);
-                }}
-              >
-                Свернуть выбор времени
-              </button>
-            )}
           </div>
         </>
+      )}
+
+      {/* Выход из режима «записаться ещё» — доступен всегда (и при пустой сетке,
+          и при ошибке загрузки), иначе из режима было бы не выбраться. */}
+      {pickingNew && !rescheduling && (
+        <button
+          className="mini"
+          style={{ marginTop: 12 }}
+          disabled={busyAction}
+          onClick={() => {
+            setPickingNew(false);
+            setSelected([]);
+            setNotice(null);
+          }}
+        >
+          Свернуть выбор времени
+        </button>
       )}
 
       {/* Нижняя панель выбора */}

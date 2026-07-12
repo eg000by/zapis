@@ -109,6 +109,9 @@ export async function POST(req: Request) {
     try {
       const mine = await listContactEvents(key, now.toISOString());
       for (const e of mine) {
+        // Разово перенесённое занятие не считаем: его неделя уже учтена мастер-серией
+        // (иначе перенос двоил бы нагрузку и лимит срабатывал бы ложно).
+        if (e.moved) continue;
         const w0 = weekKey(new Date(e.start).getTime());
         const span = e.recurring ? Math.max(1, e.weeks) : 1;
         for (let i = 0; i < span; i++) addLoad(w0 + i, e.lessons);

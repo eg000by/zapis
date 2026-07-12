@@ -9,6 +9,7 @@ import {
 } from "@/lib/slots";
 import { decodeToken, contactKey } from "@/lib/link";
 import { updateLessonByEvent } from "@/lib/lessons";
+import { recolorStudent } from "@/lib/coloring";
 import { notifyRequest } from "@/lib/telegram";
 import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
 
@@ -92,7 +93,14 @@ export async function POST(req: Request) {
           timeMax: new Date(w0 + 60000).toISOString(),
           maxResults: 5,
         });
-        const found = (res2.data.items || []).find((i) => i.status !== "cancelled" && i.id);
+        // Ищем именно наступление серии на occStart: сверяем originalStartTime, чтобы не
+        // зацепить другой (ранее перенесённый) инстанс, случайно стоящий на этом времени.
+        const found = (res2.data.items || []).find((i) => {
+          if (i.status === "cancelled" || !i.id) return false;
+          if (i.extendedProperties?.private?.moved === "1") return false;
+          const orig = i.originalStartTime?.dateTime || i.start?.dateTime;
+          return !!orig && Math.abs(new Date(orig).getTime() - w0) < 60000;
+        });
         if (!found) {
           return NextResponse.json(
             { error: "Это занятие не найдено (возможно, уже перенесено)." },
@@ -111,8 +119,9 @@ export async function POST(req: Request) {
         timeMax.getTime(),
         new Date(startIso).getTime() + blockSpanMinutes(lessons) * 60000
       );
-      // Исключаем всю серию из занятости (иначе занятие конфликтовало бы само с собой).
-      const busy = await fetchBusy(timeMin, new Date(far + 60000), eventId);
+      // Исключаем из занятости ТОЛЬКО сам переносимый инстанс: остальные занятия серии
+      // остаются занятыми, иначе разовый перенос мог бы лечь поверх занятия своей же серии.
+      const busy = await fetchBusy(timeMin, new Date(far + 60000), inst.id!);
       const v = buildRecurrence(startIso, 1, busy, now, lessons);
       if (!v.ok) {
         return NextResponse.json(
@@ -128,6 +137,9 @@ export async function POST(req: Request) {
         requestBody: {
           summary: `${PENDING_PREFIX}${student} — ${subject}`,
           status: "tentative",
+          // Снимаем старый цвет: pending-занятие не участвует в покраске, и прежний
+          // «оплаченный» цвет не должен висеть на новом времени до подтверждения.
+          colorId: null,
           start: { dateTime: startIso, timeZone: TIMEZONE },
           end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
           extendedProperties: {
@@ -141,6 +153,17 @@ export async function POST(req: Request) {
           },
         },
       });
+
+      // Пересчёт цветов (best-effort): занятие выпало из подтверждённых — баланс оплат
+      // перераспределяется на остальные до решения преподавателя.
+      const sid = instPriv.studentId || priv.studentId;
+      if (sid) {
+        try {
+          await recolorStudent(sid);
+        } catch (e) {
+          console.error("recolor after reschedule once failed", e);
+        }
+      }
 
       const when = `${formatMskRange(startIso, lessons)} (разовый перенос)`;
       try {
@@ -165,6 +188,12 @@ export async function POST(req: Request) {
     // подтверждения несёт эту ревизию, и старое уведомление при нажатии распознаётся
     // как устаревшее (иначе подтверждение старого слота применяло бы последний слот).
     const rev = (Number(priv.rev) || 0) + 1;
+
+    // Прежнее время записи — чтобы отклонение переноса вернуло её на место, а не удалило.
+    // Для подтверждённой записи это её текущее время; при повторном переносе до решения
+    // сохраняем уже запомненное (возврат — к последнему утверждённому времени).
+    const prevStart =
+      (priv.status === "confirmed" ? evStart : priv.prevStart || evStart) || "";
 
     const occ = weeklyOccurrences(startIso, weeks);
     let far = timeMax.getTime();
@@ -193,7 +222,13 @@ export async function POST(req: Request) {
         end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
         ...(r.recurrence ? { recurrence: r.recurrence } : {}),
         extendedProperties: {
-          private: { ...priv, status: "pending", lessons: String(lessons), rev: String(rev) },
+          private: {
+            ...priv,
+            status: "pending",
+            lessons: String(lessons),
+            rev: String(rev),
+            ...(prevStart ? { prevStart } : {}),
+          },
         },
       },
     });
