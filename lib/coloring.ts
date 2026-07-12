@@ -16,6 +16,7 @@ import {
   listContactOccurrences,
   setEventColor,
 } from "./google";
+import { allocateBalance } from "./balance";
 import { getStudent } from "./students";
 import { sumPaidKopecks } from "./payments";
 
@@ -31,7 +32,7 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // Оплаченные ЧАСЫ из баланса (ставка — за час). Без ставки посчитать нельзя — тогда
   // 0 (прошлые красные, будущие нейтральные), чтобы не осталось ложного «оплачено».
   const paidKopecks = await sumPaidKopecks(s.id);
-  let remainingHours = s.rateKopecks > 0 ? Math.floor(paidKopecks / s.rateKopecks) : 0;
+  const paidHours = s.rateKopecks > 0 ? Math.floor(paidKopecks / s.rateKopecks) : 0;
 
   // 1. Сбрасываем цвет самих серий/событий в нейтраль — чтобы будущие неоплаченные
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения
@@ -47,28 +48,16 @@ export async function recolorStudent(studentId: string): Promise<void> {
   }
 
   // 2. Разворачиваем повторы в отдельные занятия (после сброса мастеров их инстансы —
-  // уже нейтральные) и красим нужные.
+  // уже нейтральные) и красим по балансовой раскладке (lib/balance.ts — общий walk
+  // с кабинетом и автосчетами: «всё-или-ничего» по блокам, с самых ранних).
   const occ = await listContactOccurrences(s.contactKey);
-  const now = Date.now();
-  // Баланс закрывает занятия по времени, с самых ранних. Блок = одно событие = один
-  // цвет, поделить нельзя — поэтому «всё-или-ничего»: блок считается оплаченным, только
-  // если остатка часов хватает на ВСЮ его длину. Как только не хватило — дальше всё
-  // неоплачено (не перескакиваем через большой блок к меньшему).
-  let exhausted = false;
-  for (const o of occ) {
-    let paid = false;
-    if (!exhausted && remainingHours >= o.hours) {
-      paid = true;
-      remainingHours -= o.hours;
-    } else {
-      exhausted = true;
-    }
-    const past = o.start.getTime() < now;
-    const target = paid
-      ? past
+  const { items } = allocateBalance(occ, paidHours, new Date());
+  for (const o of items) {
+    const target = o.paid
+      ? o.past
         ? COLOR.paidPast
         : COLOR.paidFuture
-      : past
+      : o.past
         ? COLOR.unpaidPast
         : null; // будущее неоплаченное — нейтральный (без цвета)
 

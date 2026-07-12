@@ -33,6 +33,31 @@ interface MyPayment {
   amountKopecks: number;
   note: string;
   payLink: string;
+  kind: string; // manual | debt | advance
+}
+
+// Баланс оплат: долг / оплачено вперёд (до даты) / остаток. null — ставка не задана.
+interface MyBalance {
+  debtKopecks: number;
+  debtHours: number;
+  aheadHours: number;
+  paidUntil: string | null;
+  balanceKopecks: number;
+  rateKopecks: number;
+}
+
+// "4 500 ₽" из копеек.
+function fmtRub(kopecks: number): string {
+  return `${(kopecks / 100).toLocaleString("ru-RU")} ₽`;
+}
+
+// "занятие/занятия/занятий" по числу.
+function lessonsWord(n: number): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return "занятие";
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "занятия";
+  return "занятий";
 }
 
 // "13:00" в МСК из ISO-момента.
@@ -111,6 +136,7 @@ export default function BookingClient({
   // Мои записи.
   const [my, setMy] = useState<MyEvent[] | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
+  const [balance, setBalance] = useState<MyBalance | null>(null);
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
@@ -171,6 +197,7 @@ export default function BookingClient({
       .then((d) => {
         setMy(d.events || []);
         setPayments(d.payments || []);
+        setBalance(d.balance || null);
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
@@ -456,6 +483,27 @@ export default function BookingClient({
       {nextLesson && (
         <div className="next-lesson">
           📌 Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
+        </div>
+      )}
+
+      {balance && (balance.debtHours > 0 || balance.aheadHours > 0 || balance.balanceKopecks > 0) && (
+        <div className="card my-card">
+          <div className="day-title">Баланс</div>
+          {balance.debtHours > 0 && (
+            <div className="balance-row debt">
+              Долг: <b>{balance.debtHours} {lessonsWord(balance.debtHours)} · {fmtRub(balance.debtKopecks)}</b>
+            </div>
+          )}
+          {balance.aheadHours > 0 && balance.paidUntil && (
+            <div className="balance-row ok">
+              Оплачено вперёд: <b>{balance.aheadHours} {lessonsWord(balance.aheadHours)}</b> — до {fmtDateMsk(balance.paidUntil)}
+            </div>
+          )}
+          {balance.balanceKopecks > 0 && (
+            <div className="balance-row">
+              Остаток на балансе: <b>{fmtRub(balance.balanceKopecks)}</b>
+            </div>
+          )}
         </div>
       )}
 

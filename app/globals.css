@@ -510,6 +510,22 @@ select:focus {
   margin-top: 10px;
 }
 
+/* Плашка «Баланс»: долг / оплачено вперёд / остаток */
+.balance-row {
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--text);
+}
+.balance-row + .balance-row {
+  border-top: 1px solid var(--border);
+}
+.balance-row.debt b {
+  color: var(--danger);
+}
+.balance-row.ok b {
+  color: var(--success);
+}
+
 /* Тег «Перенос» на строке разово перенесённого занятия */
 .badge.move {
   background: rgba(217, 119, 6, 0.16);

@@ -23,7 +23,7 @@ import { recolorStudent } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
 import { getOrCreateStudentLinkCode } from "./shortlink";
-import { SUBJECTS } from "./config";
+import { SUBJECTS, siteBaseUrl } from "./config";
 import { formatMskRange } from "./slots";
 import type { Lesson } from "./schema";
 
@@ -307,18 +307,9 @@ export async function deleteStudentBot(studentId: string): Promise<boolean> {
 }
 
 // Базовый URL для ссылок из бота. У бота нет заголовков запроса (в отличие от /admin),
-// поэтому берём его из env. Порядок: явный NEXT_PUBLIC_BASE_URL →
-// VERCEL_PROJECT_PRODUCTION_URL (стабильный production-домен проекта, напр.
-// zapis-ten.vercel.app; ОДИНАКОВ между деплоями) → VERCEL_URL (адрес конкретного
-// деплоя — уродливый и разный каждый раз; крайний фолбэк).
+// поэтому берём его из env — общая логика в lib/config.ts (siteBaseUrl).
 function botBaseUrl(): string {
-  const explicit = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
-  if (explicit && !explicit.includes("localhost")) return explicit;
-  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (prod) return `https://${prod.replace(/\/$/, "")}`;
-  const vercel = process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
-  return explicit; // локальная разработка (напр. http://localhost:3000) либо пусто
+  return siteBaseUrl();
 }
 
 // Генерирует персональную ссылку на запись (тот же encodeToken, что и /admin) и шлёт её.

@@ -44,3 +44,16 @@ export const RECURRENCE_WEEKS = 26;
 
 // Максимум занятий (часов) на одного человека в неделю.
 export const MAX_LESSONS_PER_WEEK = 4;
+
+// Публичный адрес сайта — для ссылок вне HTTP-запроса (бот, return_url оплаты).
+// Порядок: явный NEXT_PUBLIC_BASE_URL → VERCEL_PROJECT_PRODUCTION_URL (стабильный
+// production-домен) → VERCEL_URL (адрес конкретного деплоя; крайний фолбэк).
+export function siteBaseUrl(): string {
+  const explicit = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  if (explicit && !explicit.includes("localhost")) return explicit;
+  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (prod) return `https://${prod.replace(/\/$/, "")}`;
+  const vercel = process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
+  return explicit; // локальная разработка (напр. http://localhost:3000) либо пусто
+}

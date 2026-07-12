@@ -30,8 +30,8 @@ export const lessons = pgTable("lessons", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Платёж ученика. Оплата принимается вне сайта — через «Мой налог» (СБП + чек
-// автоматически). Наша БД — учёт: сумма, статус (ставим вручную), ссылка на оплату.
+// Платёж ученика. Ссылка на оплату — ЮKassa (генерируется автоматически) или
+// вручную («Мой налог»). Статус «оплачено» ставит вебхук ЮKassa или преподаватель.
 export const payments = pgTable("payments", {
   id: uuid("id").primaryKey().defaultRandom(),
   studentId: uuid("student_id")
@@ -39,8 +39,13 @@ export const payments = pgTable("payments", {
     .references(() => students.id, { onDelete: "cascade" }),
   amountKopecks: integer("amount_kopecks").notNull(),
   status: text("status").notNull().default("unpaid"), // unpaid/paid/canceled
-  payLink: text("pay_link").notNull().default(""), // ссылка/QR счёта из «Мой налог»
+  payLink: text("pay_link").notNull().default(""), // ссылка на оплату (ЮKassa/«Мой налог»)
   note: text("note").notNull().default(""), // напр. «Март, 4 занятия»
+  // Происхождение счёта: manual — выставлен вручную; debt — автосчёт за проведённые
+  // неоплаченные занятия; advance — автосчёт за занятия на месяц вперёд.
+  kind: text("kind").notNull().default("manual"),
+  // id платежа в ЮKassa (для сверки вебхука и обновления ссылки).
+  providerPaymentId: text("provider_payment_id").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   paidAt: timestamp("paid_at", { withTimezone: true }),
 });

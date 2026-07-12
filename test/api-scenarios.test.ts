@@ -38,6 +38,8 @@ vi.mock("@/lib/lessons", () => ({
 }));
 vi.mock("@/lib/coloring", () => ({ recolorStudent: vi.fn(async () => {}) }));
 vi.mock("@/lib/payments", () => ({ outstandingPayments: vi.fn(async () => []) }));
+// Автосчета тестируются отдельно (test/autobill.test.ts) — здесь глушим.
+vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
 vi.mock("@/lib/crm-bot", () => {
   const fns = [
     "applyPendingInput", "cancelPending", "chooseTrialForNew", "deletePaymentBot",
@@ -557,7 +559,37 @@ describe("/api/telegram — вебхук", () => {
 
 describe("/api/my — записи и плашка «ближайшее занятие»", () => {
   it("пусто для нового ученика", async () => {
-    expect(await getMy(TOKEN())).toEqual({ events: [], payments: [], nextLesson: null });
+    expect(await getMy(TOKEN())).toEqual({
+      events: [],
+      payments: [],
+      balance: null,
+      nextLesson: null,
+    });
+  });
+
+  it("отдаёт баланс и счета, когда ученик есть в CRM", async () => {
+    const { getStudentByContactKey } = await import("@/lib/students");
+    const { ensureAutoInvoices } = await import("@/lib/autobill");
+    const { outstandingPayments } = await import("@/lib/payments");
+    vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
+      id: "stu-1",
+      name: "Тест Тестов",
+    } as any);
+    vi.mocked(ensureAutoInvoices).mockResolvedValueOnce({
+      debtKopecks: 300000, debtHours: 2, aheadHours: 1,
+      paidUntil: TUE_1810, balanceKopecks: 50000, rateKopecks: 150000,
+      paidHours: 3, pastPaidHours: 2, leftoverHours: 0, items: [],
+    } as any);
+    vi.mocked(outstandingPayments).mockResolvedValueOnce([
+      { id: "p1", amountKopecks: 300000, note: "Автосчёт: долг", payLink: "https://yk", kind: "debt" },
+    ] as any);
+
+    const my = await getMy(TOKEN());
+    expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", "Тест Тестов");
+    expect(my.balance).toMatchObject({ debtKopecks: 300000, debtHours: 2, paidUntil: TUE_1810 });
+    expect(my.payments).toEqual([
+      { id: "p1", amountKopecks: 300000, note: "Автосчёт: долг", payLink: "https://yk", kind: "debt" },
+    ]);
   });
 
   it("битый токен → 403", async () => {

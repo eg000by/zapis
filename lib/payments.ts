@@ -6,12 +6,15 @@ import { db } from "./db";
 import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
+// manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт на месяц вперёд.
+export type PaymentKind = "manual" | "debt" | "advance";
 
 export async function createPayment(input: {
   studentId: string;
   amountKopecks: number;
   note?: string;
   payLink?: string;
+  kind?: PaymentKind;
 }): Promise<Payment> {
   const [p] = await db()
     .insert(payments)
@@ -20,9 +23,29 @@ export async function createPayment(input: {
       amountKopecks: input.amountKopecks,
       note: input.note ?? "",
       payLink: input.payLink ?? "",
+      kind: input.kind ?? "manual",
     })
     .returning();
   return p;
+}
+
+// Точечное обновление счёта (сумма/заметка/ссылка/платёж провайдера) — для автосчетов.
+export async function updatePayment(
+  id: string,
+  patch: Partial<Pick<Payment, "amountKopecks" | "note" | "payLink" | "providerPaymentId">>
+): Promise<void> {
+  await db().update(payments).set(patch).where(eq(payments.id, id));
+}
+
+// Счёт по id платежа ЮKassa — для вебхука.
+export async function getPaymentByProviderId(providerPaymentId: string): Promise<Payment | null> {
+  if (!providerPaymentId) return null;
+  const [row] = await db()
+    .select()
+    .from(payments)
+    .where(eq(payments.providerPaymentId, providerPaymentId))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function getPayment(id: string): Promise<Payment | null> {
