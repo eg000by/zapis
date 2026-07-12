@@ -454,11 +454,33 @@ export async function chooseTrialForNew(chatId: number | string, trial: boolean)
   }
   // trial влияет и на contactKey (как на /admin), и на саму ссылку — держим их согласованными.
   const ck = contactKey({ name, subject, tg, trial });
-  const s = await upsertStudent({ name, subject, tg, contactKey: ck });
+  const s = await upsertStudent({ name, subject, tg, contactKey: ck, trial });
   await clearState(String(chatId));
   await sendOwner(`✅ Ученик <b>${escapeHtml(name)}</b> добавлен${trial ? " · пробное" : ""}.`);
   await sendBookingLink(chatId, s.id, trial);
   await showStudentCard(chatId, null, s.id);
+}
+
+// Переводит пробного ученика в полноценные (кнопка «Полноценный ученик» из
+// уведомления «пробное прошло»). Снимает флаг trial и сразу шлёт регулярную
+// ссылку на запись — её остаётся переслать ученику.
+export async function makeStudentFull(
+  chatId: number | string,
+  messageId: number | null,
+  studentId: string
+): Promise<void> {
+  const s = await getStudent(studentId);
+  if (!s) {
+    await emit(chatId, messageId, "Ученик не найден (возможно, уже удалён).");
+    return;
+  }
+  await updateStudent(s.id, { trial: false });
+  await emit(
+    chatId,
+    messageId,
+    `✅ <b>${escapeHtml(s.name)}</b> — теперь полноценный ученик.\nСейчас пришлю регулярную ссылку на запись.`
+  );
+  await sendBookingLink(chatId, s.id, false);
 }
 
 // Отменяет текущий ожидаемый ввод (заметка/счёт/ссылка/новый ученик) и по

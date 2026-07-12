@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
 import { listContactEvents, nextOccurrenceForContact } from "@/lib/google";
-import { getStudentByContactKey } from "@/lib/students";
+import { getStudent, getStudentByContactKey } from "@/lib/students";
 import { outstandingPayments } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 
 // Пустой блок оплат/баланса — когда ученика нет в CRM или БД недоступна.
-const NO_BILLING = { payments: [], balance: null } as {
+const NO_BILLING = { payments: [], balance: null, meetLink: "" } as {
+  meetLink: string;
   payments: { id: string; amountKopecks: number; note: string; payLink: string; kind: string }[];
   balance: {
     debtKopecks: number;
@@ -43,8 +44,9 @@ export async function GET(req: Request) {
       // Автосчета + счета к оплате + баланс.
       (async () => {
         try {
+          // Строка ученика нужна целиком (meetLink, имя) — по id из токена или по ключу.
           const student = decoded.info.studentId
-            ? null
+            ? await getStudent(decoded.info.studentId)
             : await getStudentByContactKey(key);
           const studentId = decoded.info.studentId || student?.id;
           if (!studentId) return NO_BILLING;
@@ -60,6 +62,7 @@ export async function GET(req: Request) {
 
           const rows = await outstandingPayments(studentId);
           return {
+            meetLink: student?.meetLink || "",
             payments: rows.map((p) => ({
               id: p.id,
               amountKopecks: p.amountKopecks,
@@ -89,6 +92,7 @@ export async function GET(req: Request) {
       events,
       payments: billing.payments,
       balance: billing.balance,
+      meetLink: billing.meetLink,
       nextLesson,
     });
   } catch (e) {

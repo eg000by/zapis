@@ -29,6 +29,7 @@ vi.mock("@/lib/telegram", () => ({
 }));
 vi.mock("@/lib/students", () => ({
   upsertStudent: vi.fn(async () => ({ id: "stu-1" })),
+  getStudent: vi.fn(async () => null),
   getStudentByContactKey: vi.fn(async () => null),
 }));
 vi.mock("@/lib/lessons", () => ({
@@ -45,6 +46,7 @@ vi.mock("@/lib/crm-bot", () => {
     "applyPendingInput", "cancelPending", "chooseTrialForNew", "deletePaymentBot",
     "deleteStudentBot", "markPaymentPaid", "pickSubjectForNew", "promptDeletePayment",
     "promptDeleteStudent", "promptLessonNote", "promptNewPayment", "promptNewStudent",
+    "makeStudentFull",
     "promptPaymentLink", "promptStudentNote", "sendBookingLink", "showLessons",
     "showPayments", "showStudentCard", "showStudentsList", "submitTgForNew",
     "toggleStudentArchive",
@@ -238,6 +240,66 @@ describe("/api/book", () => {
     // Итого по-прежнему 3 часа в неделю — четвёртый должен пройти (раньше двоился → 409).
     const r2 = await post("book", { token: TOKEN(), start: "2026-07-14T14:00:00.000Z" });
     expect(r2.status).toBe(200);
+  });
+});
+
+// ───────────────────────── пробное занятие ─────────────────────────
+
+describe("пробная ссылка — одно занятие", () => {
+  const TRIAL = () => encodeToken({ ...INFO, trial: true });
+
+  it("бронь по пробной ссылке — разовая, ученик помечается пробным", async () => {
+    const r = await post("book", { token: TRIAL(), start: TUE_1810 });
+    expect(r.status).toBe(200);
+    const { upsertStudent } = await import("@/lib/students");
+    expect(vi.mocked(upsertStudent).mock.calls.at(-1)![0]).toMatchObject({ trial: true });
+  });
+
+  it("несколько слотов за раз → 409", async () => {
+    const r = await post("book", {
+      token: TRIAL(),
+      starts: ["2026-07-14T07:00:00.000Z", TUE_1810],
+    });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toContain("один слот");
+    expect(allStored()).toHaveLength(0);
+  });
+
+  it("вторая запись при живом занятии → 409", async () => {
+    await post("book", { token: TRIAL(), start: TUE_1810 });
+    const r = await post("book", { token: TRIAL(), start: WED_1810 });
+    expect(r.status).toBe(409);
+    expect(r.json.error).toContain("только на одно занятие");
+  });
+
+  it("прошедшее пробное тоже блокирует новую запись (решает преподаватель)", async () => {
+    seedEvent({
+      start: { dateTime: "2026-07-10T15:10:00.000Z" }, // уже прошло
+      end: { dateTime: "2026-07-10T16:10:00.000Z" },
+      extendedProperties: { private: { app: "zapis", contactKey: contactKey({ ...INFO, trial: true }) } },
+    });
+    const r = await post("book", { token: TRIAL(), start: TUE_1810 });
+    expect(r.status).toBe(409);
+  });
+
+  it("после отмены пробного можно записаться заново", async () => {
+    await post("book", { token: TRIAL(), start: TUE_1810 });
+    const id = allStored()[0].id;
+    await post("cancel", { token: TRIAL(), eventId: id });
+    const r = await post("book", { token: TRIAL(), start: WED_1810 });
+    expect(r.status).toBe(200);
+  });
+
+  it("обычной ссылки ограничения не касаются", async () => {
+    await post("book", { token: TOKEN(), start: TUE_1810 });
+    const r = await post("book", { token: TOKEN(), start: WED_1810 });
+    expect(r.status).toBe(200);
+  });
+
+  it("кнопка «Полноценный ученик» в боте диспатчится в makeStudentFull", async () => {
+    const { makeStudentFull } = await import("@/lib/crm-bot");
+    await tgCallback("mkfull:stu-1");
+    expect(makeStudentFull).toHaveBeenCalledWith(111222333, 42, "stu-1");
   });
 });
 
@@ -563,8 +625,20 @@ describe("/api/my — записи и плашка «ближайшее заня
       events: [],
       payments: [],
       balance: null,
+      meetLink: "",
       nextLesson: null,
     });
+  });
+
+  it("отдаёт ссылку на Телемост из карточки ученика", async () => {
+    const { getStudentByContactKey } = await import("@/lib/students");
+    vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
+      id: "stu-1",
+      name: "Тест Тестов",
+      meetLink: "https://telemost.yandex.ru/j/12345",
+    } as any);
+    const my = await getMy(TOKEN());
+    expect(my.meetLink).toBe("https://telemost.yandex.ru/j/12345");
   });
 
   it("отдаёт баланс и счета, когда ученик есть в CRM", async () => {

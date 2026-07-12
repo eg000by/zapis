@@ -14,6 +14,13 @@ export const students = pgTable("students", {
   rateKopecks: integer("rate_kopecks").notNull().default(0),
   active: boolean("active").notNull().default(true),
   note: text("note").notNull().default(""), // общая заметка/профиль ученика
+  // Пробный ученик: записан по пробной ссылке, ещё не подтверждён как постоянный.
+  // Флаг снимается кнопкой «Полноценный ученик» в боте или созданием регулярной ссылки.
+  trial: boolean("trial").notNull().default(false),
+  // Когда владельцу отправлен вопрос «пробное прошло — что дальше?» (чтобы не повторять).
+  trialNotifiedAt: timestamp("trial_notified_at", { withTimezone: true }),
+  // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — показывается в кабинете.
+  meetLink: text("meet_link").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

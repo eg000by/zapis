@@ -43,6 +43,8 @@ export async function POST(req: Request) {
       await recolorSafe(() => recolorStudent(studentId)); // ставка меняет число оплаченных
     } else if (action === "student.active") {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
+    } else if (action === "student.meetlink") {
+      await updateStudent(studentId, { meetLink: String(form.get("meetLink") || "").trim() });
     } else if (action === "student.delete") {
       // Необратимо: каскадом уходят занятия, оплаты и ссылки ученика. После —
       // редирект в общий список (карточки уже нет), см. ветку ниже.

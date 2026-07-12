@@ -510,6 +510,17 @@ select:focus {
   margin-top: 10px;
 }
 
+/* Ссылка на онлайн-занятие (Телемост) — кликабельная плашка */
+a.meet-link {
+  text-decoration: none;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+a.meet-link:hover {
+  filter: brightness(0.9);
+}
+
 /* Плашка «Баланс»: долг / оплачено вперёд / остаток */
 .balance-row {
   padding: 8px 0;

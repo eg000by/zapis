@@ -137,6 +137,8 @@ export default function BookingClient({
   const [my, setMy] = useState<MyEvent[] | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
   const [balance, setBalance] = useState<MyBalance | null>(null);
+  // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
+  const [meetLink, setMeetLink] = useState<string>("");
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
@@ -198,6 +200,7 @@ export default function BookingClient({
         setMy(d.events || []);
         setPayments(d.payments || []);
         setBalance(d.balance || null);
+        setMeetLink(d.meetLink || "");
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
@@ -230,6 +233,11 @@ export default function BookingClient({
   }, []);
 
   function toggleSlot(start: string) {
+    // Пробное занятие одно — выбор одиночный (новый клик заменяет прежний слот).
+    if (trial) {
+      setSelected((cur) => (cur.includes(start) ? [] : [start]));
+      return;
+    }
     setSelected((cur) =>
       cur.includes(start) ? cur.filter((s) => s !== start) : [...cur, start]
     );
@@ -486,6 +494,12 @@ export default function BookingClient({
         </div>
       )}
 
+      {meetLink && (
+        <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
+          🎥 Подключиться к занятию (Яндекс Телемост) ↗
+        </a>
+      )}
+
       {balance && (balance.debtHours > 0 || balance.aheadHours > 0 || balance.balanceKopecks > 0) && (
         <div className="card my-card">
           <div className="day-title">Баланс</div>
@@ -588,7 +602,8 @@ export default function BookingClient({
               </div>
             </div>
           ))}
-          {!rsEvent && !pickingNew && (
+          {/* Пробное занятие одно — вторую запись не предлагаем. */}
+          {!rsEvent && !pickingNew && !trial && (
             <button
               className="mini"
               style={{ marginTop: 12 }}

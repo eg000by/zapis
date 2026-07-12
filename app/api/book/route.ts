@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { CALENDAR_ID, calendarClient, fetchBusy, listContactEvents } from "@/lib/google";
+import {
+  CALENDAR_ID,
+  calendarClient,
+  fetchBusy,
+  listContactEvents,
+  liveEventIdsForContact,
+} from "@/lib/google";
 import {
   blockSpanMinutes,
   buildRecurrence,
@@ -74,9 +80,32 @@ export async function POST(req: Request) {
   // Подряд идущие часы объединяем в один блок (одно событие в календаре).
   const blocks = groupConsecutive(starts);
 
+  // Пробное занятие ровно одно: один часовой слот и только пока по этой ссылке
+  // ещё ничего не записано (считая прошедшие занятия — после пробного решение
+  // о продолжении принимает преподаватель).
+  if (contact.trial && (blocks.length > 1 || blocks[0]?.slots.length > 1)) {
+    return NextResponse.json(
+      { error: "Пробное занятие одно — выберите один слот." },
+      { status: 409 }
+    );
+  }
+
   try {
     const now = new Date();
     const { timeMin, timeMax } = windowBounds(now);
+
+    if (contact.trial) {
+      const live = await liveEventIdsForContact(contactKey(contact));
+      if (live.size > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "По пробной ссылке можно записаться только на одно занятие. Перенести или отменить его можно в разделе «Ваши записи».",
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     // Для повторяющихся записей проверяем занятость и за пределами окна —
     // до последнего занятия самой дальней серии.
@@ -96,7 +125,13 @@ export async function POST(req: Request) {
     // Календарь — источник правды, поэтому недоступность БД НЕ должна ломать запись.
     let studentId: string | null = contact.studentId || null;
     try {
-      const s = await upsertStudent({ name: student, subject, tg: contact.tg, contactKey: key });
+      const s = await upsertStudent({
+        name: student,
+        subject,
+        tg: contact.tg,
+        contactKey: key,
+        trial: contact.trial,
+      });
       studentId = s.id;
     } catch (e) {
       console.error("CRM upsert student failed", e);

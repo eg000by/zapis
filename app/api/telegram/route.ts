@@ -10,6 +10,7 @@ import {
   chooseTrialForNew,
   deletePaymentBot,
   deleteStudentBot,
+  makeStudentFull,
   markPaymentPaid,
   pickSubjectForNew,
   promptDeletePayment,
@@ -164,6 +165,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   if (data.startsWith("delp:")) {
     await promptDeletePayment(chatId, messageId, data.slice(5));
     await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("mkfull:")) {
+    await makeStudentFull(chatId, messageId, data.slice(7));
+    await answerCallback(cq.id, "Теперь полноценный ученик ✅");
     return ok();
   }
   if (data.startsWith("delstuok:")) {

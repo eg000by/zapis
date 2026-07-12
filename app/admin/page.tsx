@@ -143,7 +143,7 @@ export default async function AdminPage({
             <a href={link({})}>← Все ученики</a>
           </p>
           <h1>
-            {student.name} {student.active ? "" : "· 🚫 архив"}
+            {student.name} {student.trial ? "· 🎯 пробный" : ""} {student.active ? "" : "· 🚫 архив"}
           </h1>
           <p>
             {student.subject}
@@ -206,6 +206,28 @@ export default async function AdminPage({
               </button>
             </form>
           </div>
+        </div>
+
+        <div className="card" style={{ marginTop: 16 }}>
+          <label style={{ marginTop: 0 }}>Ссылка на занятие (Яндекс Телемост)</label>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Постоянная ссылка комнаты — показывается ученику в кабинете кнопкой «Подключиться».
+          </p>
+          <form method="POST" action="/api/admin">
+            <input type="hidden" name="key" value={key} />
+            <input type="hidden" name="action" value="student.meetlink" />
+            <input type="hidden" name="studentId" value={student.id} />
+            <input
+              name="meetLink"
+              type="url"
+              defaultValue={student.meetLink}
+              placeholder="https://telemost.yandex.ru/j/…"
+              style={{ width: "100%", boxSizing: "border-box" }}
+            />
+            <button className="btn" type="submit">
+              Сохранить ссылку
+            </button>
+          </form>
         </div>
 
         <div className="card" style={{ marginTop: 16 }}>
@@ -391,7 +413,7 @@ export default async function AdminPage({
       const { upsertStudent } = await import("@/lib/students");
       const { contactKey } = await import("@/lib/link");
       const ck = contactKey({ name, subject, tg, trial });
-      const s = await upsertStudent({ name, subject, tg, contactKey: ck });
+      const s = await upsertStudent({ name, subject, tg, contactKey: ck, trial });
       studentId = s.id;
     } catch (e) {
       console.error("admin create student", e);

@@ -43,6 +43,13 @@
       "when": 1783865281626,
       "tag": "0005_flawless_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783868340120,
+      "tag": "0006_cloudy_norrin_radd",
+      "breakpoints": true
     }
   ]
 }
