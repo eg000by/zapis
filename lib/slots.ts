@@ -221,6 +221,18 @@ export function buildRecurrence(
   return { ok: true, recurrence, end: first.end };
 }
 
+// Сдвигает выбранный слот сетки (ближайшее наступление дня недели) в неделю
+// переносимого занятия occIso: разовый перенос занятия «через 3 недели» не должен
+// уезжать на текущую неделю. Если после сдвига время оказалось в прошлом — берём
+// неделей позже.
+export function shiftIntoWeekOf(startIso: string, occIso: string, now = new Date()): string {
+  const WEEK = 7 * 86400000;
+  const shift = Math.round((new Date(occIso).getTime() - new Date(startIso).getTime()) / WEEK);
+  let t = new Date(startIso).getTime() + shift * WEEK;
+  if (t <= now.getTime()) t += WEEK;
+  return new Date(t).toISOString();
+}
+
 // Форматирует блок как "Ср, 7 июля, 10:00–12:10 (МСК)" для сообщений.
 // Для одного занятия диапазон не показываем: "Ср, 7 июля, 10:00 (МСК)".
 export function formatMskRange(startIso: string, lessons = 1): string {

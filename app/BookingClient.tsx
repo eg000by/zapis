@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { groupConsecutive } from "@/lib/blocks";
 import { SLOT_MINUTES, SLOT_STEP_MINUTES } from "@/lib/config";
+import { shiftIntoWeekOf } from "@/lib/slots";
 
 interface Slot {
   start: string;
@@ -267,17 +268,8 @@ export default function BookingClient({
     if (!rsEvent) return;
     setBusyAction(true);
     setNotice(null);
-    // Для разового переноса слот сетки (ближайшее наступление дня недели) сдвигаем
-    // в неделю переносимого занятия: занятие «через 3 недели» не должно уезжать на
-    // текущую неделю. Если так получилось прошлое время — берём неделей позже.
-    let target = start;
-    if (rsMode === "once" && rsOcc) {
-      const WEEK = 7 * 86400000;
-      const shift = Math.round((new Date(rsOcc).getTime() - new Date(start).getTime()) / WEEK);
-      let t = new Date(start).getTime() + shift * WEEK;
-      if (t <= Date.now()) t += WEEK;
-      target = new Date(t).toISOString();
-    }
+    // Для разового переноса слот сетки сдвигаем в неделю переносимого занятия.
+    const target = rsMode === "once" && rsOcc ? shiftIntoWeekOf(start, rsOcc) : start;
     try {
       const res = await fetch("/api/reschedule", {
         method: "POST",
