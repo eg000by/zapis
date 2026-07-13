@@ -21,6 +21,7 @@ import {
   promptNewPayment,
   promptNewStudent,
   promptPaymentLink,
+  promptStudentMeetLink,
   promptStudentNote,
   sendBookingLink,
   showLessons,
@@ -208,6 +209,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   if (data.startsWith("snote:")) {
     await promptStudentNote(chatId, data.slice(6));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("smeet:")) {
+    await promptStudentMeetLink(chatId, data.slice(6));
     await answerCallback(cq.id);
     return ok();
   }

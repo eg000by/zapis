@@ -61,7 +61,7 @@ vi.mock("@/lib/crm-bot", () => {
     "deleteStudentBot", "markPaymentPaid", "pickSubjectForNew", "promptDeletePayment",
     "promptDeleteStudent", "promptLessonNote", "promptNewPayment", "promptNewStudent",
     "makeStudentFull",
-    "promptPaymentLink", "promptStudentNote", "sendBookingLink", "showLessons",
+    "promptPaymentLink", "promptStudentMeetLink", "promptStudentNote", "sendBookingLink", "showLessons",
     "showPayments", "showStudentCard", "showStudentsList", "submitRateForNew",
     "submitTgForNew", "toggleStudentArchive",
   ];

@@ -111,11 +111,13 @@ export async function showStudentCard(
     `📚 ${escapeHtml(s.subject)}${s.tg ? ` · ${escapeHtml(s.tg)}` : ""}`,
     `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(debt)} ₽</b>`,
   ];
+  if (s.meetLink) lines.push(`🎥 ${escapeHtml(s.meetLink)}`);
   if (s.note) lines.push(`📝 ${escapeHtml(s.note)}`);
 
   const keyboard = inlineKeyboard([
     [{ text: "💳 Оплаты", data: `pays:${s.id}` }, { text: "📅 Занятия", data: `les:${s.id}` }],
     [{ text: "🔗 Ссылка на запись", data: `slink:${s.id}` }],
+    [{ text: "🎥 Ссылка Телемоста", data: `smeet:${s.id}` }],
     [{ text: "📝 Заметка об ученике", data: `snote:${s.id}` }],
     [
       { text: s.active ? "🗄 В архив" : "♻️ Вернуть из архива", data: `arch:${s.id}` },
@@ -540,7 +542,7 @@ export async function cancelPending(chatId: number | string): Promise<void> {
   }
   await sendOwner("✖️ Отменено.");
   try {
-    if (st.action === "student.note") {
+    if (st.action === "student.note" || st.action === "student.meetlink") {
       await showStudentCard(chatId, null, st.targetId);
     } else if (st.action === "lesson.note") {
       const l = await getLesson(st.targetId);
@@ -574,6 +576,18 @@ export async function promptPaymentLink(chatId: number | string, paymentId: stri
 export async function promptStudentNote(chatId: number | string, studentId: string): Promise<void> {
   await setState(String(chatId), "student.note", studentId);
   await sendOwner("✍️ Пришлите текст заметки об ученике одним сообщением:", cancelKb());
+}
+
+// Постоянная ссылка Яндекс Телемоста — закрепляется в кабинете ученика (паритет с /admin).
+export async function promptStudentMeetLink(
+  chatId: number | string,
+  studentId: string
+): Promise<void> {
+  await setState(String(chatId), "student.meetlink", studentId);
+  await sendOwner(
+    "🎥 Пришлите постоянную ссылку Яндекс Телемоста (https://telemost.yandex.ru/j/…) — она закрепится в кабинете ученика.\nЧтобы убрать ссылку, пришлите <code>-</code>.",
+    cancelKb()
+  );
 }
 
 export async function promptLessonNote(chatId: number | string, lessonId: string): Promise<void> {
@@ -651,6 +665,19 @@ export async function applyPendingInput(chatId: number | string, text: string): 
     await updateStudent(st.targetId, { note: value });
     await clearState(String(chatId));
     await sendOwner("✅ Заметка об ученике сохранена.");
+    await showStudentCard(chatId, null, st.targetId);
+    return true;
+  }
+  if (st.action === "student.meetlink") {
+    const clear = /^(-|нет|удалить)$/i.test(value);
+    if (!clear && !/^https?:\/\//i.test(value)) {
+      // Похоже, это не ссылка — просим повторить, состояние сохраняем.
+      await sendOwner("Это не похоже на ссылку. Пришлите адрес вида <code>https://telemost.yandex.ru/j/…</code> или <code>-</code>, чтобы убрать.");
+      return true;
+    }
+    await updateStudent(st.targetId, { meetLink: clear ? "" : value });
+    await clearState(String(chatId));
+    await sendOwner(clear ? "✅ Ссылка Телемоста убрана." : "✅ Ссылка Телемоста закреплена в кабинете ученика.");
     await showStudentCard(chatId, null, st.targetId);
     return true;
   }

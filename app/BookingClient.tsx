@@ -175,9 +175,12 @@ export default function BookingClient({
     !!rsEvent && rsKind === "move" && (rsMode === "all" || (rsMode === "once" && !!rsOcc));
   // Промежуточный экран (выбор «одно занятие / вся серия» и даты) — для переноса и отмены.
   const rsChoosing = !!rsEvent && !rescheduling;
-  // Сетку слотов показываем: когда записей ещё нет, либо при переносе, либо когда
-  // ученик явно захотел записаться ещё. Иначе (уже есть записи) — прячем.
-  const showGrid = !hasBookings || rescheduling || pickingNew;
+  // Сетку слотов показываем: когда записей ТОЧНО нет (my загружен и пуст), либо при
+  // переносе, либо когда ученик явно захотел записаться ещё. Пока my === null (идёт
+  // загрузка) сетку не показываем — иначе у ученика с записями мелькает «25-й кадр»
+  // с расписанием, которое тут же сменяется его кабинетом.
+  const myLoading = my === null;
+  const showGrid = (!myLoading && !hasBookings) || rescheduling || pickingNew;
 
   // Если в окне подтверждения убрали все слоты — закрываем окно.
   useEffect(() => {
@@ -493,6 +496,9 @@ export default function BookingClient({
           {notice}
         </div>
       )}
+
+      {/* Пока не знаем, есть ли записи, — спиннер вместо сетки (без «25-го кадра»). */}
+      {myLoading && <div className="spinner" />}
 
       {nextLesson && (
         <div className="next-lesson">
