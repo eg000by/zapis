@@ -136,6 +136,8 @@ export default function BookingClient({
   // Мои записи.
   const [my, setMy] = useState<MyEvent[] | null>(null);
   const [payments, setPayments] = useState<MyPayment[]>([]);
+  // Режим «СБП-перевод»: текст реквизитов вместо кнопки оплаты (пусто при ЮKassa).
+  const [payHint, setPayHint] = useState<string>("");
   const [balance, setBalance] = useState<MyBalance | null>(null);
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
   const [meetLink, setMeetLink] = useState<string>("");
@@ -207,6 +209,7 @@ export default function BookingClient({
       .then((d) => {
         setMy(d.events || []);
         setPayments(d.payments || []);
+        setPayHint(d.payHint || "");
         setBalance(d.balance || null);
         setMeetLink(d.meetLink || "");
         setTgNotify(d.tg || { connected: false, link: "" });
@@ -559,12 +562,13 @@ export default function BookingClient({
                   >
                     Оплатить по СБП ↗
                   </a>
-                ) : (
+                ) : !payHint ? (
                   <span className="badge wait">ждём ссылку на оплату</span>
-                )}
+                ) : null}
               </div>
             </div>
           ))}
+          {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
         </div>
       )}
 

@@ -57,6 +57,13 @@
       "when": 1783894199289,
       "tag": "0007_tearful_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783976174379,
+      "tag": "0008_spotty_starhawk",
+      "breakpoints": true
     }
   ]
 }

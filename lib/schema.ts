@@ -79,6 +79,20 @@ export const bookingLinks = pgTable("booking_links", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Настройки сервиса (ключ-значение): способ оплаты (yookassa/sbp) и текст реквизитов СБП.
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Отметка «вопрос "как прошло занятие?" уже отправлен» по инстансу календаря —
+// дедупликация pulse-крона (он опрашивает окно в сутки и не должен спрашивать дважды).
+export const lessonPings = pgTable("lesson_pings", {
+  instanceId: text("instance_id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Student = typeof students.$inferSelect;
 export type NewStudent = typeof students.$inferInsert;
 export type Lesson = typeof lessons.$inferSelect;

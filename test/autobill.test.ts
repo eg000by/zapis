@@ -27,6 +27,10 @@ vi.mock("@/lib/yookassa", () => ({
 // Уведомления ученику о счетах — транспорт, к планировщику не относится: глушим.
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
 vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
+vi.mock("@/lib/settings", () => ({
+  getPayMethod: vi.fn(async () => "yookassa"),
+  getSbpDetails: vi.fn(async () => "Перевод по СБП на номер …"),
+}));
 
 const NOW = new Date("2026-07-12T09:00:00.000Z");
 
@@ -214,6 +218,18 @@ describe("ensureAutoInvoices — применение к счетам", () => {
       payLink: "https://yk/pay",
       providerPaymentId: "yk-1",
     });
+  });
+
+  it("режим «СБП-перевод»: ссылки ЮKassa не создаются даже при настроенных ключах", async () => {
+    const { getPayMethod } = await import("@/lib/settings");
+    vi.mocked(getPayMethod).mockResolvedValueOnce("sbp");
+    mockBalance({ debtKopecks: 0, debtHours: 0 });
+    vi.mocked(yookassaConfigured).mockReturnValue(true);
+    vi.mocked(outstandingPayments).mockResolvedValue([
+      { id: "m1", kind: "manual", amountKopecks: 100000, payLink: "" },
+    ] as any);
+    await ensureAutoInvoices("stu-1", "Тест");
+    expect(createYkPayment).not.toHaveBeenCalled();
   });
 
   it("падение ЮKassa не ломает кабинет (best-effort)", async () => {

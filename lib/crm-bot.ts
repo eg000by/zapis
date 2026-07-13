@@ -15,7 +15,7 @@ import {
   listStudentLessons,
   setLessonNote,
 } from "./lessons";
-import { CALENDAR_ID, calendarClient } from "./google";
+import { CALENDAR_ID, calendarClient, listContactOccurrences } from "./google";
 import {
   createPayment,
   deletePayment,
@@ -29,18 +29,11 @@ import { recolorStudent } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
 import { getOrCreateStudentLinkCode } from "./shortlink";
-import { SUBJECTS, siteBaseUrl } from "./config";
+import { MISSED_COLOR_ID, SUBJECTS, siteBaseUrl } from "./config";
 import { formatMskRange } from "./slots";
-import type { Lesson } from "./schema";
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 
-const LES_STATUS: Record<string, string> = {
-  pending: "⏳",
-  confirmed: "✅",
-  done: "✔️",
-  cancelled: "🚫",
-};
 const PAY_STATUS: Record<string, string> = {
   unpaid: "🔴",
   paid: "🟢",
@@ -50,13 +43,6 @@ const PAY_STATUS: Record<string, string> = {
 // Кнопка отмены текущего ввода. force_reply нельзя совместить с инлайн-кнопкой,
 // поэтому у приглашений к вводу показываем инлайн-«Отмена» (callback "cancel").
 const cancelKb = () => inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]]);
-
-function lessonWhen(l: Lesson): string {
-  if (!l.occurrenceStart) return "—";
-  const iso =
-    l.occurrenceStart instanceof Date ? l.occurrenceStart.toISOString() : String(l.occurrenceStart);
-  return formatMskRange(iso, 1);
-}
 
 // Отправляет новое сообщение (messageId=null) либо редактирует существующее.
 async function emit(
@@ -113,25 +99,53 @@ export async function showStudentCard(
   const debt = outstanding.reduce((sum, p) => sum + p.amountKopecks, 0);
 
   const lines = [
-    `🧑‍🎓 <b>${escapeHtml(s.name)}</b>${s.active ? "" : " · 🚫 архив"}`,
+    `🧑‍🎓 <b>${escapeHtml(s.name)}</b>${s.trial ? " · 🎯 пробный" : ""}${s.active ? "" : " · 🚫 архив"}`,
     `📚 ${escapeHtml(s.subject)}${s.tg ? ` · ${escapeHtml(s.tg)}` : ""}`,
     `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(debt)} ₽</b>`,
   ];
+  // Ссылка на запись — прямо в тексте карточки (в <code> копируется одним тапом).
+  const base = botBaseUrl();
+  if (base) {
+    try {
+      const code = await getOrCreateStudentLinkCode(s.id, s.trial);
+      lines.push(`🔗 <code>${escapeHtml(`${base}/z/${code}`)}</code>`);
+    } catch (e) {
+      console.error("student card link failed", e);
+    }
+  }
   if (s.meetLink) lines.push(`🎥 ${escapeHtml(s.meetLink)}`);
   if (s.note) lines.push(`📝 ${escapeHtml(s.note)}`);
 
+  const rows: TgButton[][] = [
+    [{ text: "💳 Счета", data: `pays:${s.id}` }, { text: "📅 Занятия", data: `les:${s.id}` }],
+  ];
+  // Пробный переводится в полноценные вручную — когда решишь продолжать занятия.
+  if (s.trial) rows.push([{ text: "🎓 Сделать полноценным", data: `mkfull:${s.id}` }]);
+  rows.push([{ text: "⚙️ Ещё", data: `stools:${s.id}` }]);
+  rows.push([{ text: "⬅️ Все ученики", data: "stus" }]);
+
+  await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
+}
+
+// Раздел «технических» кнопок карточки — редкие действия не нагружают основной экран.
+export async function showStudentTools(
+  chatId: number | string,
+  messageId: number | null,
+  studentId: string
+): Promise<void> {
+  const s = await getStudent(studentId);
+  if (!s) {
+    await emit(chatId, messageId, "Ученик не найден.");
+    return;
+  }
   const keyboard = inlineKeyboard([
-    [{ text: "💳 Оплаты", data: `pays:${s.id}` }, { text: "📅 Занятия", data: `les:${s.id}` }],
-    [{ text: "🔗 Ссылка на запись", data: `slink:${s.id}` }],
-    [{ text: "🎥 Ссылка Телемоста", data: `smeet:${s.id}` }],
     [{ text: "📝 Заметка об ученике", data: `snote:${s.id}` }],
-    [
-      { text: s.active ? "🗄 В архив" : "♻️ Вернуть из архива", data: `arch:${s.id}` },
-      { text: "🗑 Удалить", data: `delstu:${s.id}` },
-    ],
-    [{ text: "⬅️ Все ученики", data: "stus" }],
+    [{ text: "🎥 Изменить ссылку на Телемост", data: `smeet:${s.id}` }],
+    [{ text: s.active ? "🗄 В архив" : "♻️ Вернуть из архива", data: `arch:${s.id}` }],
+    [{ text: "🗑 Удалить ученика", data: `delstu:${s.id}` }],
+    [{ text: "⬅️ Назад к ученику", data: `stu:${s.id}` }],
   ]);
-  await emit(chatId, messageId, lines.join("\n"), keyboard);
+  await emit(chatId, messageId, `⚙️ <b>${escapeHtml(s.name)} — управление</b>`, keyboard);
 }
 
 export async function showPayments(
@@ -145,7 +159,7 @@ export async function showPayments(
     return;
   }
   const pays = await listStudentPayments(s.id);
-  const lines = [`💳 <b>Оплаты — ${escapeHtml(s.name)}</b>`];
+  const lines = [`💳 <b>Счета — ${escapeHtml(s.name)}</b>`];
   if (!pays.length) {
     lines.push("\nСчетов нет. Создать счёт можно на сайте /admin.");
   } else {
@@ -171,6 +185,10 @@ export async function showPayments(
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
 }
 
+// Занятия ученика — из КАЛЕНДАРЯ (источник правды): реальные прошедшие и ближайшие
+// повторы, с учётом отмен/EXDATE/переносов. Строки БД используются только для заметок
+// (матчатся по точному началу занятия). Раньше показывались сырые строки БД — у серии
+// там время ПЕРВОГО повтора, даже если сами повторы отменены в календаре.
 export async function showLessons(
   chatId: number | string,
   messageId: number | null,
@@ -181,19 +199,42 @@ export async function showLessons(
     await emit(chatId, messageId, "Ученик не найден.");
     return;
   }
-  const all = await listStudentLessons(s.id, 8);
-  const les = all.filter((l) => l.status !== "cancelled");
-  const lines = [`📅 <b>Занятия — ${escapeHtml(s.name)}</b>`];
-  if (!les.length) lines.push("\nПока нет занятий.");
-  else
-    for (const l of les) {
-      lines.push(
-        `${LES_STATUS[l.status] || ""} ${lessonWhen(l)}${l.note ? `\n   📝 ${escapeHtml(l.note)}` : ""}`
-      );
+  const occ = await listContactOccurrences(s.contactKey);
+  const now = Date.now();
+  const past = occ.filter((o) => o.start.getTime() < now).slice(-3);
+  const future = occ.filter((o) => o.start.getTime() >= now).slice(0, 3);
+
+  // Заметки из БД — по точному времени начала занятия.
+  const notes = new Map<number, string>();
+  try {
+    for (const l of await listStudentLessons(s.id, 100)) {
+      if (l.note && l.occurrenceStart) notes.set(new Date(l.occurrenceStart).getTime(), l.note);
     }
-  const rows: TgButton[][] = les.map((l) => [
-    { text: `📝 ${lessonWhen(l)}`, data: `lnote:${l.id}` },
-  ]);
+  } catch (e) {
+    console.error("showLessons notes failed", e);
+  }
+
+  const lines = [`📅 <b>Занятия — ${escapeHtml(s.name)}</b>`];
+  const fmt = (o: (typeof occ)[number]) => formatMskRange(o.start.toISOString(), o.hours);
+  const noteLine = (o: (typeof occ)[number]) => {
+    const n = notes.get(o.start.getTime());
+    return n ? `\n   📝 ${escapeHtml(n)}` : "";
+  };
+  if (past.length) {
+    lines.push("\n<b>Прошедшие:</b>");
+    for (const o of past) {
+      const missed = o.colorId === MISSED_COLOR_ID;
+      lines.push(`${missed ? "🚫" : "✔️"} ${fmt(o)}${missed ? " · пропуск" : ""}${noteLine(o)}`);
+    }
+  }
+  if (future.length) {
+    lines.push("\n<b>Ближайшие:</b>");
+    for (const o of future) lines.push(`▫️ ${fmt(o)}${noteLine(o)}`);
+  }
+  if (!past.length && !future.length) lines.push("\nПока нет занятий.");
+
+  // Заметку пишем к прошедшим (кнопка на каждое) — тот же поток, что 📝 в опросе.
+  const rows: TgButton[][] = past.map((o) => [{ text: `📝 ${fmt(o)}`, data: `lrep:${o.instanceId}` }]);
   rows.push([{ text: "⬅️ Назад", data: `stu:${s.id}` }]);
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
 }

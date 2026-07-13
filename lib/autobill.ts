@@ -16,6 +16,7 @@ import { createYkPayment, yookassaConfigured } from "./yookassa";
 import { getStudent } from "./students";
 import { notifyStudent } from "./notify";
 import { escapeHtml } from "./telegram";
+import { getPayMethod, getSbpDetails } from "./settings";
 
 // Окно автосчёта «вперёд»: занятия ближайших N дней.
 export const AUTO_ADVANCE_DAYS = 30;
@@ -135,9 +136,14 @@ export async function ensureAutoInvoices(
     }
   }
 
+  // Способ оплаты: «ЮKassa» — счетам генерируются ссылки; «СБП-перевод» — ссылки не
+  // создаются (комиссия провайдера не нужна), в кабинете показываются реквизиты,
+  // оплату преподаватель отмечает вручную.
+  const method = await getPayMethod().catch(() => "yookassa" as const);
+
   // Ссылки на оплату: каждому неоплаченному счёту без ссылки — платёж ЮKassa.
   const freshLinks = new Map<string, string>();
-  if (yookassaConfigured()) {
+  if (method === "yookassa" && yookassaConfigured()) {
     const fresh = actions.length ? await outstandingPayments(studentId) : open;
     for (const p of fresh) {
       if (p.payLink) continue;
@@ -162,16 +168,20 @@ export async function ensureAutoInvoices(
     try {
       const s = await getStudent(studentId);
       if (s?.tgChatId) {
+        const sbp = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
         const rows = (await outstandingPayments(studentId)).filter((p) => changed.has(p.id));
         for (const p of rows) {
           const header =
             changed.get(p.id) === "create" ? "💳 <b>Выставлен счёт</b>" : "💳 <b>Счёт пересчитан</b>";
           const link = p.payLink || freshLinks.get(p.id) || "";
+          const payLine = sbp
+            ? escapeHtml(sbp)
+            : link
+              ? `Оплатить по СБП: ${link}`
+              : "Ссылка на оплату — в личном кабинете.";
           await notifyStudent(
             s,
-            `${header}\n\n${fmtRub(p.amountKopecks)}${p.note ? ` · ${escapeHtml(p.note)}` : ""}\n${
-              link ? `Оплатить по СБП: ${link}` : "Ссылка на оплату — в личном кабинете."
-            }`
+            `${header}\n\n${fmtRub(p.amountKopecks)}${p.note ? ` · ${escapeHtml(p.note)}` : ""}\n${payLine}`
           );
         }
       }

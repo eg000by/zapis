@@ -12,3 +12,7 @@ next-env.d.ts.timestamp
 /service-account.json
 /.env.local.example
 /scripts
+
+# Playwright
+/test-results/
+/playwright-report/

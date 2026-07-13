@@ -45,6 +45,13 @@ export async function POST(req: Request) {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
     } else if (action === "student.meetlink") {
       await updateStudent(studentId, { meetLink: String(form.get("meetLink") || "").trim() });
+    } else if (action === "student.mkfull") {
+      // Пробный → полноценный: решение принимает преподаватель в любой момент.
+      await updateStudent(studentId, { trial: false });
+    } else if (action === "settings.pay") {
+      const { setSetting } = await import("@/lib/settings");
+      await setSetting("payMethod", String(form.get("payMethod")) === "sbp" ? "sbp" : "yookassa");
+      await setSetting("sbpDetails", String(form.get("sbpDetails") || "").trim());
     } else if (action === "student.delete") {
       // Необратимо: каскадом уходят занятия, оплаты и ссылки ученика. После —
       // редирект в общий список (карточки уже нет), см. ветку ниже.

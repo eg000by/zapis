@@ -1,0 +1,19 @@
+name: pulse
+
+# Бесплатный Vercel даёт кроны только раз в день, поэтому частый «пульс»
+# (вопрос «как прошло занятие?» сразу после его конца) дёргает GitHub Actions.
+# Расписание GH может опаздывать на несколько минут — для этой задачи не критично.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call pulse endpoint
+        run: |
+          curl -fsS -m 60 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://zapis-ten.vercel.app/api/cron/pulse

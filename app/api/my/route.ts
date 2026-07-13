@@ -5,15 +5,19 @@ import { getStudent, getStudentByContactKey } from "@/lib/students";
 import { outstandingPayments } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { studentTgInfo } from "@/lib/notify";
+import { getPayMethod, getSbpDetails } from "@/lib/settings";
 
 // Пустой блок оплат/баланса — когда ученика нет в CRM или БД недоступна.
 const NO_BILLING = {
   payments: [],
   balance: null,
   meetLink: "",
+  payHint: "",
   tg: { connected: false, link: "" },
 } as {
   meetLink: string;
+  // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
+  payHint: string;
   // Уведомления в Telegram: подключены ли и deep-link для подключения.
   tg: { connected: boolean; link: string };
   payments: { id: string; amountKopecks: number; note: string; payLink: string; kind: string }[];
@@ -70,14 +74,18 @@ export async function GET(req: Request) {
 
           const rows = await outstandingPayments(studentId);
           const tg = await studentTgInfo(student).catch(() => ({ connected: false, link: "" }));
+          // Режим «СБП-перевод»: кнопки оплаты прячем, вместо них текст реквизитов.
+          const method = await getPayMethod().catch(() => "yookassa" as const);
+          const payHint = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
           return {
             meetLink: student?.meetLink || "",
+            payHint,
             tg,
             payments: rows.map((p) => ({
               id: p.id,
               amountKopecks: p.amountKopecks,
               note: p.note,
-              payLink: p.payLink,
+              payLink: method === "sbp" ? "" : p.payLink,
               kind: p.kind,
             })),
             balance: balance
@@ -103,6 +111,7 @@ export async function GET(req: Request) {
       payments: billing.payments,
       balance: billing.balance,
       meetLink: billing.meetLink,
+      payHint: billing.payHint,
       tg: billing.tg,
       nextLesson,
     });

@@ -28,6 +28,7 @@ import {
   showLessons,
   showPayments,
   showStudentCard,
+  showStudentTools,
   showStudentsList,
   submitRateForNew,
   submitTgForNew,
@@ -132,6 +133,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   if (data.startsWith("stu:")) {
     await showStudentCard(chatId, messageId, data.slice(4));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("stools:")) {
+    await showStudentTools(chatId, messageId, data.slice(7));
     await answerCallback(cq.id);
     return ok();
   }
@@ -255,12 +261,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
 
 const HELP =
   "<b>🤖 Команды</b>\n\n" +
-  "👥 /students — ученики, оплаты, заметки, ссылки\n" +
+  "👥 /students — ученики, счета, заметки, ссылки\n" +
   "➕ /new — новый ученик + ссылка на запись\n" +
-  "✖️ /cancel — отменить текущий ввод\n" +
   "❓ /help — эта справка\n\n" +
   "<b>Внутри карточки ученика:</b>\n" +
-  "🔗 ссылка на запись · 💳 оплаты (создать / отметить / удалить счёт) · 📅 занятия и заметки · 🗄 архив · 🗑 удалить ученика.";
+  "💳 счета (создать / отметить / удалить) · 📅 занятия и заметки · ⚙️ Ещё (заметка, Телемост, архив, удаление). Ссылка на запись — в тексте карточки.";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

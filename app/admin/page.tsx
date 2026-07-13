@@ -208,6 +208,24 @@ export default async function AdminPage({
           </div>
         </div>
 
+        {student.trial && (
+          <div className="card" style={{ marginTop: 16 }}>
+            <label style={{ marginTop: 0 }}>🎯 Пробный ученик</label>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Продолжаете заниматься? Переведите в полноценные — снимется ограничение
+              «одно занятие», ссылка на запись станет еженедельной.
+            </p>
+            <form method="POST" action="/api/admin">
+              <input type="hidden" name="key" value={key} />
+              <input type="hidden" name="action" value="student.mkfull" />
+              <input type="hidden" name="studentId" value={student.id} />
+              <button className="btn" type="submit">
+                🎓 Сделать полноценным
+              </button>
+            </form>
+          </div>
+        )}
+
         <div className="card" style={{ marginTop: 16 }}>
           <label style={{ marginTop: 0 }}>Ссылка на занятие (Яндекс Телемост)</label>
           <p className="hint" style={{ marginTop: 0 }}>
@@ -450,6 +468,17 @@ export default async function AdminPage({
     dbError = true;
   }
 
+  // Текущий способ оплаты (ЮKassa-ссылки или СБП-реквизиты) — для переключателя ниже.
+  let payMethod = "yookassa";
+  let sbpDetails = "";
+  try {
+    const { getPayMethod, getSbpDetails } = await import("@/lib/settings");
+    payMethod = await getPayMethod();
+    sbpDetails = await getSbpDetails();
+  } catch (e) {
+    console.error("admin pay settings", e);
+  }
+
   return (
     <div className="wrap">
       <div className="hero">
@@ -500,6 +529,37 @@ export default async function AdminPage({
       </form>
 
       {createdLink && <AdminResult link={createdLink} />}
+
+      <div className="card" style={{ marginTop: 20 }}>
+        <label style={{ marginTop: 0 }}>Способ оплаты в кабинете ученика</label>
+        <p className="hint" style={{ marginTop: 0 }}>
+          «ЮKassa» — у счетов кнопка онлайн-оплаты (комиссия провайдера). «СБП-перевод» —
+          вместо кнопки показываются реквизиты, оплату отмечаете вручную в карточке ученика.
+        </p>
+        <form method="POST" action="/api/admin">
+          <input type="hidden" name="key" value={key} />
+          <input type="hidden" name="action" value="settings.pay" />
+          <label className="check-row">
+            <input type="radio" name="payMethod" value="yookassa" defaultChecked={payMethod !== "sbp"} />
+            <span>ЮKassa — кнопка «Оплатить по СБП» со ссылкой</span>
+          </label>
+          <label className="check-row">
+            <input type="radio" name="payMethod" value="sbp" defaultChecked={payMethod === "sbp"} />
+            <span>СБП-перевод — показать реквизиты, отмечаю оплату сам</span>
+          </label>
+          <label htmlFor="sbpDetails">Текст реквизитов</label>
+          <input
+            id="sbpDetails"
+            name="sbpDetails"
+            defaultValue={sbpDetails}
+            placeholder="Перевод по СБП на номер …"
+            style={{ width: "100%", boxSizing: "border-box" }}
+          />
+          <button className="btn" type="submit">
+            Сохранить способ оплаты
+          </button>
+        </form>
+      </div>
 
       <div className="card" style={{ marginTop: 20 }}>
         <label style={{ marginTop: 0 }}>Список учеников</label>

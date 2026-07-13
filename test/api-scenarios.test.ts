@@ -56,6 +56,10 @@ vi.mock("@/lib/coloring", () => ({
 vi.mock("@/lib/payments", () => ({ outstandingPayments: vi.fn(async () => []) }));
 // Автосчета тестируются отдельно (test/autobill.test.ts) — здесь глушим.
 vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
+vi.mock("@/lib/settings", () => ({
+  getPayMethod: vi.fn(async () => "yookassa"),
+  getSbpDetails: vi.fn(async () => ""),
+}));
 vi.mock("@/lib/crm-bot", () => {
   const fns = [
     "applyPendingInput", "cancelPending", "chooseTrialForNew", "deletePaymentBot",
@@ -63,7 +67,7 @@ vi.mock("@/lib/crm-bot", () => {
     "promptDeleteStudent", "promptLessonNote", "promptNewPayment", "promptNewStudent",
     "makeStudentFull",
     "promptPaymentLink", "promptReportLessonNote", "promptStudentMeetLink", "promptStudentNote", "sendBookingLink", "showLessons",
-    "showPayments", "showStudentCard", "showStudentsList", "submitRateForNew",
+    "showPayments", "showStudentCard", "showStudentTools", "showStudentsList", "submitRateForNew",
     "submitTgForNew", "toggleStudentArchive",
   ];
   const out: Record<string, unknown> = {};
@@ -641,6 +645,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       payments: [],
       balance: null,
       meetLink: "",
+      payHint: "",
       tg: { connected: false, link: "" },
       nextLesson: null,
     });
