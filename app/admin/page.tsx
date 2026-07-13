@@ -404,6 +404,7 @@ export default async function AdminPage({
   const tg = get("tg").trim();
   const subject = get("subject").trim() || SUBJECTS[0];
   const trial = get("trial") === "on";
+  const rate = Math.max(0, Math.round(Number(get("rate") || 0)));
 
   let createdLink = "";
   if (name && SUBJECTS.includes(subject)) {
@@ -413,7 +414,14 @@ export default async function AdminPage({
       const { upsertStudent } = await import("@/lib/students");
       const { contactKey } = await import("@/lib/link");
       const ck = contactKey({ name, subject, tg, trial });
-      const s = await upsertStudent({ name, subject, tg, contactKey: ck, trial });
+      const s = await upsertStudent({
+        name,
+        subject,
+        tg,
+        contactKey: ck,
+        trial,
+        rateKopecks: rate * 100,
+      });
       studentId = s.id;
     } catch (e) {
       console.error("admin create student", e);
@@ -466,6 +474,20 @@ export default async function AdminPage({
 
         <label htmlFor="tg">Telegram (необязательно)</label>
         <input id="tg" name="tg" defaultValue={tg} placeholder="@egor" />
+
+        <label htmlFor="rate">Ставка, ₽/час</label>
+        <input
+          id="rate"
+          name="rate"
+          type="number"
+          min={0}
+          step={50}
+          defaultValue={rate > 0 ? rate : ""}
+          placeholder="напр. 1500"
+        />
+        <p className="hint" style={{ marginTop: 4 }}>
+          От ставки считаются баланс, долг и автосчета. Можно задать позже в карточке.
+        </p>
 
         <label className="check-row">
           <input type="checkbox" name="trial" defaultChecked={trial} />

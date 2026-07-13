@@ -139,6 +139,11 @@ export default function BookingClient({
   const [balance, setBalance] = useState<MyBalance | null>(null);
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
   const [meetLink, setMeetLink] = useState<string>("");
+  // Уведомления в Telegram: подключены ли + deep-link подключения (пуст — кнопку не показываем).
+  const [tgNotify, setTgNotify] = useState<{ connected: boolean; link: string }>({
+    connected: false,
+    link: "",
+  });
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
@@ -201,6 +206,7 @@ export default function BookingClient({
         setPayments(d.payments || []);
         setBalance(d.balance || null);
         setMeetLink(d.meetLink || "");
+        setTgNotify(d.tg || { connected: false, link: "" });
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
@@ -497,6 +503,12 @@ export default function BookingClient({
       {meetLink && (
         <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
           🎥 Подключиться к занятию (Яндекс Телемост) ↗
+        </a>
+      )}
+
+      {!tgNotify.connected && tgNotify.link && (
+        <a className="next-lesson tg-link" href={tgNotify.link} target="_blank" rel="noreferrer">
+          🔔 Подключить уведомления в Telegram ↗
         </a>
       )}
 

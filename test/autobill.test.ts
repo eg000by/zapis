@@ -24,6 +24,9 @@ vi.mock("@/lib/yookassa", () => ({
   yookassaConfigured: vi.fn(() => false),
   createYkPayment: vi.fn(async () => ({ id: "yk-1", confirmationUrl: "https://yk/pay" })),
 }));
+// Уведомления ученику о счетах — транспорт, к планировщику не относится: глушим.
+vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
+vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
 
 const NOW = new Date("2026-07-12T09:00:00.000Z");
 

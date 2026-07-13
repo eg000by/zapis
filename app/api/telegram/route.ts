@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
 import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/lib/slots";
-import { answerCallback, editMessageText, escapeHtml, sendOwner } from "@/lib/telegram";
+import { answerCallback, editMessageText, escapeHtml, sendOwner, sendTo } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
-import { recolorStudent } from "@/lib/coloring";
+import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
+import { notifyStudentById } from "@/lib/notify";
+import { getStudent, updateStudent } from "@/lib/students";
 import {
   applyPendingInput,
   cancelPending,
@@ -25,6 +27,7 @@ import {
   showPayments,
   showStudentCard,
   showStudentsList,
+  submitRateForNew,
   submitTgForNew,
   toggleStudentArchive,
 } from "@/lib/crm-bot";
@@ -115,6 +118,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  if (data === "nskiprate") {
+    await submitRateForNew(chatId, 0);
+    await answerCallback(cq.id);
+    return ok();
+  }
   if (data.startsWith("ntrial:")) {
     await chooseTrialForNew(chatId, data.slice(7) === "1");
     await answerCallback(cq.id);
@@ -172,6 +180,21 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id, "Теперь полноценный ученик ✅");
     return ok();
   }
+  // Утренний отчёт: «Прошло» — подтверждение (и откат ошибочного «Не прошло»),
+  // «Не прошло» — серый цвет (пропуск, не тарифицируется).
+  if (data.startsWith("ldone:")) {
+    const found = await unmarkLessonMissed(data.slice(6));
+    await answerCallback(cq.id, found ? "Занятие учтено ✅" : "Занятие не найдено");
+    return ok();
+  }
+  if (data.startsWith("lmiss:")) {
+    const found = await markLessonMissed(data.slice(6));
+    await answerCallback(
+      cq.id,
+      found ? "Пропуск 🚫 — занятие не тарифицируется" : "Занятие не найдено"
+    );
+    return ok();
+  }
   if (data.startsWith("delstuok:")) {
     const done = await deleteStudentBot(data.slice(9));
     await answerCallback(cq.id, done ? "Ученик удалён 🗑" : "Ученик не найден");
@@ -226,11 +249,41 @@ const HELP =
   "<b>Внутри карточки ученика:</b>\n" +
   "🔗 ссылка на запись · 💳 оплаты (создать / отметить / удалить счёт) · 📅 занятия и заметки · 🗄 архив · 🗑 удалить ученика.";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function handleMessage(msg: any): Promise<NextResponse> {
   const chatId = msg.chat?.id;
-  if (!isOwner(chatId)) return ok();
   const text = String(msg.text || "").trim();
-  if (!text) return ok();
+  if (!chatId || !text) return ok();
+
+  // Подключение уведомлений учеником: deep-link из кабинета t.me/<бот>?start=<studentId>.
+  // Обрабатываем ДО гейта владельца — пишет сам ученик. Payload строго UUID ученика,
+  // никаких CRM-возможностей эта ветка не даёт.
+  const startPayload = text.startsWith("/start ") ? text.slice(7).trim() : "";
+  if (startPayload && UUID_RE.test(startPayload)) {
+    const s = await getStudent(startPayload).catch(() => null);
+    if (s) {
+      await updateStudent(s.id, { tgChatId: String(chatId) });
+      await sendTo(
+        chatId,
+        `🔔 <b>Уведомления подключены</b>\n\nЗдравствуйте, ${escapeHtml(s.name)}! Сюда будут приходить подтверждения записи, напоминания о занятиях и счета на оплату.`
+      );
+    } else {
+      await sendTo(chatId, "Ссылка подключения не распознана. Откройте её из личного кабинета ещё раз.");
+    }
+    return ok();
+  }
+
+  if (!isOwner(chatId)) {
+    // Ученику (не владельцу) отвечаем только на /start без payload — подсказкой.
+    if (text.startsWith("/start")) {
+      await sendTo(
+        chatId,
+        "Это сервисный бот уведомлений о занятиях. Подключение — по кнопке «Уведомления в Telegram» в личном кабинете."
+      );
+    }
+    return ok();
+  }
 
   if (text === "/start") {
     await sendOwner(HELP);
@@ -369,6 +422,12 @@ async function handleBookingAction(
           `✅ <b>Запись подтверждена</b>${movedTag}\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
         );
       }
+      if (priv.studentId) {
+        await notifyStudentById(
+          priv.studentId,
+          `✅ Ваша запись подтверждена!\n📚 ${escapeHtml(subject)}\n🕒 <b>${escapeHtml(when)}</b>`
+        );
+      }
     } else if (moved && priv.origStart) {
       // Отклонение разового переноса: возвращаем занятие на исходное время серии.
       // Сначала проверяем, что прежний слот всё ещё свободен (его мог занять другой
@@ -414,6 +473,12 @@ async function handleBookingAction(
           chatId,
           messageId,
           `↩️ <b>Разовый перенос отклонён</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\nЗанятие осталось на прежнем времени:\n🕒 ${origWhen}`
+        );
+      }
+      if (priv.studentId) {
+        await notifyStudentById(
+          priv.studentId,
+          `↩️ Перенос не согласован — занятие осталось на прежнем времени:\n🕒 <b>${escapeHtml(origWhen)}</b>`
         );
       }
     } else if (priv.prevStart) {
@@ -468,6 +533,12 @@ async function handleBookingAction(
           `↩️ <b>Перенос отклонён</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\nЗапись осталась на прежнем времени:\n🕒 ${backWhen}`
         );
       }
+      if (priv.studentId) {
+        await notifyStudentById(
+          priv.studentId,
+          `↩️ Перенос не согласован — запись осталась на прежнем времени:\n🕒 <b>${escapeHtml(backWhen)}</b>`
+        );
+      }
     } else {
       await cal.events.delete({ calendarId: CALENDAR_ID, eventId });
       try {
@@ -481,6 +552,12 @@ async function handleBookingAction(
           chatId,
           messageId,
           `❌ <b>Заявка отклонена</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\n🕒 ${when}${tg ? `\n✈️ ${tg}` : ""}`
+        );
+      }
+      if (priv.studentId) {
+        await notifyStudentById(
+          priv.studentId,
+          `❌ К сожалению, запись не подтверждена:\n🕒 ${escapeHtml(when)}\nВыберите, пожалуйста, другое время в личном кабинете.`
         );
       }
     }

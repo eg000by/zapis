@@ -511,13 +511,15 @@ select:focus {
 }
 
 /* Ссылка на онлайн-занятие (Телемост) — кликабельная плашка */
-a.meet-link {
+a.meet-link,
+a.tg-link {
   text-decoration: none;
   font-weight: 600;
   color: var(--accent);
   cursor: pointer;
 }
-a.meet-link:hover {
+a.meet-link:hover,
+a.tg-link:hover {
   filter: brightness(0.9);
 }
 

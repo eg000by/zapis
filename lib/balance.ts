@@ -9,6 +9,7 @@
 import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
 import { sumPaidKopecks } from "./payments";
+import { MISSED_COLOR_ID } from "./config";
 
 export interface AllocatedOccurrence extends ColorOccurrence {
   paid: boolean; // закрыто балансом
@@ -80,7 +81,10 @@ export async function computeStudentBalance(studentId: string): Promise<StudentB
   if (!s || s.rateKopecks <= 0) return null;
   const paidKopecks = await sumPaidKopecks(s.id);
   const paidHours = Math.floor(paidKopecks / s.rateKopecks);
-  const occ = await listContactOccurrences(s.contactKey);
+  // Серые (пропущенные) занятия не тарифицируются — в раскладку не попадают.
+  const occ = (await listContactOccurrences(s.contactKey)).filter(
+    (o) => o.colorId !== MISSED_COLOR_ID
+  );
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
   return {
     ...summary,

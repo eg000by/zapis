@@ -1,0 +1,1 @@
+ALTER TABLE "students" ADD COLUMN "tg_chat_id" text DEFAULT '' NOT NULL;

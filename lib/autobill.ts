@@ -13,6 +13,9 @@ import {
   type PaymentKind,
 } from "./payments";
 import { createYkPayment, yookassaConfigured } from "./yookassa";
+import { getStudent } from "./students";
+import { notifyStudent } from "./notify";
+import { escapeHtml } from "./telegram";
 
 // Окно автосчёта «вперёд»: занятия ближайших N дней.
 export const AUTO_ADVANCE_DAYS = 30;
@@ -106,16 +109,20 @@ export async function ensureAutoInvoices(
     openInvoices: open.map((p) => ({ id: p.id, kind: p.kind, amountKopecks: p.amountKopecks })),
   });
 
+  // id созданных/обновлённых счетов — по ним после генерации ссылок уйдёт
+  // уведомление ученику в Telegram (если он подключил уведомления).
+  const changed = new Map<string, "create" | "update">();
   for (const a of actions) {
     if (a.action === "delete") {
       await deletePayment(a.id);
     } else if (a.action === "create") {
-      await createPayment({
+      const p = await createPayment({
         studentId,
         amountKopecks: a.amountKopecks,
         kind: a.kind,
         note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks),
       });
+      changed.set(p.id, "create");
     } else {
       // Сумма изменилась — старая ссылка ЮKassa больше не соответствует счёту.
       await updatePayment(a.id, {
@@ -124,10 +131,12 @@ export async function ensureAutoInvoices(
         payLink: "",
         providerPaymentId: "",
       });
+      changed.set(a.id, "update");
     }
   }
 
   // Ссылки на оплату: каждому неоплаченному счёту без ссылки — платёж ЮKassa.
+  const freshLinks = new Map<string, string>();
   if (yookassaConfigured()) {
     const fresh = actions.length ? await outstandingPayments(studentId) : open;
     for (const p of fresh) {
@@ -140,10 +149,34 @@ export async function ensureAutoInvoices(
         });
         if (yk.confirmationUrl) {
           await updatePayment(p.id, { payLink: yk.confirmationUrl, providerPaymentId: yk.id });
+          freshLinks.set(p.id, yk.confirmationUrl);
         }
       } catch (e) {
         console.error("yookassa link failed for payment", p.id, e);
       }
+    }
+  }
+
+  // Уведомление ученику о новом/пересчитанном счёте (best-effort).
+  if (changed.size) {
+    try {
+      const s = await getStudent(studentId);
+      if (s?.tgChatId) {
+        const rows = (await outstandingPayments(studentId)).filter((p) => changed.has(p.id));
+        for (const p of rows) {
+          const header =
+            changed.get(p.id) === "create" ? "💳 <b>Выставлен счёт</b>" : "💳 <b>Счёт пересчитан</b>";
+          const link = p.payLink || freshLinks.get(p.id) || "";
+          await notifyStudent(
+            s,
+            `${header}\n\n${fmtRub(p.amountKopecks)}${p.note ? ` · ${escapeHtml(p.note)}` : ""}\n${
+              link ? `Оплатить по СБП: ${link}` : "Ссылка на оплату — в личном кабинете."
+            }`
+          );
+        }
+      }
+    } catch (e) {
+      console.error("autobill notify failed", e);
     }
   }
 

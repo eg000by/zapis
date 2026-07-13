@@ -99,4 +99,17 @@ describe("computeStudentBalance — баланс в деньгах", () => {
     const b = (await computeStudentBalance("s"))!;
     expect(b).toMatchObject({ debtHours: 3, debtKopecks: 450000, balanceKopecks: 0, paidUntil: null });
   });
+
+  it("серое (пропуск) не тарифицируется: ни в долг, ни в списание баланса", async () => {
+    vi.mocked(getStudent).mockResolvedValue({ id: "s", contactKey: "k", rateKopecks: 150000 } as any);
+    vi.mocked(sumPaidKopecks).mockResolvedValue(150000); // 1 час
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      { ...occ(PAST1), colorId: "8" }, // пропущено — не в счёт
+      occ(PAST2), // закрывается единственным оплаченным часом
+    ] as any);
+
+    const b = (await computeStudentBalance("s"))!;
+    expect(b).toMatchObject({ debtHours: 0, debtKopecks: 0, pastPaidHours: 1, paidUntil: PAST2 });
+    expect(b.items.map((i) => i.instanceId)).toEqual([`i-${PAST2}`]);
+  });
 });

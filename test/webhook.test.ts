@@ -28,6 +28,7 @@ vi.mock("@/lib/telegram", () => ({
   sendOwner: vi.fn(async () => {}),
   escapeHtml: (s: string) => s,
 }));
+vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
 
 function call(body: unknown) {
   return POST(

@@ -81,16 +81,41 @@ export async function editMessageText(
   });
 }
 
-// Отправка сообщения владельцу (TELEGRAM_CHAT_ID) — для команд CRM.
-export async function sendOwner(text: string, replyMarkup?: unknown): Promise<void> {
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!chatId) throw new Error("TELEGRAM_CHAT_ID не задан");
+// Отправка сообщения в произвольный чат (владельцу или ученику).
+export async function sendTo(
+  chatId: number | string,
+  text: string,
+  replyMarkup?: unknown
+): Promise<void> {
   await api("sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
+}
+
+// Отправка сообщения владельцу (TELEGRAM_CHAT_ID) — для команд CRM.
+export async function sendOwner(text: string, replyMarkup?: unknown): Promise<void> {
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!chatId) throw new Error("TELEGRAM_CHAT_ID не задан");
+  await sendTo(chatId, text, replyMarkup);
+}
+
+// Username бота — для deep-link t.me/<бот>?start=…. Явный TELEGRAM_BOT_USERNAME из env
+// либо getMe (кэшируется на жизнь лямбды). Пустая строка — узнать не удалось.
+let cachedUsername: string | null = null;
+export async function botUsername(): Promise<string> {
+  const explicit = (process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
+  if (explicit) return explicit;
+  if (cachedUsername != null) return cachedUsername;
+  try {
+    const data = await api("getMe", {});
+    cachedUsername = String(data?.result?.username || "");
+  } catch {
+    cachedUsername = "";
+  }
+  return cachedUsername ?? "";
 }
 
 export interface TgButton {

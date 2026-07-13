@@ -105,6 +105,59 @@ export async function listContactOccurrences(key: string): Promise<ColorOccurren
   return out;
 }
 
+// Одно занятие за конкретный день — для утреннего отчёта и напоминаний.
+export interface DayOccurrence {
+  instanceId: string;
+  start: Date;
+  hours: number;
+  colorId: string | null;
+  student: string;
+  subject: string;
+  studentId: string;
+  contactKey: string;
+}
+
+// Все ПОДТВЕРЖДЁННЫЕ занятия сервиса (по всем ученикам) за окно [timeMin, timeMax),
+// развёрнутые в инстансы. Для утреннего отчёта «занятия за вчера» и напоминаний.
+export async function listDayOccurrences(timeMin: Date, timeMax: Date): Promise<DayOccurrence[]> {
+  const cal = calendarClient();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis"],
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    singleEvents: true,
+    orderBy: "startTime",
+    maxResults: 250,
+  });
+  const out: DayOccurrence[] = [];
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled" || !ev.id) continue;
+    const priv = ev.extendedProperties?.private || {};
+    if ((priv.status || "pending") !== "confirmed") continue;
+    const start = ev.start?.dateTime || ev.start?.date;
+    if (!start) continue;
+    const end = ev.end?.dateTime || ev.end?.date;
+    const hours =
+      Number(priv.lessons) ||
+      (end
+        ? Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 3600000))
+        : 1);
+    out.push({
+      instanceId: ev.id,
+      start: new Date(start),
+      hours,
+      colorId: ev.colorId ?? null,
+      student: priv.student || priv.name || "",
+      subject: priv.subject || "",
+      studentId: priv.studentId || "",
+      contactKey: priv.contactKey || "",
+    });
+  }
+  out.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return out;
+}
+
 // Возвращает занятые интервалы (абсолютные моменты) за окно [timeMin, timeMax).
 // Учитываются подтверждённые и предварительные (tentative) события — оба держат слот.
 // excludeId — id события, которое не учитываем (нужно при переносе: чтобы запись

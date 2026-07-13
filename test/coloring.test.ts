@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { recolorStudent } from "@/lib/coloring";
+import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { listContactMasters, listContactOccurrences, setEventColor } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { sumPaidKopecks } from "@/lib/payments";
 
+// vi.hoisted — фабрика vi.mock поднимается выше обычных const и исполняется раньше них.
+const { eventsGet } = vi.hoisted(() => ({
+  eventsGet: vi.fn(async (): Promise<any> => ({ data: {} })),
+}));
 vi.mock("@/lib/google", () => ({
+  CALENDAR_ID: "cal",
+  calendarClient: vi.fn(() => ({ events: { get: eventsGet } })),
   listContactMasters: vi.fn(async () => []),
   listContactOccurrences: vi.fn(async () => []),
   setEventColor: vi.fn(async () => {}),
@@ -130,5 +136,51 @@ describe("recolorStudent — балансовая покраска", () => {
     vi.mocked(getStudent).mockResolvedValue(null as any);
     await recolorStudent("нет-такого");
     expect(sumPaidKopecks).not.toHaveBeenCalled();
+  });
+
+  it("серое (пропуск) не тарифицируется и не перекрашивается; серый мастер не сбрасывается", async () => {
+    vi.mocked(sumPaidKopecks).mockResolvedValue(150000); // 1 час
+    vi.mocked(listContactMasters).mockResolvedValue([
+      { id: "missed-single", colorId: "8" }, // одиночное серое — не трогаем
+    ] as any);
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      occ("2026-07-01T15:10:00.000Z", 1, "8"), // пропуск: час на него не тратится
+      occ("2026-07-08T15:10:00.000Z"), // прошло → закрывается тем самым часом → зелёный
+    ] as any);
+
+    await recolorStudent("stu-1");
+
+    expect(applied()).toEqual({ "i-2026-07-08T15:10:00.000Z": "10" });
+  });
+});
+
+describe("markLessonMissed / unmarkLessonMissed — кнопки «Не прошло» / «Прошло»", () => {
+  it("«Не прошло»: серый цвет + пересчёт цветов ученика", async () => {
+    eventsGet.mockResolvedValue({
+      data: { id: "ev_i", colorId: null, extendedProperties: { private: { studentId: "stu-1" } } },
+    });
+    expect(await markLessonMissed("ev_i")).toBe(true);
+    expect(setEventColor).toHaveBeenCalledWith("ev_i", "8");
+    expect(getStudent).toHaveBeenCalledWith("stu-1"); // recolorStudent запущен
+  });
+
+  it("«Прошло» по серому: снимает серый и возвращает в тариф", async () => {
+    eventsGet.mockResolvedValue({
+      data: { id: "ev_i", colorId: "8", extendedProperties: { private: { studentId: "stu-1" } } },
+    });
+    expect(await unmarkLessonMissed("ev_i")).toBe(true);
+    expect(setEventColor).toHaveBeenCalledWith("ev_i", null);
+  });
+
+  it("«Прошло» по не-серому: ничего не патчим", async () => {
+    eventsGet.mockResolvedValue({ data: { id: "ev_i", colorId: "10" } });
+    expect(await unmarkLessonMissed("ev_i")).toBe(true);
+    expect(setEventColor).not.toHaveBeenCalled();
+  });
+
+  it("событие не найдено → false", async () => {
+    eventsGet.mockRejectedValue(new Error("404"));
+    expect(await markLessonMissed("нет")).toBe(false);
+    expect(setEventColor).not.toHaveBeenCalled();
   });
 });

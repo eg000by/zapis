@@ -50,6 +50,13 @@
       "when": 1783868340120,
       "tag": "0006_cloudy_norrin_radd",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783894199289,
+      "tag": "0007_tearful_doctor_faustus",
+      "breakpoints": true
     }
   ]
 }

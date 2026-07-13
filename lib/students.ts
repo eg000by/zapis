@@ -11,12 +11,15 @@ import { students, type Student } from "./schema";
 // trial: true метит НОВОГО ученика пробным; для существующего пробный статус может
 // только сняться (trial=false — регулярная ссылка/запись «повышает» ученика),
 // обратного даунгрейда полноценного в пробные нет.
+// rateKopecks: задаёт ставку при создании; для существующего ученика обновляет её,
+// только если передана положительная (нулём/отсутствием существующую не затираем).
 export async function upsertStudent(input: {
   name: string;
   subject: string;
   tg: string;
   contactKey: string;
   trial?: boolean;
+  rateKopecks?: number;
 }): Promise<Student> {
   const [row] = await db()
     .insert(students)
@@ -26,6 +29,7 @@ export async function upsertStudent(input: {
       tg: input.tg,
       contactKey: input.contactKey,
       trial: input.trial ?? false,
+      rateKopecks: input.rateKopecks && input.rateKopecks > 0 ? input.rateKopecks : 0,
     })
     .onConflictDoUpdate({
       target: students.contactKey,
@@ -34,6 +38,9 @@ export async function upsertStudent(input: {
         subject: input.subject,
         tg: input.tg,
         ...(input.trial === false ? { trial: false } : {}),
+        ...(input.rateKopecks && input.rateKopecks > 0
+          ? { rateKopecks: input.rateKopecks }
+          : {}),
       },
     })
     .returning();
@@ -67,7 +74,16 @@ export async function updateStudent(
   fields: Partial<
     Pick<
       Student,
-      "name" | "tg" | "subject" | "rateKopecks" | "active" | "note" | "trial" | "trialNotifiedAt" | "meetLink"
+      | "name"
+      | "tg"
+      | "subject"
+      | "rateKopecks"
+      | "active"
+      | "note"
+      | "trial"
+      | "trialNotifiedAt"
+      | "meetLink"
+      | "tgChatId"
     >
   >
 ): Promise<void> {

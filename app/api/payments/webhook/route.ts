@@ -4,6 +4,7 @@ import { getPayment, getPaymentByProviderId, setPaymentStatus, updatePayment } f
 import { getStudent } from "@/lib/students";
 import { recolorStudent } from "@/lib/coloring";
 import { escapeHtml, sendOwner } from "@/lib/telegram";
+import { notifyStudent } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,10 @@ export async function POST(req: Request) {
         const s = await getStudent(our.studentId);
         await sendOwner(
           `💰 <b>Оплата получена</b>\n\n🧑‍🎓 ${escapeHtml(s?.name || "")}\n💳 ${(our.amountKopecks / 100).toLocaleString("ru-RU")} ₽${our.note ? `\n📝 ${escapeHtml(our.note)}` : ""}`
+        );
+        await notifyStudent(
+          s,
+          `✅ Оплата получена: <b>${(our.amountKopecks / 100).toLocaleString("ru-RU")} ₽</b>. Спасибо!`
         );
       } catch (e) {
         console.error("webhook: notify failed", e);

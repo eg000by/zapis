@@ -337,8 +337,8 @@ export async function sendBookingLink(
 }
 
 // ── Мастер добавления нового ученика ──
-// имя → предмет (для «Другое» — своё название) → telegram → пробное/регулярное → ссылка.
-// Данные шага храним в botState.targetId как JSON, т.к. поле одно.
+// имя → предмет (для «Другое» — своё название) → telegram → ставка ₽/час →
+// пробное/регулярное → ссылка. Данные шага храним в botState.targetId как JSON.
 
 export async function promptNewStudent(chatId: number | string): Promise<void> {
   await setState(String(chatId), "stu.new.name", "{}");
@@ -362,14 +362,30 @@ async function askTg(chatId: number | string, name: string, subject: string): Pr
   );
 }
 
-// Шаг 4: тип занятий. Вызывается после ввода/пропуска telegram.
-async function askTrial(
+// Шаг 4: ставка за час. Без неё не считаются баланс, автосчета и покраска —
+// поэтому спрашиваем сразу при создании (пропустить можно, задать позже в /admin).
+async function askRate(
   chatId: number | string,
   name: string,
   subject: string,
   tg: string
 ): Promise<void> {
-  await setState(String(chatId), "stu.new.trial", JSON.stringify({ name, subject, tg }));
+  await setState(String(chatId), "stu.new.rate", JSON.stringify({ name, subject, tg }));
+  await sendOwner(
+    "💰 Ставка за час, ₽ — пришлите число, например <code>1500</code>.\nОт ставки считаются баланс, долг и автосчета.",
+    inlineKeyboard([[{ text: "Пропустить", data: "nskiprate" }, { text: "✖️ Отмена", data: "cancel" }]])
+  );
+}
+
+// Шаг 5: тип занятий. Вызывается после ввода/пропуска ставки.
+async function askTrial(
+  chatId: number | string,
+  name: string,
+  subject: string,
+  tg: string,
+  rateKopecks: number
+): Promise<void> {
+  await setState(String(chatId), "stu.new.trial", JSON.stringify({ name, subject, tg, rateKopecks }));
   await sendOwner(
     "🎯 Тип занятий?\n<b>Регулярное</b> — запись повторяется каждую неделю.\n" +
       "<b>Пробное</b> — разовая запись на один день.",
@@ -407,7 +423,7 @@ export async function pickSubjectForNew(chatId: number | string, index: number):
   await askTg(chatId, name, subject);
 }
 
-// Telegram получен (текст или «Пропустить») → переходим к выбору типа занятий.
+// Telegram получен (текст или «Пропустить») → переходим к ставке.
 export async function submitTgForNew(chatId: number | string, tgRaw: string): Promise<void> {
   const st = await getState(String(chatId));
   if (!st || st.action !== "stu.new.tg") {
@@ -428,13 +444,13 @@ export async function submitTgForNew(chatId: number | string, tgRaw: string): Pr
   }
   const skip = /^(-|нет|пропустить|skip)$/i.test(tgRaw.trim());
   const tg = skip ? "" : tgRaw.trim();
-  await askTrial(chatId, name, subject, tg);
+  await askRate(chatId, name, subject, tg);
 }
 
-// Финал (из callback ntrial:<0|1>): создаёт/освежает ученика в БД и шлёт ссылку.
-export async function chooseTrialForNew(chatId: number | string, trial: boolean): Promise<void> {
+// Ставка получена (текст-число либо кнопка «Пропустить» → rubles=0) → к типу занятий.
+export async function submitRateForNew(chatId: number | string, rubles: number): Promise<void> {
   const st = await getState(String(chatId));
-  if (!st || st.action !== "stu.new.trial") {
+  if (!st || st.action !== "stu.new.rate") {
     await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
     return;
   }
@@ -452,11 +468,41 @@ export async function chooseTrialForNew(chatId: number | string, trial: boolean)
     await sendOwner("Не хватило данных. Начните заново: /new");
     return;
   }
+  await askTrial(chatId, name, subject, tg, Math.max(0, Math.round(rubles)) * 100);
+}
+
+// Финал (из callback ntrial:<0|1>): создаёт/освежает ученика в БД и шлёт ссылку.
+export async function chooseTrialForNew(chatId: number | string, trial: boolean): Promise<void> {
+  const st = await getState(String(chatId));
+  if (!st || st.action !== "stu.new.trial") {
+    await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
+    return;
+  }
+  let name = "";
+  let subject = "";
+  let tg = "";
+  let rateKopecks = 0;
+  try {
+    const o = JSON.parse(st.targetId);
+    name = o.name || "";
+    subject = o.subject || "";
+    tg = o.tg || "";
+    rateKopecks = Number(o.rateKopecks) || 0;
+  } catch {}
+  if (!name || !subject) {
+    await clearState(String(chatId));
+    await sendOwner("Не хватило данных. Начните заново: /new");
+    return;
+  }
   // trial влияет и на contactKey (как на /admin), и на саму ссылку — держим их согласованными.
   const ck = contactKey({ name, subject, tg, trial });
-  const s = await upsertStudent({ name, subject, tg, contactKey: ck, trial });
+  const s = await upsertStudent({ name, subject, tg, contactKey: ck, trial, rateKopecks });
   await clearState(String(chatId));
-  await sendOwner(`✅ Ученик <b>${escapeHtml(name)}</b> добавлен${trial ? " · пробное" : ""}.`);
+  await sendOwner(
+    `✅ Ученик <b>${escapeHtml(name)}</b> добавлен${trial ? " · пробное" : ""}${
+      rateKopecks > 0 ? ` · ${rub(rateKopecks)} ₽/час` : ""
+    }.`
+  );
   await sendBookingLink(chatId, s.id, trial);
   await showStudentCard(chatId, null, s.id);
 }
@@ -563,6 +609,15 @@ export async function applyPendingInput(chatId: number | string, text: string): 
   }
   if (st.action === "stu.new.tg") {
     await submitTgForNew(chatId, value);
+    return true;
+  }
+  if (st.action === "stu.new.rate") {
+    const rubles = Number(value.replace(/\s/g, ""));
+    if (!Number.isFinite(rubles) || rubles < 0) {
+      await sendOwner("Не понял ставку. Пришлите число рублей за час, например <code>1500</code>.");
+      return true;
+    }
+    await submitRateForNew(chatId, rubles);
     return true;
   }
   if (st.action === "payment.create") {

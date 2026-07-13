@@ -10,9 +10,11 @@ import {
   seedEvent,
 } from "./helpers/fake-google";
 import { contactKey, encodeToken } from "@/lib/link";
-import { answerCallback, editMessageText, notifyRequest } from "@/lib/telegram";
-import { recolorStudent } from "@/lib/coloring";
+import { answerCallback, editMessageText, notifyRequest, sendOwner, sendTo } from "@/lib/telegram";
+import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { setLessonStatusByEvent } from "@/lib/lessons";
+import { getStudent, updateStudent } from "@/lib/students";
+import { notifyStudentById } from "@/lib/notify";
 
 vi.mock("googleapis", async () => {
   const { google } = await import("./helpers/fake-google");
@@ -21,23 +23,35 @@ vi.mock("googleapis", async () => {
 vi.mock("@/lib/telegram", () => ({
   notifyRequest: vi.fn(async () => {}),
   sendOwner: vi.fn(async () => {}),
+  sendTo: vi.fn(async () => {}),
   answerCallback: vi.fn(async () => {}),
   editMessageText: vi.fn(async () => {}),
   escapeHtml: (s: string) => s,
   inlineKeyboard: (rows: unknown) => ({ inline_keyboard: rows }),
   forceReply: () => ({ force_reply: true }),
+  botUsername: vi.fn(async () => "test_bot"),
 }));
 vi.mock("@/lib/students", () => ({
   upsertStudent: vi.fn(async () => ({ id: "stu-1" })),
   getStudent: vi.fn(async () => null),
   getStudentByContactKey: vi.fn(async () => null),
+  updateStudent: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/notify", () => ({
+  notifyStudent: vi.fn(async () => {}),
+  notifyStudentById: vi.fn(async () => {}),
+  studentTgInfo: vi.fn(async () => ({ connected: false, link: "" })),
 }));
 vi.mock("@/lib/lessons", () => ({
   recordLesson: vi.fn(async () => {}),
   setLessonStatusByEvent: vi.fn(async () => {}),
   updateLessonByEvent: vi.fn(async () => {}),
 }));
-vi.mock("@/lib/coloring", () => ({ recolorStudent: vi.fn(async () => {}) }));
+vi.mock("@/lib/coloring", () => ({
+  recolorStudent: vi.fn(async () => {}),
+  markLessonMissed: vi.fn(async () => true),
+  unmarkLessonMissed: vi.fn(async () => true),
+}));
 vi.mock("@/lib/payments", () => ({ outstandingPayments: vi.fn(async () => []) }));
 // Автосчета тестируются отдельно (test/autobill.test.ts) — здесь глушим.
 vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
@@ -48,8 +62,8 @@ vi.mock("@/lib/crm-bot", () => {
     "promptDeleteStudent", "promptLessonNote", "promptNewPayment", "promptNewStudent",
     "makeStudentFull",
     "promptPaymentLink", "promptStudentNote", "sendBookingLink", "showLessons",
-    "showPayments", "showStudentCard", "showStudentsList", "submitTgForNew",
-    "toggleStudentArchive",
+    "showPayments", "showStudentCard", "showStudentsList", "submitRateForNew",
+    "submitTgForNew", "toggleStudentArchive",
   ];
   const out: Record<string, unknown> = {};
   for (const f of fns) out[f] = vi.fn(async () => false);
@@ -626,6 +640,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       payments: [],
       balance: null,
       meetLink: "",
+      tg: { connected: false, link: "" },
       nextLesson: null,
     });
   });
@@ -716,5 +731,77 @@ describe("/api/my — записи и плашка «ближайшее заня
     await tgCallback(`cr:1:${instId}`);
     const my = await getMy(TOKEN());
     expect(my.nextLesson).toBe("2026-07-13T15:10:00.000Z");
+  });
+});
+
+// ─────────────── Уведомления ученику + /start + кнопки отчёта ───────────────
+
+// Крафтовое текстовое сообщение боту (не callback).
+async function tgMessage(text: string, chatId: number) {
+  const mod = await import("@/app/api/telegram/route");
+  const res = await mod.POST(
+    new Request("http://test/api/telegram", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-bot-api-secret-token": "test-webhook-secret",
+      },
+      body: JSON.stringify({ message: { chat: { id: chatId }, text } }),
+    })
+  );
+  return res.status;
+}
+
+describe("уведомления ученику в Telegram", () => {
+  it("подтверждение заявки → уведомление ученику", async () => {
+    await bookConfirmed();
+    expect(notifyStudentById).toHaveBeenCalledWith(
+      "stu-1",
+      expect.stringContaining("подтверждена")
+    );
+  });
+
+  it("отклонение заявки → уведомление ученику", async () => {
+    await post("book", { token: TOKEN(), start: TUE_1810 });
+    const id = allStored().slice(-1)[0].id;
+    await tgCallback(`d:${id}`);
+    expect(notifyStudentById).toHaveBeenCalledWith(
+      "stu-1",
+      expect.stringContaining("не подтверждена")
+    );
+  });
+
+  it("/start <studentId> привязывает chat_id ученика (и не даёт CRM-доступа)", async () => {
+    const uuid = "123e4567-e89b-42d3-a456-426614174000";
+    vi.mocked(getStudent).mockResolvedValueOnce({ id: uuid, name: "Тест", tgChatId: "" } as any);
+    await tgMessage(`/start ${uuid}`, 999000111); // чужой чат ≠ владелец
+    expect(updateStudent).toHaveBeenCalledWith(uuid, { tgChatId: "999000111" });
+    expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("Уведомления подключены"));
+  });
+
+  it("/start с неизвестным id — вежливый отказ, ничего не пишем в БД", async () => {
+    await tgMessage("/start 123e4567-e89b-42d3-a456-426614174999", 999000111);
+    expect(updateStudent).not.toHaveBeenCalled();
+    expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("не распознана"));
+  });
+
+  it("чужой чат без deep-link не получает CRM-команды", async () => {
+    await tgMessage("/students", 999000111);
+    expect(sendTo).not.toHaveBeenCalled();
+    expect(sendOwner).not.toHaveBeenCalled();
+  });
+});
+
+describe("кнопки утреннего отчёта", () => {
+  it("«Не прошло» → markLessonMissed, «Прошло» → unmarkLessonMissed", async () => {
+    await tgCallback("lmiss:ev_x");
+    expect(markLessonMissed).toHaveBeenCalledWith("ev_x");
+    let [, msg] = vi.mocked(answerCallback).mock.calls.at(-1)!;
+    expect(msg).toContain("Пропуск");
+
+    await tgCallback("ldone:ev_x");
+    expect(unmarkLessonMissed).toHaveBeenCalledWith("ev_x");
+    [, msg] = vi.mocked(answerCallback).mock.calls.at(-1)!;
+    expect(msg).toContain("учтено");
   });
 });

@@ -12,6 +12,8 @@
 // поштучно: каждый повтор — отдельный инстанс со своим цветом. Только подтверждённые
 // занятия (pending не трогаем).
 import {
+  CALENDAR_ID,
+  calendarClient,
   listContactMasters,
   listContactOccurrences,
   setEventColor,
@@ -19,8 +21,10 @@ import {
 import { allocateBalance } from "./balance";
 import { getStudent } from "./students";
 import { sumPaidKopecks } from "./payments";
+import { MISSED_COLOR_ID } from "./config";
 
 // colorId Google Calendar: 10 Basil (зелёный), 11 Tomato (красный), 6 Tangerine (оранжевый).
+// Серый (8, MISSED_COLOR_ID) — «пропущено», ставится вручную и покраской не трогается.
 const COLOR = { paidPast: "10", unpaidPast: "11", paidFuture: "6" } as const;
 
 // Пересчитывает и применяет цвета всех подтверждённых занятий ученика.
@@ -38,6 +42,8 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения
   // на каждый повтор на 26 недель вперёд).
   for (const m of await listContactMasters(s.contactKey)) {
+    // Серое одиночное событие — пропуск, отмеченный владельцем: не сбрасываем.
+    if (m.colorId === MISSED_COLOR_ID) continue;
     if (m.colorId != null) {
       try {
         await setEventColor(m.id, null);
@@ -50,7 +56,10 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // 2. Разворачиваем повторы в отдельные занятия (после сброса мастеров их инстансы —
   // уже нейтральные) и красим по балансовой раскладке (lib/balance.ts — общий walk
   // с кабинетом и автосчетами: «всё-или-ничего» по блокам, с самых ранних).
-  const occ = await listContactOccurrences(s.contactKey);
+  // Серые (пропущенные) занятия исключаем: они не тарифицируются и остаются серыми.
+  const occ = (await listContactOccurrences(s.contactKey)).filter(
+    (o) => o.colorId !== MISSED_COLOR_ID
+  );
   const { items } = allocateBalance(occ, paidHours, new Date());
   for (const o of items) {
     const target = o.paid
@@ -68,4 +77,51 @@ export async function recolorStudent(studentId: string): Promise<void> {
       console.error("recolorStudent set occurrence failed", o.instanceId, e);
     }
   }
+}
+
+// «Не прошло»: красит занятие серым (пропуск, не тарифицируется) и пересчитывает
+// остальные цвета/баланс ученика. Возвращает false, если событие не найдено.
+export async function markLessonMissed(instanceId: string): Promise<boolean> {
+  const cal = calendarClient();
+  let ev;
+  try {
+    const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId: instanceId });
+    ev = res.data;
+  } catch {
+    return false;
+  }
+  await setEventColor(instanceId, MISSED_COLOR_ID);
+  const studentId = ev.extendedProperties?.private?.studentId;
+  if (studentId) {
+    try {
+      await recolorStudent(studentId);
+    } catch (e) {
+      console.error("markLessonMissed recolor failed", e);
+    }
+  }
+  return true;
+}
+
+// «Прошло» после ошибочного «Не прошло»: снимает серый и возвращает занятие в тариф
+// (пересчёт вернёт балансовый цвет). Для не-серого занятия ничего не делает.
+export async function unmarkLessonMissed(instanceId: string): Promise<boolean> {
+  const cal = calendarClient();
+  let ev;
+  try {
+    const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId: instanceId });
+    ev = res.data;
+  } catch {
+    return false;
+  }
+  if (ev.colorId !== MISSED_COLOR_ID) return true; // и так в тарифе
+  await setEventColor(instanceId, null);
+  const studentId = ev.extendedProperties?.private?.studentId;
+  if (studentId) {
+    try {
+      await recolorStudent(studentId);
+    } catch (e) {
+      console.error("unmarkLessonMissed recolor failed", e);
+    }
+  }
+  return true;
 }
