@@ -4,7 +4,7 @@ import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/
 import { answerCallback, editMessageText, escapeHtml, sendOwner, sendTo } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
-import { notifyStudentById } from "@/lib/notify";
+import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
 import { getStudent, updateStudent } from "@/lib/students";
 import {
   applyPendingInput,
@@ -281,6 +281,8 @@ async function handleMessage(msg: any): Promise<NextResponse> {
         chatId,
         `🔔 <b>Уведомления подключены</b>\n\nЗдравствуйте, ${escapeHtml(s.name)}! Сюда будут приходить подтверждения записи, напоминания о занятиях и счета на оплату.`
       );
+      // Закрепляем в чате ученика его постоянные ссылки (кабинет + Телемост).
+      await pinStudentLinks(s, chatId);
     } else {
       await sendTo(chatId, "Ссылка подключения не распознана. Откройте её из личного кабинета ещё раз.");
     }

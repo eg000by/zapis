@@ -51,6 +51,7 @@ export async function notifyRequest(params: {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
     reply_markup: {
       inline_keyboard: [
         [
@@ -77,21 +78,38 @@ export async function editMessageText(
     message_id: messageId,
     text,
     parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
 }
 
-// Отправка сообщения в произвольный чат (владельцу или ученику).
+// Отправка сообщения в произвольный чат (владельцу или ученику). Превью ссылок
+// выключено: карточки со ссылками (Телемост, оплата, кабинет) не разрастаются.
+// Возвращает отправленное сообщение (message_id нужен для закрепа).
 export async function sendTo(
   chatId: number | string,
   text: string,
   replyMarkup?: unknown
-): Promise<void> {
-  await api("sendMessage", {
+): Promise<{ message_id?: number } | null> {
+  const data = await api("sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
+    link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+  return data?.result ?? null;
+}
+
+// Закрепляет сообщение в чате (в личном чате с ботом права не нужны).
+export async function pinChatMessage(
+  chatId: number | string,
+  messageId: number
+): Promise<void> {
+  await api("pinChatMessage", {
+    chat_id: chatId,
+    message_id: messageId,
+    disable_notification: true,
   });
 }
 

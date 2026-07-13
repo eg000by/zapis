@@ -40,6 +40,7 @@ vi.mock("@/lib/students", () => ({
 vi.mock("@/lib/notify", () => ({
   notifyStudent: vi.fn(async () => {}),
   notifyStudentById: vi.fn(async () => {}),
+  pinStudentLinks: vi.fn(async () => {}),
   studentTgInfo: vi.fn(async () => ({ connected: false, link: "" })),
 }));
 vi.mock("@/lib/lessons", () => ({
@@ -772,11 +773,15 @@ describe("уведомления ученику в Telegram", () => {
   });
 
   it("/start <studentId> привязывает chat_id ученика (и не даёт CRM-доступа)", async () => {
+    const { pinStudentLinks } = await import("@/lib/notify");
     const uuid = "123e4567-e89b-42d3-a456-426614174000";
-    vi.mocked(getStudent).mockResolvedValueOnce({ id: uuid, name: "Тест", tgChatId: "" } as any);
+    const stu = { id: uuid, name: "Тест", tgChatId: "", trial: false, meetLink: "" };
+    vi.mocked(getStudent).mockResolvedValueOnce(stu as any);
     await tgMessage(`/start ${uuid}`, 999000111); // чужой чат ≠ владелец
     expect(updateStudent).toHaveBeenCalledWith(uuid, { tgChatId: "999000111" });
     expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("Уведомления подключены"));
+    // Ученику закрепляются его постоянные ссылки (кабинет + Телемост).
+    expect(pinStudentLinks).toHaveBeenCalledWith(stu, 999000111);
   });
 
   it("/start с неизвестным id — вежливый отказ, ничего не пишем в БД", async () => {
