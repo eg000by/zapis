@@ -32,9 +32,9 @@ and real money.
 - **Service notifications for students** — an opt-in Telegram deep-link connects a
   student's chat; they get booking confirmations, invoices with payment links, payment
   receipts and same-day lesson reminders.
-- **Morning cron** — daily digest for the teacher: yesterday's lessons with
-  "held / missed" buttons, "trial lesson passed — keep or delete?" prompts, student
-  reminders.
+- **Post-lesson pulse** — right after a lesson ends the teacher gets a "how did it
+  go?" prompt (held / missed / add a note); a daily morning cron sends students
+  same-day reminders.
 
 ## Architecture
 
@@ -63,15 +63,17 @@ Key decisions:
 
 ## Testing
 
-141 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+142 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
 → cancellation end to end, plus the balance model, auto-invoicing, payment webhook and
-cron digests.
+cron digests. On top of that, 12 hermetic Playwright e2e tests drive the real
+booking UI in a browser with every `/api/*` call intercepted.
 
 ```bash
-npm run test
+npm run test        # unit/scenario (Vitest)
+npm run test:e2e    # browser e2e (Playwright)
 ```
 
 ## Stack
@@ -91,6 +93,19 @@ Required env: Google OAuth (`GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN`, `CALENDAR_I
 `DATABASE_URL`, `LINK_SIGNING_SECRET`, `ADMIN_SECRET`, Telegram
 (`TELEGRAM_BOT_TOKEN/CHAT_ID/WEBHOOK_SECRET`), optional YooKassa
 (`YOOKASSA_SHOP_ID/SECRET_KEY`) and `CRON_SECRET`. Migrations: `npm run db:migrate`.
+
+## Docker
+
+Self-hosting without Vercel — multi-stage image on Next.js standalone output, plus a
+scheduler sidecar that replaces Vercel Cron / GitHub Actions (15-minute lesson pulse,
+daily morning reminders):
+
+```bash
+docker compose up --build   # app on :3000 + cron sidecar; secrets from .env.local
+```
+
+Secrets are runtime-only (`env_file`) — the image contains none. The database stays
+external (Supabase); run migrations from the host: `npm run db:migrate`.
 
 ---
 
@@ -123,18 +138,33 @@ Required env: Google OAuth (`GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN`, `CALENDAR_I
   зелёный/красный/оранжевый, серый = пропуск (не тарифицируется).
 - **Уведомления ученикам** — подключение по deep-link в Telegram: подтверждения записи,
   счета со ссылкой на оплату, подтверждения оплаты, напоминания в день занятия.
-- **Утренний крон** — ежедневный дайджест преподавателю: вчерашние занятия с кнопками
-  «прошло / не прошло», вопрос «пробное прошло — продолжаем?», напоминания ученикам.
+- **Пульс после занятия** — сразу после конца занятия преподавателю приходит «как
+  прошло?» (прошло / пропуск / заметка); утренний крон шлёт ученикам напоминания о
+  сегодняшних занятиях.
 
 ## Тесты
 
-141 тест Vitest гоняет **настоящие роуты и календарную логику** поверх in-memory фейка
+142 теста Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,
-платёжный вебхук и кроны.
+платёжный вебхук и кроны. Плюс 12 герметичных браузерных e2e на Playwright —
+реальный UI записи с перехватом всех вызовов `/api/*`.
 
 ## Стек
 
 Next.js 14 (App Router) · TypeScript · Drizzle ORM + Postgres (Supabase) ·
 Google Calendar API (OAuth) · Telegram Bot API · ЮKassa · Vitest · Vercel (+ Cron)
+
+## Docker
+
+Самостоятельный хостинг без Vercel — многостадийный образ на standalone-сборке Next.js
+плюс планировщик-сайдкар вместо Vercel Cron / GitHub Actions (пульс каждые 15 минут,
+утренние напоминания раз в день):
+
+```bash
+docker compose up --build   # приложение на :3000 + крон; секреты из .env.local
+```
+
+Секретов в образе нет — только в рантайме (`env_file`). База остаётся внешней
+(Supabase); миграции — с хоста: `npm run db:migrate`.

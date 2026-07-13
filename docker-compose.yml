@@ -1,0 +1,32 @@
+# Самостоятельный хостинг без Vercel: приложение + встроенный планировщик.
+# Секреты берутся из .env.local (см. .env.example). Postgres не поднимаем —
+# сервис рассчитан на внешнюю БД (Supabase), календарь и Telegram тоже внешние.
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file: .env.local
+    restart: unless-stopped
+
+  # Замена Vercel Cron и GitHub Actions: каждые ~15 минут — пульс («как прошло
+  # занятие?»), первый прогон после 06:00 UTC (09:00 МСК) — утренние напоминания.
+  cron:
+    image: curlimages/curl:8.10.1
+    depends_on:
+      - app
+    env_file: .env.local
+    restart: unless-stopped
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        while true; do
+          curl -fsS -m 60 -H "Authorization: Bearer $${CRON_SECRET}" http://app:3000/api/cron/pulse || true
+          today=$$(date -u +%Y%m%d)
+          if [ "$$(date -u +%H)" -ge 6 ] && [ "$$today" != "$$(cat /tmp/morning-done 2>/dev/null)" ]; then
+            curl -fsS -m 60 -H "Authorization: Bearer $${CRON_SECRET}" http://app:3000/api/cron/morning || true
+            echo "$$today" > /tmp/morning-done
+          fi
+          sleep 900
+        done
