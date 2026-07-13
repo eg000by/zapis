@@ -143,6 +143,7 @@ describe("отчёт «занятия за вчера»", () => {
     const kb = JSON.stringify(keyboard);
     expect(kb).toContain("ldone:ev1_a");
     expect(kb).toContain("lmiss:ev1_a");
+    expect(kb).toContain("lrep:ev1_a"); // 📝 заметка к занятию
     expect(kb).toContain("ldone:ev2_b");
     expect(kb).toContain("lmiss:ev2_b");
   });

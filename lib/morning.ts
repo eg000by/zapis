@@ -84,6 +84,7 @@ export async function sendYesterdayReport(now: Date): Promise<{ lessons: number 
     rows.push([
       { text: `✅ ${label}`, data: `ldone:${o.instanceId}` },
       { text: "❌ не прошло", data: `lmiss:${o.instanceId}` },
+      { text: "📝", data: `lrep:${o.instanceId}` },
     ]);
   }
   await sendOwner(lines.join("\n"), inlineKeyboard(rows));

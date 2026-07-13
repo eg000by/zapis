@@ -9,7 +9,13 @@ import {
   type TgButton,
 } from "./telegram";
 import { deleteStudent, getStudent, listStudents, updateStudent, upsertStudent } from "./students";
-import { getLesson, listStudentLessons, setLessonNote } from "./lessons";
+import {
+  findOrCreateOccurrenceLesson,
+  getLesson,
+  listStudentLessons,
+  setLessonNote,
+} from "./lessons";
+import { CALENDAR_ID, calendarClient } from "./google";
 import {
   createPayment,
   deletePayment,
@@ -593,6 +599,40 @@ export async function promptStudentMeetLink(
 export async function promptLessonNote(chatId: number | string, lessonId: string): Promise<void> {
   await setState(String(chatId), "lesson.note", lessonId);
   await sendOwner("✍️ Пришлите текст заметки по занятию одним сообщением:", cancelKb());
+}
+
+// Заметка из утреннего отчёта (кнопка 📝 у занятия): по инстансу календаря находим/
+// создаём строку занятия в БД и включаем обычный ввод заметки (lesson.note).
+export async function promptReportLessonNote(
+  chatId: number | string,
+  instanceId: string
+): Promise<void> {
+  const cal = calendarClient();
+  let ev;
+  try {
+    ev = (await cal.events.get({ calendarId: CALENDAR_ID, eventId: instanceId })).data;
+  } catch {
+    await sendOwner("Занятие не найдено в календаре (возможно, удалено).");
+    return;
+  }
+  const priv = ev.extendedProperties?.private || {};
+  const start = ev.start?.dateTime || ev.start?.date;
+  if (!priv.studentId || !start) {
+    await sendOwner("У занятия нет привязки к ученику — добавьте заметку из карточки: /students.");
+    return;
+  }
+  const lesson = await findOrCreateOccurrenceLesson({
+    studentId: priv.studentId,
+    calendarEventId: instanceId,
+    occurrenceStart: new Date(start),
+    subject: priv.subject || null,
+  });
+  await setState(String(chatId), "lesson.note", lesson.id);
+  const when = formatMskRange(new Date(start).toISOString(), Number(priv.lessons) || 1);
+  await sendOwner(
+    `✍️ Заметка к занятию <b>${escapeHtml(when)}</b>${lesson.note ? `\nСейчас: «${escapeHtml(lesson.note)}»` : ""} — пришлите текст одним сообщением:`,
+    cancelKb()
+  );
 }
 
 // Если бот ждёт ввод (заметку) — сохраняет и подтверждает. Возвращает true, если обработал.

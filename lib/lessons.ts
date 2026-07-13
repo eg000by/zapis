@@ -1,7 +1,7 @@
 // Сервисный слой «Занятия». Одна строка = одно занятие (блок/повтор — по факту
 // проведения). Пишется из брони best-effort: если БД недоступна, запись в календарь
 // всё равно проходит. Заметку по содержанию занятия добавляет преподаватель.
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "./db";
 import { lessons, type Lesson } from "./schema";
 
@@ -45,6 +45,29 @@ export async function listStudentLessons(studentId: string, limit = 30): Promise
 
 export async function setLessonNote(id: string, note: string): Promise<void> {
   await db().update(lessons).set({ note }).where(eq(lessons.id, id));
+}
+
+// Строка занятия для КОНКРЕТНОГО повтора (заметка из утреннего отчёта). У серии в БД
+// одна строка с временем первого занятия, поэтому для прошедшего повтора строки чаще
+// нет — ищем по ученику и точному началу, при отсутствии создаём как проведённое.
+export async function findOrCreateOccurrenceLesson(input: {
+  studentId: string;
+  calendarEventId: string;
+  occurrenceStart: Date;
+  subject?: string | null;
+}): Promise<Lesson> {
+  const [existing] = await db()
+    .select()
+    .from(lessons)
+    .where(
+      and(
+        eq(lessons.studentId, input.studentId),
+        eq(lessons.occurrenceStart, input.occurrenceStart)
+      )
+    )
+    .limit(1);
+  if (existing) return existing;
+  return recordLesson({ ...input, status: "done" });
 }
 
 // Синхронизация статуса занятия с решением по заявке в календаре

@@ -61,7 +61,7 @@ vi.mock("@/lib/crm-bot", () => {
     "deleteStudentBot", "markPaymentPaid", "pickSubjectForNew", "promptDeletePayment",
     "promptDeleteStudent", "promptLessonNote", "promptNewPayment", "promptNewStudent",
     "makeStudentFull",
-    "promptPaymentLink", "promptStudentMeetLink", "promptStudentNote", "sendBookingLink", "showLessons",
+    "promptPaymentLink", "promptReportLessonNote", "promptStudentMeetLink", "promptStudentNote", "sendBookingLink", "showLessons",
     "showPayments", "showStudentCard", "showStudentsList", "submitRateForNew",
     "submitTgForNew", "toggleStudentArchive",
   ];
@@ -793,6 +793,12 @@ describe("уведомления ученику в Telegram", () => {
 });
 
 describe("кнопки утреннего отчёта", () => {
+  it("«📝» → promptReportLessonNote с id инстанса", async () => {
+    const { promptReportLessonNote } = await import("@/lib/crm-bot");
+    await tgCallback("lrep:ev_x");
+    expect(promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_x");
+  });
+
   it("«Не прошло» → markLessonMissed, «Прошло» → unmarkLessonMissed", async () => {
     await tgCallback("lmiss:ev_x");
     expect(markLessonMissed).toHaveBeenCalledWith("ev_x");

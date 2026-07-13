@@ -21,6 +21,7 @@ import {
   promptNewPayment,
   promptNewStudent,
   promptPaymentLink,
+  promptReportLessonNote,
   promptStudentMeetLink,
   promptStudentNote,
   sendBookingLink,
@@ -186,6 +187,12 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   if (data.startsWith("ldone:")) {
     const found = await unmarkLessonMissed(data.slice(6));
     await answerCallback(cq.id, found ? "Занятие учтено ✅" : "Занятие не найдено");
+    return ok();
+  }
+  // Заметка к занятию прямо из утреннего отчёта (📝).
+  if (data.startsWith("lrep:")) {
+    await promptReportLessonNote(chatId, data.slice(5));
+    await answerCallback(cq.id);
     return ok();
   }
   if (data.startsWith("lmiss:")) {
