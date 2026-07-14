@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeIncome } from "@/lib/stats";
+import { expectedIncome, summarizeIncome } from "@/lib/stats";
 
 // «Сейчас»: 14 июля 2026 (МСК).
 const NOW = new Date("2026-07-14T09:00:00.000Z");
@@ -42,5 +42,53 @@ describe("summarizeIncome — сводка доходов", () => {
     const s = summarizeIncome({ paid: [], unpaid: [], studentsActive: [], now: NOW });
     expect(s).toMatchObject({ totalKopecks: 0, outstandingKopecks: 0, activeStudents: 0, paidCount: 0 });
     expect(s.byMonth.every((m) => m.kopecks === 0)).toBe(true);
+    expect(s.expectedMonthKopecks).toBeNull(); // календарь не считали
+  });
+
+  it("ожидаемый доход прокидывается в сводку", () => {
+    const s = summarizeIncome({
+      paid: [],
+      unpaid: [],
+      studentsActive: [],
+      expectedMonthKopecks: 900000,
+      now: NOW,
+    });
+    expect(s.expectedMonthKopecks).toBe(900000);
+  });
+});
+
+describe("expectedIncome — ожидаемый доход за месяц по расписанию", () => {
+  const rates = new Map([
+    ["s1", 150000], // 1500 ₽/час
+    ["s2", 200000], // 2000 ₽/час
+  ]);
+
+  it("часы занятий × ставка ученика, блоки считаются целиком", () => {
+    const total = expectedIncome(
+      [
+        { hours: 1, colorId: null, studentId: "s1" },
+        { hours: 2, colorId: null, studentId: "s1" }, // блок из двух часов
+        { hours: 1, colorId: "10", studentId: "s2" }, // оплаченное прошедшее — тоже в плане месяца
+      ],
+      rates
+    );
+    expect(total).toBe(150000 * 3 + 200000);
+  });
+
+  it("пропуски (серые) и бесплатные (Sage) не считаются", () => {
+    const total = expectedIncome(
+      [
+        { hours: 1, colorId: "8", studentId: "s1" }, // пропуск
+        { hours: 1, colorId: "2", studentId: "s1" }, // бесплатное пробное
+        { hours: 1, colorId: null, studentId: "s1" },
+      ],
+      rates
+    );
+    expect(total).toBe(150000);
+  });
+
+  it("ученик без ставки даёт 0 (не ломает подсчёт)", () => {
+    const total = expectedIncome([{ hours: 3, colorId: null, studentId: "нет-такого" }], rates);
+    expect(total).toBe(0);
   });
 });

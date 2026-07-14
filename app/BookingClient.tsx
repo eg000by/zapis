@@ -12,6 +12,7 @@ interface Slot {
 }
 interface Day {
   date: string;
+  closed?: boolean; // выходной: день виден в сетке, но записи нет
   title: string;
   weekday: string;
   slots: Slot[];
@@ -752,7 +753,7 @@ export default function BookingClient({
             {days.map((d, i) => (
               <button
                 key={d.date}
-                className={`day-chip ${i === activeDay ? "active" : ""}`}
+                className={`day-chip ${i === activeDay ? "active" : ""} ${d.closed ? "closed" : ""}`}
                 onClick={() => setActiveDay(i)}
               >
                 <b>{d.weekday}</b>
@@ -762,30 +763,38 @@ export default function BookingClient({
 
           <div className="card">
             <div className="day-title">{days[activeDay].title}</div>
-            <div className="slots-grid">
-              {days[activeDay].slots.map((s) =>
-                s.busy ? (
-                  <div key={s.start} className="slot busy">
-                    {s.time}
-                    <small>занято</small>
-                  </div>
-                ) : (
-                  <button
-                    key={s.start}
-                    className={`slot ${selected.includes(s.start) ? "picked" : ""}`}
-                    disabled={busyAction}
-                    onClick={() => onSlotClick(s)}
-                  >
-                    {s.time}
-                  </button>
-                )
-              )}
-            </div>
-            <p className="hint">
-              {rescheduling
-                ? "Нажмите на свободное время — запись переедет на него."
-                : "Можно выбрать несколько слотов. Серые — уже заняты."}
-            </p>
+            {days[activeDay].closed ? (
+              <p className="hint" style={{ margin: "4px 2px" }}>
+                🌙 Выходной — в этот день занятий нет. Выберите другой день недели.
+              </p>
+            ) : (
+              <>
+                <div className="slots-grid">
+                  {days[activeDay].slots.map((s) =>
+                    s.busy ? (
+                      <div key={s.start} className="slot busy">
+                        {s.time}
+                        <small>занято</small>
+                      </div>
+                    ) : (
+                      <button
+                        key={s.start}
+                        className={`slot ${selected.includes(s.start) ? "picked" : ""}`}
+                        disabled={busyAction}
+                        onClick={() => onSlotClick(s)}
+                      >
+                        {s.time}
+                      </button>
+                    )
+                  )}
+                </div>
+                <p className="hint">
+                  {rescheduling
+                    ? "Нажмите на свободное время — запись переедет на него."
+                    : "Можно выбрать несколько слотов. Серые — уже заняты."}
+                </p>
+              </>
+            )}
           </div>
         </>
       )}

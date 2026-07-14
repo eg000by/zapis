@@ -513,6 +513,14 @@ export default async function AdminPage({
               <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.thisMonthKopecks)} ₽</div>
               <div className="hint" style={{ margin: 0 }}>этот месяц</div>
             </div>
+            {stats.expectedMonthKopecks != null && (
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: "var(--accent)" }}>
+                  {rub(stats.expectedMonthKopecks)} ₽
+                </div>
+                <div className="hint" style={{ margin: 0 }}>ожидается за месяц</div>
+              </div>
+            )}
             <div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.prevMonthKopecks)} ₽</div>
               <div className="hint" style={{ margin: 0 }}>прошлый месяц</div>

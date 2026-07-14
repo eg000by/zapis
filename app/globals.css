@@ -128,6 +128,17 @@ body {
 .day-chip.active small {
   color: rgba(255, 255, 255, 0.85);
 }
+/* Выходной: день в сетке есть, но приглушён — записи в него нет. */
+.day-chip.closed {
+  background: var(--busy-bg);
+  color: var(--busy-text);
+  border-color: var(--border);
+}
+.day-chip.closed.active {
+  background: var(--busy-text);
+  border-color: var(--busy-text);
+  color: #fff;
+}
 
 .card {
   background: var(--card);

@@ -40,6 +40,7 @@ export interface DaySlots {
   title: string; // "Пн, 7 июля"
   weekday: string; // "Пн"
   slots: Slot[];
+  closed: boolean; // выходной: день показывается в сетке, но записи нет
 }
 
 // Переводит "стеночное" время МСК в абсолютный момент (МСК = UTC+3, без DST).
@@ -98,7 +99,17 @@ export function buildWeek(busy: BusyEvent[], now = new Date()): DaySlots[] {
 
   for (const weekday of WEEK_ORDER) {
     const win = dayWindow(weekday);
-    if (!win) continue;
+    // Выходной: день остаётся в сетке (чтобы неделя была видна целиком), но без слотов.
+    if (!win) {
+      days.push({
+        date: `wd-${weekday}`,
+        weekday: WEEKDAYS_SHORT[weekday],
+        title: WEEKDAYS_FULL[weekday],
+        slots: [],
+        closed: true,
+      });
+      continue;
+    }
     const startMin = win.start * 60;
     const endMin = win.end * 60;
 
@@ -127,13 +138,12 @@ export function buildWeek(busy: BusyEvent[], now = new Date()): DaySlots[] {
       });
     }
 
-    if (slots.length === 0) continue;
-
     days.push({
       date: `wd-${weekday}`, // синтетический стабильный ключ (не дата)
       weekday: WEEKDAYS_SHORT[weekday],
       title: WEEKDAYS_FULL[weekday],
       slots,
+      closed: false,
     });
   }
 

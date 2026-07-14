@@ -63,12 +63,12 @@ Key decisions:
 
 ## Testing
 
-142 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+159 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
 → cancellation end to end, plus the balance model, auto-invoicing, payment webhook and
-cron digests. On top of that, 12 hermetic Playwright e2e tests drive the real
+cron digests. On top of that, 13 hermetic Playwright e2e tests drive the real
 booking UI in a browser with every `/api/*` call intercepted.
 
 ```bash
@@ -144,11 +144,11 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
 
 ## Тесты
 
-142 теста Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
+159 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,
-платёжный вебхук и кроны. Плюс 12 герметичных браузерных e2e на Playwright —
+платёжный вебхук и кроны. Плюс 13 герметичных браузерных e2e на Playwright —
 реальный UI записи с перехватом всех вызовов `/api/*`.
 
 ## Стек

@@ -81,12 +81,12 @@ const INFO = { name: "Тест Тестов", subject: "Математика", t
 const TOKEN = () => encodeToken(INFO);
 const KEY = () => contactKey(INFO);
 
-// Слоты сетки (МСК): Вт/Чт/Сб 9–14, Пн/Ср 16–21. Вторник 14 июля 09:00 и повторы;
-// среда 16:00; четверг 09:00. Все — валидные старты новой сетки.
+// Слоты сетки (МСК): Вт/Чт/Сб 9–17, Пн/Ср 15–21. Вторник 14 июля 09:00 и повторы;
+// среда 16:10; четверг 09:00. Все — валидные старты сетки.
 const TUE_9 = "2026-07-14T06:00:00.000Z"; // Вт 09:00
 const TUE2_9 = "2026-07-21T06:00:00.000Z"; // Вт+7 09:00
 const TUE3_9 = "2026-07-28T06:00:00.000Z"; // Вт+14 09:00
-const WED_16 = "2026-07-15T13:00:00.000Z"; // Ср 16:00
+const WED_PM = "2026-07-15T13:10:00.000Z"; // Ср 16:10
 const THU2_9 = "2026-07-23T06:00:00.000Z"; // Чт 09:00
 // Соседние слоты вторника (09:00, 10:10, 11:20, 12:30) — для блоков/лимита.
 const TUE_A = "2026-07-14T06:00:00.000Z"; // 09:00
@@ -238,7 +238,7 @@ describe("/api/book", () => {
     });
     expect(r1.status).toBe(200);
     // Пятый час в ту же неделю (среда 16:00) — сверх лимита.
-    const r2 = await post("book", { token: TOKEN(), start: WED_16 });
+    const r2 = await post("book", { token: TOKEN(), start: WED_PM });
     expect(r2.status).toBe(409);
     expect(r2.json.error).toContain("не больше 4");
   });
@@ -289,7 +289,7 @@ describe("пробная ссылка — одно занятие", () => {
 
   it("вторая запись при живом занятии → 409", async () => {
     await post("book", { token: TRIAL(), start: TUE_9 });
-    const r = await post("book", { token: TRIAL(), start: WED_16 });
+    const r = await post("book", { token: TRIAL(), start: WED_PM });
     expect(r.status).toBe(409);
     expect(r.json.error).toContain("только на одно занятие");
   });
@@ -308,13 +308,13 @@ describe("пробная ссылка — одно занятие", () => {
     await post("book", { token: TRIAL(), start: TUE_9 });
     const id = allStored()[0].id;
     await post("cancel", { token: TRIAL(), eventId: id });
-    const r = await post("book", { token: TRIAL(), start: WED_16 });
+    const r = await post("book", { token: TRIAL(), start: WED_PM });
     expect(r.status).toBe(200);
   });
 
   it("обычной ссылки ограничения не касаются", async () => {
     await post("book", { token: TOKEN(), start: TUE_9 });
-    const r = await post("book", { token: TOKEN(), start: WED_16 });
+    const r = await post("book", { token: TOKEN(), start: WED_PM });
     expect(r.status).toBe(200);
   });
 
@@ -330,12 +330,12 @@ describe("пробная ссылка — одно занятие", () => {
 describe("/api/reschedule — вся серия", () => {
   it("переносит серию: снова pending, rev растёт, prevStart запомнен", async () => {
     const id = await bookConfirmed();
-    const r = await post("reschedule", { token: TOKEN(), eventId: id, start: WED_16 });
+    const r = await post("reschedule", { token: TOKEN(), eventId: id, start: WED_PM });
     expect(r.status).toBe(200);
 
     const ev = getStored(id)!;
     expect(ev.status).toBe("tentative");
-    expect(new Date(ev.start!.dateTime!).toISOString()).toBe(WED_16);
+    expect(new Date(ev.start!.dateTime!).toISOString()).toBe(WED_PM);
     expect(ev.recurrence).toEqual(["RRULE:FREQ=WEEKLY;COUNT=26"]);
     expect(priv(id)).toMatchObject({ status: "pending", rev: "1" });
     expect(new Date(priv(id).prevStart).toISOString()).toBe(TUE_9);
@@ -343,7 +343,7 @@ describe("/api/reschedule — вся серия", () => {
 
   it("повторный перенос сохраняет prevStart последнего ПОДТВЕРЖДЁННОГО времени", async () => {
     const id = await bookConfirmed();
-    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_16 });
+    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_PM });
     await post("reschedule", { token: TOKEN(), eventId: id, start: "2026-07-16T06:00:00.000Z" });
     expect(priv(id).rev).toBe("2");
     expect(new Date(priv(id).prevStart).toISOString()).toBe(TUE_9);
@@ -352,7 +352,7 @@ describe("/api/reschedule — вся серия", () => {
   it("чужая запись → 403", async () => {
     const id = await bookConfirmed();
     const foreign = encodeToken({ ...INFO, name: "Чужой" });
-    const r = await post("reschedule", { token: foreign, eventId: id, start: WED_16 });
+    const r = await post("reschedule", { token: foreign, eventId: id, start: WED_PM });
     expect(r.status).toBe(403);
   });
 
@@ -360,10 +360,10 @@ describe("/api/reschedule — вся серия", () => {
     const id = await bookConfirmed();
     seedEvent({
       summary: "Чужое занятие",
-      start: { dateTime: WED_16 },
-      end: { dateTime: "2026-07-15T14:00:00.000Z" },
+      start: { dateTime: WED_PM },
+      end: { dateTime: "2026-07-15T14:10:00.000Z" },
     });
-    const r = await post("reschedule", { token: TOKEN(), eventId: id, start: WED_16 });
+    const r = await post("reschedule", { token: TOKEN(), eventId: id, start: WED_PM });
     expect(r.status).toBe(409);
     expect(priv(id).status).toBe("confirmed");
   });
@@ -555,7 +555,7 @@ describe("/api/telegram — вебхук", () => {
 
   it("устаревшая карточка после переноса не подтверждает старый слот", async () => {
     const id = await bookConfirmed();
-    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_16 }); // rev=1
+    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_PM }); // rev=1
     await tgCallback(`c:${id}`); // плоская карточка первоначальной заявки (rev="")
     expect(priv(id).status).toBe("pending"); // не подтвердилось
     const [, , text] = vi.mocked(editMessageText).mock.calls.at(-1)!;
@@ -604,7 +604,7 @@ describe("/api/telegram — вебхук", () => {
 
   it("отклонение переноса СЕРИИ возвращает её на прежнее время, а не удаляет", async () => {
     const id = await bookConfirmed();
-    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_16 });
+    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_PM });
     await tgCallback(`dr:1:${id}`);
 
     const ev = getStored(id)!;
@@ -616,7 +616,7 @@ describe("/api/telegram — вебхук", () => {
 
   it("отклонение переноса серии при занятом прежнем слоте оставляет pending", async () => {
     const id = await bookConfirmed();
-    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_16 });
+    await post("reschedule", { token: TOKEN(), eventId: id, start: WED_PM });
     seedEvent({
       summary: "Чужое занятие",
       start: { dateTime: TUE_9 }, // ближайшее будущее наступление прежнего слота
@@ -625,7 +625,7 @@ describe("/api/telegram — вебхук", () => {
     await tgCallback(`dr:1:${id}`);
 
     expect(priv(id).status).toBe("pending");
-    expect(new Date(getStored(id)!.start!.dateTime!).toISOString()).toBe(WED_16);
+    expect(new Date(getStored(id)!.start!.dateTime!).toISOString()).toBe(WED_PM);
     const [, msg] = vi.mocked(answerCallback).mock.calls.at(-1)!;
     expect(String(msg)).toContain("Вернуть нельзя");
   });
@@ -734,12 +734,12 @@ describe("/api/my — записи и плашка «ближайшее заня
   it("подтверждённый разовый перенос попадает в плашку по новому времени", async () => {
     const id = await bookConfirmed();
     await post("reschedule", {
-      token: TOKEN(), eventId: id, mode: "once", occStart: TUE_9, start: "2026-07-13T13:00:00.000Z",
+      token: TOKEN(), eventId: id, mode: "once", occStart: TUE_9, start: "2026-07-13T12:00:00.000Z",
     });
     const instId = instanceIdFor(id, TUE_9);
     await tgCallback(`cr:1:${instId}`);
     const my = await getMy(TOKEN());
-    expect(my.nextLesson).toBe("2026-07-13T13:00:00.000Z");
+    expect(my.nextLesson).toBe("2026-07-13T12:00:00.000Z");
   });
 });
 

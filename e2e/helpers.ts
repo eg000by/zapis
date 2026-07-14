@@ -9,13 +9,14 @@ export function tokenUrl(info: Partial<typeof INFO> = {}): string {
   return `/?t=${encodeURIComponent(encodeToken({ ...INFO, ...info }))}`;
 }
 
-// Сетка на два дня: во вторнике один свободный и один занятый слот.
+// Сетка: во вторнике свободные и занятый слоты, среда, и пятница-выходной (closed).
 export const SLOTS = {
   days: [
     {
       date: "2026-07-14",
       title: "Вторник, 14 июля",
       weekday: "Вт",
+      closed: false,
       slots: [
         { start: "2026-07-14T07:00:00.000Z", time: "10:00", busy: false },
         { start: "2026-07-14T08:10:00.000Z", time: "11:10", busy: true },
@@ -26,7 +27,15 @@ export const SLOTS = {
       date: "2026-07-15",
       title: "Среда, 15 июля",
       weekday: "Ср",
+      closed: false,
       slots: [{ start: "2026-07-15T07:00:00.000Z", time: "10:00", busy: false }],
+    },
+    {
+      date: "wd-5",
+      title: "Пятница",
+      weekday: "Пт",
+      closed: true,
+      slots: [],
     },
   ],
 };

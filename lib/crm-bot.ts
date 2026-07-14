@@ -153,6 +153,9 @@ export async function showStats(
   const text =
     `📊 <b>Доходы</b>\n\n` +
     `За этот месяц: <b>${rub(st.thisMonthKopecks)} ₽</b>\n` +
+    (st.expectedMonthKopecks != null
+      ? `Ожидается за месяц: <b>${rub(st.expectedMonthKopecks)} ₽</b> (по расписанию)\n`
+      : "") +
     `За прошлый месяц: ${rub(st.prevMonthKopecks)} ₽\n` +
     `Всего получено: ${rub(st.totalKopecks)} ₽ (${st.paidCount} оплат)\n` +
     `Не оплачено (выставлено): ${rub(st.outstandingKopecks)} ₽\n` +
