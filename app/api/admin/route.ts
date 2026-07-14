@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteStudent, updateStudent } from "@/lib/students";
+import { deleteStudent, getStudent, updateStudent } from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
 import {
   createPayment,
@@ -7,7 +7,8 @@ import {
   setPayLink,
   setPaymentStatus,
 } from "@/lib/payments";
-import { recolorStudent } from "@/lib/coloring";
+import { markPastLessonsFree, recolorStudent } from "@/lib/coloring";
+import { deleteFutureEventsForContact } from "@/lib/google";
 
 export const dynamic = "force-dynamic";
 
@@ -46,15 +47,29 @@ export async function POST(req: Request) {
     } else if (action === "student.meetlink") {
       await updateStudent(studentId, { meetLink: String(form.get("meetLink") || "").trim() });
     } else if (action === "student.mkfull") {
-      // Пробный → полноценный: решение принимает преподаватель в любой момент.
-      await updateStudent(studentId, { trial: false });
+      // Пробный → полноценный: снимаем trial, при указанной ставке — задаём её,
+      // прошедшее пробное помечаем бесплатным (не долг), пересчитываем цвета.
+      const s = await getStudent(studentId);
+      const rub = Math.max(0, Math.round(Number(form.get("rate") || 0)));
+      await updateStudent(studentId, { trial: false, ...(rub > 0 ? { rateKopecks: rub * 100 } : {}) });
+      if (s) await recolorSafe(() => markPastLessonsFree(s.contactKey));
+      await recolorSafe(() => recolorStudent(studentId));
     } else if (action === "settings.pay") {
       const { setSetting } = await import("@/lib/settings");
       await setSetting("payMethod", String(form.get("payMethod")) === "sbp" ? "sbp" : "yookassa");
       await setSetting("sbpDetails", String(form.get("sbpDetails") || "").trim());
     } else if (action === "student.delete") {
-      // Необратимо: каскадом уходят занятия, оплаты и ссылки ученика. После —
-      // редирект в общий список (карточки уже нет), см. ветку ниже.
+      // Необратимо: каскадом уходят занятия, оплаты и ссылки ученика; будущие
+      // непроведённые занятия удаляются и из календаря. После — редирект в общий
+      // список (карточки уже нет), см. ветку ниже.
+      const s = await getStudent(studentId);
+      if (s) {
+        try {
+          await deleteFutureEventsForContact(s.contactKey);
+        } catch (e) {
+          console.error("student.delete calendar cleanup failed", e);
+        }
+      }
       await deleteStudent(studentId);
     } else if (action === "lesson.note") {
       await setLessonNote(String(form.get("lessonId") || ""), String(form.get("note") || ""));

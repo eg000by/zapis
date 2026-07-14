@@ -9,7 +9,11 @@
 import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
 import { sumPaidKopecks } from "./payments";
-import { MISSED_COLOR_ID } from "./config";
+import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
+
+// Занятия, исключённые из тарификации: пропуск (серый) и бесплатное (пробное).
+const isUntariffed = (colorId: string | null) =>
+  colorId === MISSED_COLOR_ID || colorId === FREE_COLOR_ID;
 
 export interface AllocatedOccurrence extends ColorOccurrence {
   paid: boolean; // закрыто балансом
@@ -81,10 +85,8 @@ export async function computeStudentBalance(studentId: string): Promise<StudentB
   if (!s || s.rateKopecks <= 0) return null;
   const paidKopecks = await sumPaidKopecks(s.id);
   const paidHours = Math.floor(paidKopecks / s.rateKopecks);
-  // Серые (пропущенные) занятия не тарифицируются — в раскладку не попадают.
-  const occ = (await listContactOccurrences(s.contactKey)).filter(
-    (o) => o.colorId !== MISSED_COLOR_ID
-  );
+  // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
+  const occ = (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId));
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
   return {
     ...summary,

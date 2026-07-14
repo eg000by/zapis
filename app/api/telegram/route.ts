@@ -27,6 +27,7 @@ import {
   sendBookingLink,
   showLessons,
   showPayments,
+  showStats,
   showStudentCard,
   showStudentTools,
   showStudentsList,
@@ -94,6 +95,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   if (data === "stusarch") {
     await showStudentsList(chatId, messageId, true);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "stats") {
+    await showStats(chatId, messageId);
     await answerCallback(cq.id);
     return ok();
   }
@@ -263,6 +269,7 @@ const HELP =
   "<b>🤖 Команды</b>\n\n" +
   "👥 /students — ученики, счета, заметки, ссылки\n" +
   "➕ /new — новый ученик + ссылка на запись\n" +
+  "📊 /stats — доходы\n" +
   "❓ /help — эта справка\n\n" +
   "<b>Внутри карточки ученика:</b>\n" +
   "💳 счета (создать / отметить / удалить) · 📅 занятия и заметки · ⚙️ Ещё (заметка, Телемост, архив, удаление). Ссылка на запись — в тексте карточки.";
@@ -312,6 +319,10 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
   if (text.startsWith("/students")) {
     await showStudentsList(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/stats")) {
+    await showStats(chatId, null);
     return ok();
   }
   if (text.startsWith("/new")) {

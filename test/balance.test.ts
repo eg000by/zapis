@@ -112,4 +112,16 @@ describe("computeStudentBalance — баланс в деньгах", () => {
     expect(b).toMatchObject({ debtHours: 0, debtKopecks: 0, pastPaidHours: 1, paidUntil: PAST2 });
     expect(b.items.map((i) => i.instanceId)).toEqual([`i-${PAST2}`]);
   });
+
+  it("бесплатное пробное (Sage, цвет 2) не висит долгом", async () => {
+    vi.mocked(getStudent).mockResolvedValue({ id: "s", contactKey: "k", rateKopecks: 150000 } as any);
+    vi.mocked(sumPaidKopecks).mockResolvedValue(0); // ничего не оплачено
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      { ...occ(PAST1), colorId: "2" }, // бесплатное пробное — вне тарификации
+    ] as any);
+
+    const b = (await computeStudentBalance("s"))!;
+    expect(b).toMatchObject({ debtHours: 0, debtKopecks: 0 });
+    expect(b.items).toHaveLength(0);
+  });
 });

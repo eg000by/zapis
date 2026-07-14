@@ -21,11 +21,14 @@ import {
 import { allocateBalance } from "./balance";
 import { getStudent } from "./students";
 import { sumPaidKopecks } from "./payments";
-import { MISSED_COLOR_ID } from "./config";
+import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // colorId Google Calendar: 10 Basil (зелёный), 11 Tomato (красный), 6 Tangerine (оранжевый).
-// Серый (8, MISSED_COLOR_ID) — «пропущено», ставится вручную и покраской не трогается.
+// Серый (8) — «пропущено», Sage (2) — «бесплатное»: оба ставятся отдельно, покраской не
+// трогаются и в тарификацию не идут.
 const COLOR = { paidPast: "10", unpaidPast: "11", paidFuture: "6" } as const;
+const isUntariffed = (colorId: string | null) =>
+  colorId === MISSED_COLOR_ID || colorId === FREE_COLOR_ID;
 
 // Пересчитывает и применяет цвета всех подтверждённых занятий ученика.
 // Триггеры: отметка/снятие/удаление оплаты, подтверждение заявки, перенос.
@@ -42,8 +45,8 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения
   // на каждый повтор на 26 недель вперёд).
   for (const m of await listContactMasters(s.contactKey)) {
-    // Серое одиночное событие — пропуск, отмеченный владельцем: не сбрасываем.
-    if (m.colorId === MISSED_COLOR_ID) continue;
+    // Серое (пропуск) или Sage (бесплатное) одиночное событие — не сбрасываем.
+    if (isUntariffed(m.colorId)) continue;
     if (m.colorId != null) {
       try {
         await setEventColor(m.id, null);
@@ -56,10 +59,9 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // 2. Разворачиваем повторы в отдельные занятия (после сброса мастеров их инстансы —
   // уже нейтральные) и красим по балансовой раскладке (lib/balance.ts — общий walk
   // с кабинетом и автосчетами: «всё-или-ничего» по блокам, с самых ранних).
-  // Серые (пропущенные) занятия исключаем: они не тарифицируются и остаются серыми.
-  const occ = (await listContactOccurrences(s.contactKey)).filter(
-    (o) => o.colorId !== MISSED_COLOR_ID
-  );
+  // Пропущенные (серые) и бесплатные (Sage) занятия исключаем: не тарифицируются,
+  // цвет за ними сохраняется.
+  const occ = (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId));
   const { items } = allocateBalance(occ, paidHours, new Date());
   for (const o of items) {
     const target = o.paid
@@ -75,6 +77,21 @@ export async function recolorStudent(studentId: string): Promise<void> {
       await setEventColor(o.instanceId, target);
     } catch (e) {
       console.error("recolorStudent set occurrence failed", o.instanceId, e);
+    }
+  }
+}
+
+// Помечает все ПРОШЕДШИЕ занятия ученика бесплатными (Sage) — при переводе пробного
+// в полноценные, чтобы состоявшееся пробное не висело долгом. Уже серые/бесплатные
+// не трогаем. Будущие занятия не затрагиваются.
+export async function markPastLessonsFree(contactKey: string): Promise<void> {
+  const now = Date.now();
+  for (const o of await listContactOccurrences(contactKey)) {
+    if (o.start.getTime() >= now || isUntariffed(o.colorId)) continue;
+    try {
+      await setEventColor(o.instanceId, FREE_COLOR_ID);
+    } catch (e) {
+      console.error("markPastLessonsFree failed", o.instanceId, e);
     }
   }
 }

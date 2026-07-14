@@ -8,9 +8,7 @@ import {
   SLOT_MINUTES,
   SLOT_STEP_MINUTES,
   TIMEZONE,
-  WORK_DAYS,
-  WORK_END_HOUR,
-  WORK_START_HOUR,
+  dayWindow,
 } from "./config";
 
 // Длительность блока из `lessons` подряд идущих занятий, в минутах:
@@ -91,16 +89,18 @@ function nextOccurrence(weekday: number, hh: number, mm: number, now: Date): Dat
   return cand;
 }
 
-// Строит «обезличенную» неделю: дни Пн–Вс (из WORK_DAYS) с одинаковой сеткой слотов.
-// start слота — ISO ближайшего будущего наступления (для записи серия начнётся с него).
-// Слот занят, если хотя бы одно из ближайших AVAILABILITY_WEEKS наступлений занято.
+// Строит «обезличенную» неделю: доступные дни (из WORK_HOURS) со своей сеткой слотов —
+// у каждого дня своё рабочее окно. start слота — ISO ближайшего будущего наступления
+// (для записи серия начнётся с него). Слот занят, если хотя бы одно из ближайших
+// AVAILABILITY_WEEKS наступлений занято.
 export function buildWeek(busy: BusyEvent[], now = new Date()): DaySlots[] {
   const days: DaySlots[] = [];
-  const startMin = WORK_START_HOUR * 60;
-  const endMin = WORK_END_HOUR * 60;
 
   for (const weekday of WEEK_ORDER) {
-    if (!WORK_DAYS.includes(weekday)) continue;
+    const win = dayWindow(weekday);
+    if (!win) continue;
+    const startMin = win.start * 60;
+    const endMin = win.end * 60;
 
     const slots: Slot[] = [];
     // Шаг сетки — SLOT_STEP_MINUTES (занятие + перерыв). Последний урок должен
@@ -155,19 +155,20 @@ export function validateSlot(
   if (isNaN(start.getTime())) return { ok: false, reason: "Некорректное время" };
   if (start <= now) return { ok: false, reason: "Это время уже прошло" };
 
-  // Блок должен попадать в сетку рабочих часов МСК.
+  // Блок должен попадать в сетку рабочих часов МСК своего дня недели.
   const shifted = new Date(start.getTime() + MSK_OFFSET_MINUTES * 60000);
   const minutesOfDay = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
   const weekday = shifted.getUTCDay();
-  const offset = minutesOfDay - WORK_START_HOUR * 60;
+  const win = dayWindow(weekday);
+  if (!win) return { ok: false, reason: "Этот день недоступен" };
+  const offset = minutesOfDay - win.start * 60;
   const span = blockSpanMinutes(lessons);
   if (offset < 0 || offset % SLOT_STEP_MINUTES !== 0) {
     return { ok: false, reason: "Время вне сетки" };
   }
-  if (WORK_START_HOUR * 60 + offset + span > WORK_END_HOUR * 60) {
+  if (win.start * 60 + offset + span > win.end * 60) {
     return { ok: false, reason: "Время вне рабочих часов" };
   }
-  if (!WORK_DAYS.includes(weekday)) return { ok: false, reason: "Этот день недоступен" };
 
   const end = new Date(start.getTime() + span * 60000);
   if (overlaps(start, end, busy)) return { ok: false, reason: "Слот уже занят" };

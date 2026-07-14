@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
+import {
+  markLessonMissed,
+  markPastLessonsFree,
+  recolorStudent,
+  unmarkLessonMissed,
+} from "@/lib/coloring";
 import { listContactMasters, listContactOccurrences, setEventColor } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { sumPaidKopecks } from "@/lib/payments";
@@ -151,6 +156,33 @@ describe("recolorStudent — балансовая покраска", () => {
     await recolorStudent("stu-1");
 
     expect(applied()).toEqual({ "i-2026-07-08T15:10:00.000Z": "10" });
+  });
+
+  it("бесплатное (Sage, 2) не тарифицируется, цвет сохраняется, мастер не сбрасывается", async () => {
+    vi.mocked(sumPaidKopecks).mockResolvedValue(150000); // 1 час
+    vi.mocked(listContactMasters).mockResolvedValue([{ id: "free-single", colorId: "2" }] as any);
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      occ("2026-07-01T15:10:00.000Z", 1, "2"), // бесплатное пробное — вне тарификации
+      occ("2026-07-08T15:10:00.000Z"), // закрывается оплаченным часом → зелёный
+    ] as any);
+
+    await recolorStudent("stu-1");
+
+    expect(applied()).toEqual({ "i-2026-07-08T15:10:00.000Z": "10" });
+  });
+});
+
+describe("markPastLessonsFree — пробное становится бесплатным при переводе в полноценные", () => {
+  it("красит прошедшие занятия в Sage (2); будущие и уже серые/бесплатные не трогает", async () => {
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      occ("2026-07-01T15:10:00.000Z"), // прошло → Sage
+      occ("2026-07-05T15:10:00.000Z", 1, "8"), // прошло, но серое → пропуск, не трогаем
+      occ("2026-07-20T15:10:00.000Z"), // будущее → не трогаем
+    ] as any);
+
+    await markPastLessonsFree("key");
+
+    expect(applied()).toEqual({ "i-2026-07-01T15:10:00.000Z": "2" });
   });
 });
 

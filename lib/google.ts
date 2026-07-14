@@ -205,6 +205,76 @@ export interface BookingEvent {
   origStart: string; // для moved — исходное время занятия до переноса (ISO), иначе ""
 }
 
+// Момент в формате RRULE UNTIL (UTC): "20260714T090000Z".
+function utcRuleStamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`
+  );
+}
+
+// Обрезает RRULE до момента stamp: убирает COUNT/UNTIL и ставит UNTIL=stamp
+// (будущие наступления после stamp пропадают, прошлые остаются).
+function truncateRrule(rrule: string, stamp: string): string {
+  const parts = rrule
+    .replace(/^RRULE:/i, "")
+    .split(";")
+    .filter((p) => p && !/^(COUNT|UNTIL)=/i.test(p));
+  parts.push(`UNTIL=${stamp}`);
+  return `RRULE:${parts.join(";")}`;
+}
+
+// Удаляет все БУДУЩИЕ непроведённые занятия ученика из календаря (при удалении ученика):
+// одиночные будущие события — целиком; серии, начавшиеся в прошлом, — обрезает по
+// UNTIL=сейчас (прошлые занятия-история остаются); серии целиком в будущем — целиком.
+// Возвращает число затронутых мастер-событий.
+export async function deleteFutureEventsForContact(key: string): Promise<number> {
+  const cal = calendarClient();
+  const now = Date.now();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
+    timeMin: new Date(now - 400 * 86400000).toISOString(),
+    timeMax: new Date(now + 400 * 86400000).toISOString(),
+    singleEvents: false,
+    maxResults: 250,
+  });
+  let affected = 0;
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled" || !ev.id) continue;
+    const startIso = ev.start?.dateTime || ev.start?.date;
+    if (!startIso) continue;
+    const isSeries = Array.isArray(ev.recurrence) && ev.recurrence.length > 0;
+    const startMs = new Date(startIso).getTime();
+    try {
+      if (!isSeries) {
+        if (startMs > now) {
+          await cal.events.delete({ calendarId: CALENDAR_ID, eventId: ev.id });
+          affected++;
+        }
+        continue;
+      }
+      if (startMs > now) {
+        // Вся серия ещё впереди — удаляем целиком.
+        await cal.events.delete({ calendarId: CALENDAR_ID, eventId: ev.id });
+        affected++;
+        continue;
+      }
+      // Серия уже идёт: обрезаем будущие наступления, прошлые оставляем.
+      const stamp = utcRuleStamp(new Date(now));
+      const recurrence = (ev.recurrence || []).map((r) =>
+        /^RRULE:/i.test(r) ? truncateRrule(r, stamp) : r
+      );
+      await cal.events.patch({ calendarId: CALENDAR_ID, eventId: ev.id, requestBody: { recurrence } });
+      affected++;
+    } catch (e) {
+      console.error("deleteFutureEventsForContact failed", ev.id, e);
+    }
+  }
+  return affected;
+}
+
 // Множество id «живых» (не отменённых) событий владельца ссылки — для сверки CRM
 // с календарём (источник правды). Занятие в БД, чьё событие удалено/отменено —
 // уже не активно. Берём широкое окно (±~13 мес), чтобы захватить и прошлые занятия.

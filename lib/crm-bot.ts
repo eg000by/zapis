@@ -15,7 +15,12 @@ import {
   listStudentLessons,
   setLessonNote,
 } from "./lessons";
-import { CALENDAR_ID, calendarClient, listContactOccurrences } from "./google";
+import {
+  CALENDAR_ID,
+  calendarClient,
+  deleteFutureEventsForContact,
+  listContactOccurrences,
+} from "./google";
 import {
   createPayment,
   deletePayment,
@@ -25,11 +30,12 @@ import {
   setPayLink,
   setPaymentStatus,
 } from "./payments";
-import { recolorStudent } from "./coloring";
+import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
 import { getOrCreateStudentLinkCode } from "./shortlink";
 import { MISSED_COLOR_ID, SUBJECTS, siteBaseUrl } from "./config";
+import { computeIncomeStats } from "./stats";
 import { formatMskRange } from "./slots";
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
@@ -76,7 +82,9 @@ export async function showStudentsList(
     return;
   }
 
-  const rows: TgButton[][] = [[{ text: "➕ Новый ученик", data: "newstu" }]];
+  const rows: TgButton[][] = [
+    [{ text: "➕ Новый ученик", data: "newstu" }, { text: "📊 Доходы", data: "stats" }],
+  ];
   for (const s of active) rows.push([{ text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` }]);
   if (inArchive.length) rows.push([{ text: `🗄 Архив (${inArchive.length})`, data: "stusarch" }]);
   const text = active.length
@@ -125,6 +133,32 @@ export async function showStudentCard(
   rows.push([{ text: "⬅️ Все ученики", data: "stus" }]);
 
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
+}
+
+// Статистика доходов: суммы за месяц/прошлый месяц/всё время, долг, мини-график
+// по 6 месяцам. Данные — из оплаченных счетов (lib/stats.ts).
+export async function showStats(
+  chatId: number | string,
+  messageId: number | null
+): Promise<void> {
+  const st = await computeIncomeStats();
+  const max = Math.max(1, ...st.byMonth.map((m) => m.kopecks));
+  // Мини-график: столбик из блоков высотой пропорционально месяцу.
+  const bars = st.byMonth
+    .map((m) => {
+      const n = m.kopecks === 0 ? 0 : Math.max(1, Math.round((m.kopecks / max) * 8));
+      return `${m.label.padEnd(3)} ${"█".repeat(n)}${n === 0 ? "·" : ""} ${rub(m.kopecks)} ₽`;
+    })
+    .join("\n");
+  const text =
+    `📊 <b>Доходы</b>\n\n` +
+    `За этот месяц: <b>${rub(st.thisMonthKopecks)} ₽</b>\n` +
+    `За прошлый месяц: ${rub(st.prevMonthKopecks)} ₽\n` +
+    `Всего получено: ${rub(st.totalKopecks)} ₽ (${st.paidCount} оплат)\n` +
+    `Не оплачено (выставлено): ${rub(st.outstandingKopecks)} ₽\n` +
+    `Активных учеников: ${st.activeStudents}\n\n` +
+    `<b>Помесячно</b>\n<code>${bars}</code>`;
+  await emit(chatId, messageId, text, inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
 }
 
 // Раздел «технических» кнопок карточки — редкие действия не нагружают основной экран.
@@ -347,10 +381,16 @@ export async function toggleStudentArchive(
   return nowArchived;
 }
 
-// Удаляет ученика из БД (каскад). Возвращает true при успехе — для навигации в список.
+// Удаляет ученика из БД (каскад) и его будущие непроведённые занятия из календаря.
+// Возвращает true при успехе — для навигации в список.
 export async function deleteStudentBot(studentId: string): Promise<boolean> {
   const s = await getStudent(studentId);
   if (!s) return false;
+  try {
+    await deleteFutureEventsForContact(s.contactKey);
+  } catch (e) {
+    console.error("deleteStudentBot: calendar cleanup failed", e);
+  }
   await deleteStudent(studentId);
   return true;
 }
@@ -556,9 +596,27 @@ export async function chooseTrialForNew(chatId: number | string, trial: boolean)
   await showStudentCard(chatId, null, s.id);
 }
 
-// Переводит пробного ученика в полноценные (кнопка «Полноценный ученик» из
-// уведомления «пробное прошло»). Снимает флаг trial и сразу шлёт регулярную
-// ссылку на запись — её остаётся переслать ученику.
+// Завершает перевод в полноценные: снимает trial, помечает прошедшее пробное
+// бесплатным (не долг), пересчитывает цвета и шлёт регулярную ссылку на запись.
+async function finalizeMkfull(chatId: number | string, s: { id: string; name: string; contactKey: string; rateKopecks: number }): Promise<void> {
+  await updateStudent(s.id, { trial: false });
+  try {
+    await markPastLessonsFree(s.contactKey);
+    await recolorStudent(s.id);
+  } catch (e) {
+    console.error("finalizeMkfull free/recolor failed", e);
+  }
+  await sendOwner(
+    `✅ <b>${escapeHtml(s.name)}</b> — теперь полноценный ученик${
+      s.rateKopecks > 0 ? ` · ${rub(s.rateKopecks)} ₽/час` : ""
+    }.\nПрошедшее пробное занятие отмечено бесплатным. Сейчас пришлю регулярную ссылку.`
+  );
+  await sendBookingLink(chatId, s.id, false);
+}
+
+// Переводит пробного ученика в полноценные (кнопка «Сделать полноценным»). Если ставка
+// ещё не задана — сперва спрашивает её (баланс и счета считаются от ставки), иначе
+// переводит сразу.
 export async function makeStudentFull(
   chatId: number | string,
   messageId: number | null,
@@ -569,13 +627,19 @@ export async function makeStudentFull(
     await emit(chatId, messageId, "Ученик не найден (возможно, уже удалён).");
     return;
   }
-  await updateStudent(s.id, { trial: false });
-  await emit(
-    chatId,
-    messageId,
-    `✅ <b>${escapeHtml(s.name)}</b> — теперь полноценный ученик.\nСейчас пришлю регулярную ссылку на запись.`
+  if (s.rateKopecks > 0) {
+    if (messageId != null) {
+      await editMessageText(chatId, messageId, `🎓 Перевод в полноценные: <b>${escapeHtml(s.name)}</b>`);
+    }
+    await finalizeMkfull(chatId, s);
+    return;
+  }
+  // Без ставки — спрашиваем её, перевод завершим после ввода (applyPendingInput).
+  await setState(String(chatId), "stu.mkfull.rate", s.id);
+  await sendOwner(
+    `🎓 Перевод <b>${escapeHtml(s.name)}</b> в полноценные.\n💰 Пришлите ставку за час, ₽ — например <code>1500</code>. От неё считаются баланс и счета.`,
+    cancelKb()
   );
-  await sendBookingLink(chatId, s.id, false);
 }
 
 // Отменяет текущий ожидаемый ввод (заметка/счёт/ссылка/новый ученик) и по
@@ -599,6 +663,8 @@ export async function cancelPending(chatId: number | string): Promise<void> {
     } else if (st.action === "payment.link") {
       const p = await getPayment(st.targetId);
       if (p) await showPayments(chatId, null, p.studentId);
+    } else if (st.action === "stu.mkfull.rate") {
+      await showStudentCard(chatId, null, st.targetId);
     } else if (st.action.startsWith("stu.new")) {
       await showStudentsList(chatId, null);
     }
@@ -713,6 +779,20 @@ export async function applyPendingInput(chatId: number | string, text: string): 
       return true;
     }
     await submitRateForNew(chatId, rubles);
+    return true;
+  }
+  if (st.action === "stu.mkfull.rate") {
+    const rubles = Number(value.replace(/\s/g, ""));
+    if (!Number.isFinite(rubles) || rubles <= 0) {
+      await sendOwner("Нужна ставка числом рублей за час, например <code>1500</code>.");
+      return true;
+    }
+    const target = st.targetId;
+    await updateStudent(target, { rateKopecks: Math.round(rubles) * 100 });
+    await clearState(String(chatId));
+    const fresh = await getStudent(target);
+    if (fresh) await finalizeMkfull(chatId, fresh);
+    else await sendOwner("Ученик не найден.");
     return true;
   }
   if (st.action === "payment.create") {

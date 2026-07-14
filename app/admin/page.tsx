@@ -213,12 +213,22 @@ export default async function AdminPage({
             <label style={{ marginTop: 0 }}>🎯 Пробный ученик</label>
             <p className="hint" style={{ marginTop: 0 }}>
               Продолжаете заниматься? Переведите в полноценные — снимется ограничение
-              «одно занятие», ссылка на запись станет еженедельной.
+              «одно занятие», ссылка станет еженедельной, а прошедшее пробное занятие
+              отметится бесплатным (не попадёт в долг). Заодно задайте ставку.
             </p>
             <form method="POST" action="/api/admin">
               <input type="hidden" name="key" value={key} />
               <input type="hidden" name="action" value="student.mkfull" />
               <input type="hidden" name="studentId" value={student.id} />
+              <label style={{ marginTop: 0 }}>Ставка, ₽/час</label>
+              <input
+                name="rate"
+                type="number"
+                min={0}
+                step={50}
+                defaultValue={student.rateKopecks > 0 ? student.rateKopecks / 100 : ""}
+                placeholder="напр. 1500"
+              />
               <button className="btn" type="submit">
                 🎓 Сделать полноценным
               </button>
@@ -479,12 +489,71 @@ export default async function AdminPage({
     console.error("admin pay settings", e);
   }
 
+  // Статистика доходов.
+  let stats: import("@/lib/stats").IncomeStats | null = null;
+  try {
+    const { computeIncomeStats } = await import("@/lib/stats");
+    stats = await computeIncomeStats();
+  } catch (e) {
+    console.error("admin income stats", e);
+  }
+
   return (
     <div className="wrap">
       <div className="hero">
         <h1>Ученики</h1>
         <p>Создайте персональную ссылку — ученик добавится в базу автоматически.</p>
       </div>
+
+      {stats && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <label style={{ marginTop: 0 }}>📊 Доходы</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, margin: "6px 0 10px" }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.thisMonthKopecks)} ₽</div>
+              <div className="hint" style={{ margin: 0 }}>этот месяц</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.prevMonthKopecks)} ₽</div>
+              <div className="hint" style={{ margin: 0 }}>прошлый месяц</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.totalKopecks)} ₽</div>
+              <div className="hint" style={{ margin: 0 }}>всего · {stats.paidCount} оплат</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--danger)" }}>
+                {rub(stats.outstandingKopecks)} ₽
+              </div>
+              <div className="hint" style={{ margin: 0 }}>не оплачено</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.activeStudents}</div>
+              <div className="hint" style={{ margin: 0 }}>активных учеников</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 90 }}>
+            {stats.byMonth.map((m, i) => {
+              const max = Math.max(1, ...stats!.byMonth.map((x) => x.kopecks));
+              const h = m.kopecks === 0 ? 2 : Math.max(4, Math.round((m.kopecks / max) * 78));
+              return (
+                <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                  <div
+                    title={`${rub(m.kopecks)} ₽`}
+                    style={{
+                      height: h,
+                      background: "var(--accent)",
+                      borderRadius: "6px 6px 0 0",
+                      opacity: m.kopecks === 0 ? 0.25 : 1,
+                    }}
+                  />
+                  <div className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>{m.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <form className="card" method="GET" style={{ marginTop: 16 }}>
         <input type="hidden" name="key" value={key} />
