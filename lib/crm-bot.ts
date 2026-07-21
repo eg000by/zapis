@@ -38,6 +38,13 @@ import { getOrCreateStudentLinkCode } from "./shortlink";
 import { MISSED_COLOR_ID, SUBJECTS, siteBaseUrl } from "./config";
 import { computeIncomeStats } from "./stats";
 import { formatMskRange } from "./slots";
+import {
+  DEFAULT_SBP_DETAILS,
+  getPayMethod,
+  getSbpDetails,
+  setSetting,
+  type PayMethod,
+} from "./settings";
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 
@@ -163,6 +170,48 @@ export async function showStats(
     `Активных учеников: ${st.activeStudents}\n\n` +
     `<b>Помесячно</b>\n<code>${bars}</code>`;
   await emit(chatId, messageId, text, inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
+}
+
+// Раздел «Способ оплаты» — паритет с /admin: ЮKassa (кнопка-ссылка) или СБП-перевод
+// (реквизиты в кабинете, оплата отмечается вручную) + текст реквизитов СБП.
+export async function showPaySettings(
+  chatId: number | string,
+  messageId: number | null
+): Promise<void> {
+  const method = await getPayMethod().catch(() => "yookassa" as PayMethod);
+  const sbp = await getSbpDetails().catch(() => DEFAULT_SBP_DETAILS);
+  const text =
+    `💳 <b>Способ оплаты</b>\n\n` +
+    `Сейчас: <b>${method === "sbp" ? "СБП-перевод" : "ЮKassa (кнопка оплаты)"}</b>\n\n` +
+    (method === "sbp"
+      ? `Реквизиты, которые видит ученик:\n<code>${escapeHtml(sbp)}</code>`
+      : `Ученику показывается кнопка «Оплатить» со ссылкой ЮKassa.`);
+  const keyboard = inlineKeyboard([
+    [{ text: `${method === "yookassa" ? "✅ " : ""}ЮKassa`, data: "setpay:yookassa" }],
+    [{ text: `${method === "sbp" ? "✅ " : ""}СБП-перевод`, data: "setpay:sbp" }],
+    [{ text: "✏️ Изменить реквизиты СБП", data: "sbpedit" }],
+  ]);
+  await emit(chatId, messageId, text, keyboard);
+}
+
+// Переключение способа оплаты из бота (тот же setSetting, что и /admin).
+export async function setPayMethodBot(
+  chatId: number | string,
+  messageId: number | null,
+  method: PayMethod
+): Promise<void> {
+  await setSetting("payMethod", method === "sbp" ? "sbp" : "yookassa");
+  await showPaySettings(chatId, messageId);
+}
+
+// Приглашение изменить реквизиты СБП (forced reply через botState).
+export async function promptSbpDetails(chatId: number | string): Promise<void> {
+  const cur = await getSbpDetails().catch(() => DEFAULT_SBP_DETAILS);
+  await setState(String(chatId), "settings.sbp", "");
+  await sendOwner(
+    `✏️ Пришлите новый текст реквизитов СБП (его увидит ученик в кабинете).\nТекущий:\n<code>${escapeHtml(cur)}</code>`,
+    cancelKb()
+  );
 }
 
 // Раздел «технических» кнопок карточки — редкие действия не нагружают основной экран.
@@ -824,6 +873,17 @@ export async function applyPendingInput(chatId: number | string, text: string): 
     const p = await getPayment(st.targetId);
     await sendOwner("✅ Ссылка на оплату сохранена.");
     if (p) await showPayments(chatId, null, p.studentId);
+    return true;
+  }
+  if (st.action === "settings.sbp") {
+    if (!value) {
+      await sendOwner("Текст пустой — пришлите реквизиты СБП.");
+      return true;
+    }
+    await setSetting("sbpDetails", value);
+    await clearState(String(chatId));
+    await sendOwner("✅ Реквизиты СБП обновлены.");
+    await showPaySettings(chatId, null);
     return true;
   }
   if (st.action === "student.note") {

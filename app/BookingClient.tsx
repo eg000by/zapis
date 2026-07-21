@@ -589,9 +589,6 @@ export default function BookingClient({
               −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
             </span>
           </div>
-          <p className="pkg-alt">
-            Или поштучно — {fmtRub(packageOffer.perLessonKopecks)} за занятие (счёт выше).
-          </p>
           {packageOffer.payLink ? (
             <a
               className="mini pkg-btn"

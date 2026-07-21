@@ -22,11 +22,14 @@ import {
   promptNewStudent,
   promptPaymentLink,
   promptReportLessonNote,
+  promptSbpDetails,
   promptStudentMeetLink,
   promptStudentNote,
   sendBookingLink,
+  setPayMethodBot,
   showLessons,
   showPayments,
+  showPaySettings,
   showStats,
   showStudentCard,
   showStudentTools,
@@ -119,6 +122,21 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   if (data === "stats") {
     await showStats(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "pay") {
+    await showPaySettings(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("setpay:")) {
+    await setPayMethodBot(chatId, messageId, data.slice(7) === "sbp" ? "sbp" : "yookassa");
+    await answerCallback(cq.id, "Способ оплаты обновлён 💳");
+    return ok();
+  }
+  if (data === "sbpedit") {
+    await promptSbpDetails(chatId);
     await answerCallback(cq.id);
     return ok();
   }
@@ -289,6 +307,7 @@ const HELP =
   "👥 /students — ученики, счета, заметки, ссылки\n" +
   "➕ /new — новый ученик + ссылка на запись\n" +
   "📊 /stats — доходы\n" +
+  "💳 /pay — способ оплаты (ЮKassa / СБП)\n" +
   "❓ /help — эта справка\n\n" +
   "<b>Внутри карточки ученика:</b>\n" +
   "💳 счета (создать / отметить / удалить) · 📅 занятия и заметки · ⚙️ Ещё (заметка, Телемост, архив, удаление). Ссылка на запись — в тексте карточки.";
@@ -342,6 +361,10 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
   if (text.startsWith("/stats")) {
     await showStats(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/pay")) {
+    await showPaySettings(chatId, null);
     return ok();
   }
   if (text.startsWith("/new")) {

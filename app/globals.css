@@ -573,6 +573,7 @@ a.tg-link:hover {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px 10px;
+  margin-bottom: 12px;
 }
 .pkg-price b {
   font-size: 22px;
@@ -590,11 +591,6 @@ a.tg-link:hover {
   background: rgba(22, 163, 74, 0.14);
   padding: 3px 8px;
   border-radius: 999px;
-}
-.pkg-alt {
-  margin: 8px 0 12px;
-  font-size: 13px;
-  color: var(--muted);
 }
 .pkg-btn {
   background: var(--accent);

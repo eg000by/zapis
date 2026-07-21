@@ -186,6 +186,38 @@ describe("recolorStudent — балансовая покраска", () => {
   });
 });
 
+describe("unmarkLessonMissed — «Прошло» всегда пересчитывает цвета", () => {
+  it("нейтральное прошедшее занятие → перекрашивается в долг (красный), хотя серым не было", async () => {
+    // Событие не серое (нейтральное), но уже прошло и не оплачено.
+    eventsGet.mockResolvedValueOnce({
+      data: { colorId: null, extendedProperties: { private: { studentId: "stu-1" } } },
+    });
+    vi.mocked(sumPaidKopecks).mockResolvedValue(0); // не оплачено
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      occ("2026-07-01T15:10:00.000Z"), // прошло, без оплаты → долг
+    ] as any);
+
+    const found = await unmarkLessonMissed("i-2026-07-01T15:10:00.000Z");
+
+    expect(found).toBe(true);
+    // Пересчёт покрасил прошедшее неоплаченное в «11» (красный/долг).
+    expect(applied()["i-2026-07-01T15:10:00.000Z"]).toBe("11");
+  });
+
+  it("серое занятие → снимает серый и пересчитывает", async () => {
+    eventsGet.mockResolvedValueOnce({
+      data: { colorId: "8", extendedProperties: { private: { studentId: "stu-1" } } },
+    });
+    vi.mocked(sumPaidKopecks).mockResolvedValue(0);
+    vi.mocked(listContactOccurrences).mockResolvedValue([occ("2026-07-01T15:10:00.000Z")] as any);
+
+    await unmarkLessonMissed("i-2026-07-01T15:10:00.000Z");
+
+    // Сначала снят серый (null), затем балансовая покраска в «11».
+    expect(applied()["i-2026-07-01T15:10:00.000Z"]).toBe("11");
+  });
+});
+
 describe("markPastLessonsFree — пробное становится бесплатным при переводе в полноценные", () => {
   it("красит прошедшие занятия в Sage (2); будущие и уже серые/бесплатные не трогает", async () => {
     vi.mocked(listContactOccurrences).mockResolvedValue([

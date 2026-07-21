@@ -120,8 +120,10 @@ export async function markLessonMissed(instanceId: string): Promise<boolean> {
   return true;
 }
 
-// «Прошло» после ошибочного «Не прошло»: снимает серый и возвращает занятие в тариф
-// (пересчёт вернёт балансовый цвет). Для не-серого занятия ничего не делает.
+// «Прошло»: подтверждает, что занятие состоялось. Снимает ошибочный серый (пропуск),
+// если был, и в ЛЮБОМ случае пересчитывает цвета ученика — чтобы прошедшее неоплаченное
+// занятие покрасилось в «долг» (красный), а не осталось нейтральным (время само по себе
+// перекраску не запускает — триггеры это оплата/подтверждение/пропуск).
 export async function unmarkLessonMissed(instanceId: string): Promise<boolean> {
   const cal = calendarClient();
   let ev;
@@ -131,8 +133,7 @@ export async function unmarkLessonMissed(instanceId: string): Promise<boolean> {
   } catch {
     return false;
   }
-  if (ev.colorId !== MISSED_COLOR_ID) return true; // и так в тарифе
-  await setEventColor(instanceId, null);
+  if (ev.colorId === MISSED_COLOR_ID) await setEventColor(instanceId, null);
   const studentId = ev.extendedProperties?.private?.studentId;
   if (studentId) {
     try {
