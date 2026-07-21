@@ -8,7 +8,7 @@ import {
   setPaymentStatus,
 } from "@/lib/payments";
 import { markPastLessonsFree, recolorStudent } from "@/lib/coloring";
-import { deleteFutureEventsForContact } from "@/lib/google";
+import { applyMeetLinkToEvents, deleteFutureEventsForContact } from "@/lib/google";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +45,15 @@ export async function POST(req: Request) {
     } else if (action === "student.active") {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
     } else if (action === "student.meetlink") {
-      await updateStudent(studentId, { meetLink: String(form.get("meetLink") || "").trim() });
+      const meetLink = String(form.get("meetLink") || "").trim();
+      await updateStudent(studentId, { meetLink });
+      // Обновляем ссылку в описании уже существующих событий календаря (best-effort).
+      try {
+        const s = await getStudent(studentId);
+        if (s) await applyMeetLinkToEvents(s.contactKey, meetLink);
+      } catch (e) {
+        console.error("applyMeetLinkToEvents (admin) failed", e);
+      }
     } else if (action === "student.mkfull") {
       // Пробный → полноценный: снимаем trial, при указанной ставке — задаём её,
       // прошедшее пробное помечаем бесплатным (не долг), пересчитываем цвета.

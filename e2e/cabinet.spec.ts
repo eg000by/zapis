@@ -11,15 +11,13 @@ test("кабинет: записи вместо сетки, все плашки 
   await expect(page.getByText("Ваши записи")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
 
-  // Плашки: ближайшее занятие, Телемост, уведомления в TG.
+  // Плашки: ближайшее занятие, Телемост.
   await expect(page.getByText("Ближайшее занятие")).toBeVisible();
   const meet = page.locator("a.meet-link");
   await expect(meet).toContainText("Телемост");
   await expect(meet).toHaveAttribute("href", "https://telemost.yandex.ru/j/e2e");
-  await expect(page.locator("a.tg-link")).toHaveAttribute(
-    "href",
-    "https://t.me/e2e_bot?start=stu-1"
-  );
+  // Кнопки «Подключить уведомления в Telegram» больше нет.
+  await expect(page.locator("a.tg-link")).toHaveCount(0);
 
   // Баланс: долг за 1 занятие.
   await expect(page.locator(".balance-row.debt")).toContainText("Долг");
@@ -59,19 +57,33 @@ test("экзамен ЕГЭ: два варианта оплаты — пошту
   // Поштучный автосчёт (следующее занятие) — в блоке «К оплате».
   await expect(page.getByText("Автосчёт: следующее занятие")).toBeVisible();
 
-  // Карточка пакета: цена, старая цена, выгода, кнопка.
+  // Карточка пакета: цена, старая цена, выгода — без кнопки, ссылка оплаты как у счёта.
   const pkg = page.locator(".pkg-card");
   await expect(pkg).toContainText("пакет «Месяц»");
   await expect(pkg.locator(".pkg-price b")).toHaveText("18 000 ₽");
   await expect(pkg.locator(".pkg-old")).toHaveText("20 000 ₽");
   await expect(pkg.locator(".pkg-save")).toContainText("−10%");
 
-  // Клик по «Оформить пакет» уходит в /api/pay-package (и открывает ссылку оплаты).
-  const [req] = await Promise.all([
-    page.waitForRequest((r) => r.url().includes("/api/pay-package") && r.method() === "POST"),
-    pkg.getByRole("button", { name: "Оформить пакет" }).click(),
-  ]);
-  expect(req.url()).toContain("/api/pay-package");
+  // ЮKassa-режим: ссылка «Оплатить пакет по СБП», отдельной кнопки «Оформить» нет.
+  await expect(pkg.getByRole("link", { name: /Оплатить пакет по СБП/ })).toHaveAttribute(
+    "href",
+    "https://yookassa.test/package"
+  );
+  await expect(pkg.getByRole("button", { name: "Оформить пакет" })).toHaveCount(0);
+});
+
+test("экзамен ЕГЭ в режиме СБП: пакет показывает реквизиты вместо ссылки", async ({ page }) => {
+  const my = {
+    ...MY_EGE,
+    payHint: "Перевод по СБП на номер 8 927 750-23-78 (Т-Банк или Сбер)",
+    payments: [{ ...MY_EGE.payments[0], payLink: "" }],
+    packageOffer: { ...MY_EGE.packageOffer, payLink: "" },
+  };
+  await mockApi(page, { my });
+  await page.goto(tokenUrl());
+  const pkg = page.locator(".pkg-card");
+  await expect(pkg.getByText("Перевод по СБП на номер")).toBeVisible();
+  await expect(pkg.getByRole("link", { name: /Оплатить/ })).toHaveCount(0);
 });
 
 test("нет «25-го кадра»: пока /api/my грузится — спиннер, сетка не мелькает", async ({ page }) => {

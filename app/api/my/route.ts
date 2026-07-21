@@ -40,7 +40,6 @@ const NO_BILLING = {
     savingsKopecks: number;
     savingsPercent: number;
     payLink: string; // ссылка ЮKassa существующего счёта (в СБП-режиме пусто)
-    hasInvoice: boolean; // пакет уже выставлен и ждёт оплаты
   } | null;
 };
 
@@ -91,11 +90,13 @@ export async function GET(req: Request) {
           const method = await getPayMethod().catch(() => "yookassa" as const);
           const payHint = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
 
-          // Экзаменационный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты в кабинете.
+          // Экзаменационный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты. Показываем только
+          // когда счёт-оффер уже выставлен (ensureAutoInvoices создаёт его при наличии
+          // подтверждённых занятий — до этого пакет ученику не показываем).
           const tariff = detectExamTariff(student?.subject || "");
           let packageOffer = null as (typeof NO_BILLING)["packageOffer"];
-          if (tariff) {
-            const existing = await outstandingPackage(studentId).catch(() => null);
+          const pkgInvoice = tariff ? await outstandingPackage(studentId).catch(() => null) : null;
+          if (tariff && pkgInvoice) {
             const sav = packageSavings(tariff);
             packageOffer = {
               label: tariff.label,
@@ -104,8 +105,7 @@ export async function GET(req: Request) {
               perLessonKopecks: tariff.hourlyKopecks,
               savingsKopecks: sav.kopecks,
               savingsPercent: sav.percent,
-              payLink: method === "sbp" ? "" : existing?.payLink || "",
-              hasInvoice: !!existing,
+              payLink: method === "sbp" ? "" : pkgInvoice.payLink || "",
             };
           }
           return {

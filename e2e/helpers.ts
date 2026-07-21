@@ -83,8 +83,7 @@ export const MY_EGE = {
     perLessonKopecks: 250000,
     savingsKopecks: 200000,
     savingsPercent: 10,
-    payLink: "",
-    hasInvoice: false,
+    payLink: "https://yookassa.test/package",
   },
   nextLesson: null,
 };
@@ -145,9 +144,6 @@ export async function mockApi(
     }
     if (url.includes("/api/occurrences")) {
       return route.fulfill({ json: { occurrences: ["2026-07-14T07:00:00.000Z", "2026-07-21T07:00:00.000Z"] } });
-    }
-    if (url.includes("/api/pay-package")) {
-      return route.fulfill({ json: { ok: true, payLink: "https://yookassa.test/package", amountKopecks: 1800000 } });
     }
     return route.fulfill({ json: { ok: true } });
   });

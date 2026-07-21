@@ -16,6 +16,7 @@ import {
   setLessonNote,
 } from "./lessons";
 import {
+  applyMeetLinkToEvents,
   CALENDAR_ID,
   calendarClient,
   deleteFutureEventsForContact,
@@ -840,6 +841,13 @@ export async function applyPendingInput(chatId: number | string, text: string): 
       return true;
     }
     await updateStudent(st.targetId, { meetLink: clear ? "" : value });
+    // Обновляем ссылку и в описании уже существующих событий календаря (best-effort).
+    try {
+      const s = await getStudent(st.targetId);
+      if (s) await applyMeetLinkToEvents(s.contactKey, clear ? "" : value);
+    } catch (e) {
+      console.error("applyMeetLinkToEvents (bot) failed", e);
+    }
     await clearState(String(chatId));
     await sendOwner(clear ? "✅ Ссылка Телемоста убрана." : "✅ Ссылка Телемоста закреплена в кабинете ученика.");
     await showStudentCard(chatId, null, st.targetId);

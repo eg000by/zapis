@@ -40,6 +40,51 @@ export async function setEventColor(eventId: string, colorId: string | null): Pr
   });
 }
 
+// Перестраивает строку «Телемост: …» в описании события: убирает старую (если была)
+// и добавляет новую, когда ссылка задана. Хвостовые пустые строки подчищаем.
+function withMeetLink(description: string, meetLink: string): string {
+  const lines = (description || "")
+    .split("\n")
+    .filter((l) => !/^\s*телемост\s*:/i.test(l));
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  if (meetLink) lines.push(`Телемост: ${meetLink}`);
+  return lines.join("\n");
+}
+
+// Обновляет ссылку на Телемост в описании всех подтверждённых событий ученика
+// (серии — по мастеру, одиночные — сами). Вызывается при добавлении/смене ссылки
+// в кабинете, чтобы она появилась в уже существующих событиях календаря.
+export async function applyMeetLinkToEvents(key: string, meetLink: string): Promise<number> {
+  const cal = calendarClient();
+  const now = Date.now();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis", `contactKey=${key}`],
+    timeMin: new Date(now - 400 * 86400000).toISOString(),
+    timeMax: new Date(now + 400 * 86400000).toISOString(),
+    singleEvents: false,
+    maxResults: 250,
+  });
+  let updated = 0;
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled" || !ev.id) continue;
+    if ((ev.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
+    const next = withMeetLink(ev.description || "", meetLink);
+    if (next === (ev.description || "")) continue;
+    try {
+      await cal.events.patch({
+        calendarId: CALENDAR_ID,
+        eventId: ev.id,
+        requestBody: { description: next },
+      });
+      updated++;
+    } catch (e) {
+      console.error("applyMeetLinkToEvents patch failed", ev.id, e);
+    }
+  }
+  return updated;
+}
+
 // Одно занятие (инстанс серии или одиночное событие) для поштучной покраски.
 export interface ColorOccurrence {
   instanceId: string; // id, на который вешаем цвет (инстанс повтора или само событие)

@@ -56,7 +56,6 @@ interface PackageOffer {
   savingsKopecks: number;
   savingsPercent: number;
   payLink: string;
-  hasInvoice: boolean;
 }
 
 // "4 500 ₽" из копеек.
@@ -153,15 +152,8 @@ export default function BookingClient({
   const [payHint, setPayHint] = useState<string>("");
   const [balance, setBalance] = useState<MyBalance | null>(null);
   const [packageOffer, setPackageOffer] = useState<PackageOffer | null>(null);
-  const [pkgBusy, setPkgBusy] = useState(false);
-  const [pkgSbp, setPkgSbp] = useState<string | null>(null);
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
   const [meetLink, setMeetLink] = useState<string>("");
-  // Уведомления в Telegram: подключены ли + deep-link подключения (пуст — кнопку не показываем).
-  const [tgNotify, setTgNotify] = useState<{ connected: boolean; link: string }>({
-    connected: false,
-    link: "",
-  });
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
@@ -229,38 +221,9 @@ export default function BookingClient({
         setBalance(d.balance || null);
         setPackageOffer(d.packageOffer || null);
         setMeetLink(d.meetLink || "");
-        setTgNotify(d.tg || { connected: false, link: "" });
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
-  }
-
-  // Оформление месячного пакета (ОГЭ/ЕГЭ): ЮKassa — открываем ссылку оплаты; СБП —
-  // показываем реквизиты (счёт выставлен, преподаватель отметит оплату вручную).
-  async function buyPackage() {
-    if (pkgBusy) return;
-    setPkgBusy(true);
-    setPkgSbp(null);
-    try {
-      const r = await fetch(`/api/pay-package?token=${encodeURIComponent(token)}`, {
-        method: "POST",
-      });
-      const d = await r.json();
-      if (!r.ok) {
-        setNotice(d.error || "Не удалось оформить пакет.");
-        return;
-      }
-      if (d.payLink) {
-        window.open(d.payLink, "_blank", "noopener");
-      } else if (d.sbp) {
-        setPkgSbp(d.sbp);
-      }
-      loadMy();
-    } catch {
-      setNotice("Не удалось оформить пакет. Попробуйте позже.");
-    } finally {
-      setPkgBusy(false);
-    }
   }
 
   // Тихо обновляет сетку (без спиннера). Если prune — убирает из выбора слоты,
@@ -560,12 +523,6 @@ export default function BookingClient({
         </a>
       )}
 
-      {!tgNotify.connected && tgNotify.link && (
-        <a className="next-lesson tg-link" href={tgNotify.link} target="_blank" rel="noreferrer">
-          🔔 Подключить уведомления в Telegram ↗
-        </a>
-      )}
-
       {balance && (balance.debtHours > 0 || balance.aheadHours > 0 || balance.balanceKopecks > 0) && (
         <div className="card my-card">
           <div className="day-title">Баланс</div>
@@ -645,14 +602,10 @@ export default function BookingClient({
             >
               Оплатить пакет по СБП ↗
             </a>
+          ) : payHint ? (
+            <p className="hint" style={{ marginTop: 4 }}>💳 {payHint}</p>
           ) : (
-            <button className="mini pkg-btn" disabled={pkgBusy} onClick={buyPackage}>
-              {pkgBusy ? "Готовим счёт…" : "Оформить пакет"}
-            </button>
-          )}
-          {pkgSbp && <p className="hint" style={{ marginTop: 12 }}>💳 {pkgSbp}</p>}
-          {packageOffer.hasInvoice && !packageOffer.payLink && !pkgSbp && (
-            <p className="hint" style={{ marginTop: 8 }}>Счёт на пакет уже выставлен.</p>
+            <span className="badge wait">ждём ссылку на оплату</span>
           )}
         </div>
       )}

@@ -5,7 +5,13 @@
 // кабинета (/api/my) — идемпотентно: суммы сверяются и обновляются, лишние
 // автосчета удаляются, при нуле — счёт снимается.
 import { computeStudentBalance, type StudentBalance } from "./balance";
-import { createPayment, deletePayment, outstandingPayments, updatePayment } from "./payments";
+import {
+  createPayment,
+  deletePayment,
+  outstandingPackage,
+  outstandingPayments,
+  updatePayment,
+} from "./payments";
 import { createYkPayment, yookassaConfigured } from "./yookassa";
 import { getStudent } from "./students";
 import { notifyStudent } from "./notify";
@@ -155,6 +161,24 @@ export async function ensureAutoInvoices(
     }
   }
 
+  // Месячный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты. Выставляем оффер автоматически,
+  // но только когда у ученика уже есть подтверждённые занятия (balance.items). Пока
+  // счёт не оплачен, он не гасит поштучные (исключён из billedManual в planAutoInvoices).
+  let createdPackage = false;
+  const examTariff = detectExamTariff(student?.subject || "");
+  if (examTariff && balance.items.length > 0) {
+    const existing = await outstandingPackage(studentId);
+    if (!existing) {
+      await createPayment({
+        studentId,
+        amountKopecks: examTariff.packageKopecks,
+        kind: "package",
+        note: `Пакет «Месяц» — ${examTariff.packageLessons} занятий (${examTariff.label})`,
+      });
+      createdPackage = true;
+    }
+  }
+
   // Способ оплаты: «ЮKassa» — счетам генерируются ссылки; «СБП-перевод» — ссылки не
   // создаются (комиссия провайдера не нужна), в кабинете показываются реквизиты,
   // оплату преподаватель отмечает вручную.
@@ -163,7 +187,7 @@ export async function ensureAutoInvoices(
   // Ссылки на оплату: каждому неоплаченному счёту без ссылки — платёж ЮKassa.
   const freshLinks = new Map<string, string>();
   if (method === "yookassa" && yookassaConfigured()) {
-    const fresh = actions.length ? await outstandingPayments(studentId) : open;
+    const fresh = actions.length || createdPackage ? await outstandingPayments(studentId) : open;
     for (const p of fresh) {
       if (p.payLink) continue;
       try {
