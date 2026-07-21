@@ -8,8 +8,8 @@
 // (без перескока через большой блок к меньшему).
 import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
-import { sumPaidKopecks } from "./payments";
-import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
+import { paidHoursBreakdown } from "./payments";
+import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // Занятия, исключённые из тарификации: пропуск (серый) и бесплатное (пробное).
 const isUntariffed = (colorId: string | null) =>
@@ -83,17 +83,25 @@ export interface StudentBalance extends BalanceSummary {
 export async function computeStudentBalance(studentId: string): Promise<StudentBalance | null> {
   const s = await getStudent(studentId);
   if (!s || s.rateKopecks <= 0) return null;
-  const paidKopecks = await sumPaidKopecks(s.id);
-  const paidHours = Math.floor(paidKopecks / s.rateKopecks);
+  // Пакетные оплаты (месяц ОГЭ/ЕГЭ) кредитуют фиксированные часы, а не деньги÷ставку.
+  const packageLessons = detectExamTariff(s.subject)?.packageLessons ?? 0;
+  const { paidHours, moneyKopecks, packageHours } = await paidHoursBreakdown(
+    s.id,
+    s.rateKopecks,
+    packageLessons
+  );
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
   const occ = (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId));
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
+  // Остаток на балансе: нераспределённые часы × ставка + «хвост» денег от деления
+  // непакетных оплат на ставку (пакетные часы целые, хвоста не дают).
+  const moneyHours = paidHours - packageHours;
   return {
     ...summary,
     items,
     rateKopecks: s.rateKopecks,
     debtKopecks: summary.debtHours * s.rateKopecks,
     balanceKopecks:
-      summary.leftoverHours * s.rateKopecks + (paidKopecks - paidHours * s.rateKopecks),
+      summary.leftoverHours * s.rateKopecks + (moneyKopecks - moneyHours * s.rateKopecks),
   };
 }

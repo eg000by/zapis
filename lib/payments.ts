@@ -6,8 +6,10 @@ import { db } from "./db";
 import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
-// manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт на месяц вперёд.
-export type PaymentKind = "manual" | "debt" | "advance";
+// manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт на месяц
+// вперёд (у экзаменационных — на одно следующее занятие); package — месячный пакет
+// ОГЭ/ЕГЭ (кредитует фиксированное число часов, а не деньги÷ставку).
+export type PaymentKind = "manual" | "debt" | "advance" | "package";
 
 export async function createPayment(input: {
   studentId: string;
@@ -78,6 +80,46 @@ export async function sumPaidKopecks(studentId: string): Promise<number> {
     .from(payments)
     .where(and(eq(payments.studentId, studentId), eq(payments.status, "paid")));
   return rows.reduce((sum, r) => sum + r.amount, 0);
+}
+
+// Оплаченные ЧАСЫ ученика — единый расчёт для баланса и покраски. Обычные счета
+// кредитуют деньги÷ставку; пакетные («месяц» ОГЭ/ЕГЭ) дают ровно packageLessons
+// часов независимо от скидки. moneyKopecks — деньги непакетных оплат (для остатка
+// на балансе). packageLessons = 0 → пакетов нет (обычный предмет).
+export async function paidHoursBreakdown(
+  studentId: string,
+  rateKopecks: number,
+  packageLessons: number
+): Promise<{ paidHours: number; moneyKopecks: number; packageHours: number }> {
+  const rows = await db()
+    .select({ amount: payments.amountKopecks, kind: payments.kind })
+    .from(payments)
+    .where(and(eq(payments.studentId, studentId), eq(payments.status, "paid")));
+  let moneyKopecks = 0;
+  let packageHours = 0;
+  for (const r of rows) {
+    if (r.kind === "package") packageHours += packageLessons;
+    else moneyKopecks += r.amount;
+  }
+  const fromMoney = rateKopecks > 0 ? Math.floor(moneyKopecks / rateKopecks) : 0;
+  return { paidHours: fromMoney + packageHours, moneyKopecks, packageHours };
+}
+
+// Неоплаченный пакетный счёт ученика (для повторного показа/переиспользования оффера).
+export async function outstandingPackage(studentId: string): Promise<Payment | null> {
+  const [row] = await db()
+    .select()
+    .from(payments)
+    .where(
+      and(
+        eq(payments.studentId, studentId),
+        eq(payments.status, "unpaid"),
+        eq(payments.kind, "package")
+      )
+    )
+    .orderBy(desc(payments.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function setPaymentStatus(id: string, status: PaymentStatus): Promise<void> {

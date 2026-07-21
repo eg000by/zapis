@@ -87,21 +87,15 @@ body {
 }
 
 .day-nav {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
   padding: 18px 0 6px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-.day-nav::-webkit-scrollbar {
-  display: none;
 }
 
 .day-chip {
-  flex: 0 0 auto;
-  min-width: 64px;
-  padding: 10px 12px;
+  min-width: 0;
+  padding: 10px 4px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--card);
@@ -114,11 +108,25 @@ body {
 .day-chip small {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   margin-bottom: 2px;
 }
 .day-chip b {
-  font-size: 16px;
+  font-size: 15px;
+}
+@media (min-width: 520px) {
+  .day-nav {
+    gap: 8px;
+  }
+  .day-chip {
+    padding: 10px 12px;
+  }
+  .day-chip small {
+    font-size: 12px;
+  }
+  .day-chip b {
+    font-size: 16px;
+  }
 }
 .day-chip.active {
   background: var(--accent);
@@ -548,6 +556,54 @@ a.tg-link:hover {
 }
 .balance-row.ok b {
   color: var(--success);
+}
+
+/* Карточка месячного пакета (ОГЭ/ЕГЭ) — второй вариант оплаты в кабинете. */
+.pkg-card {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+.pkg-lead {
+  margin: 2px 0 10px;
+  font-size: 14px;
+  color: var(--text);
+}
+.pkg-price {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.pkg-price b {
+  font-size: 22px;
+  color: var(--accent);
+}
+.pkg-old {
+  color: var(--muted);
+  text-decoration: line-through;
+  font-size: 14px;
+}
+.pkg-save {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--success);
+  background: rgba(22, 163, 74, 0.14);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.pkg-alt {
+  margin: 8px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pkg-btn {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.pkg-btn:hover {
+  filter: brightness(1.05);
 }
 
 /* Тег «Перенос» на строке разово перенесённого занятия */

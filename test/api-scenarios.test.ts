@@ -650,6 +650,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       meetLink: "",
       payHint: "",
       tg: { connected: false, link: "" },
+      packageOffer: null,
       nextLesson: null,
     });
   });

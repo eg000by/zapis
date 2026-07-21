@@ -40,6 +40,20 @@ export const SLOTS = {
   ],
 };
 
+// Полная неделя из 7 дней (Пн–Вс) — для проверки, что на мобилке помещаются все дни.
+export const SLOTS_WEEK = {
+  days: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((weekday, i) => ({
+    date: `wd-${i}`,
+    title: `День ${weekday}`,
+    weekday,
+    closed: weekday === "Пт" || weekday === "Вс",
+    slots:
+      weekday === "Пт" || weekday === "Вс"
+        ? []
+        : [{ start: `2026-07-${13 + i}T07:00:00.000Z`, time: "10:00", busy: false }],
+  })),
+};
+
 // Пустой ответ /api/my (новый ученик).
 export const MY_EMPTY = {
   events: [],
@@ -48,6 +62,30 @@ export const MY_EMPTY = {
   meetLink: "",
   payHint: "",
   tg: { connected: false, link: "" },
+  packageOffer: null,
+  nextLesson: null,
+};
+
+// Кабинет экзаменационного ученика (ЕГЭ): поштучный счёт + карточка месячного пакета.
+export const MY_EGE = {
+  events: [],
+  payments: [
+    { id: "adv", amountKopecks: 250000, note: "Автосчёт: следующее занятие (1 ч)", payLink: "https://yookassa.test/lesson", kind: "advance" },
+  ],
+  balance: null,
+  meetLink: "",
+  payHint: "",
+  tg: { connected: false, link: "" },
+  packageOffer: {
+    label: "ЕГЭ",
+    lessons: 8,
+    amountKopecks: 1800000,
+    perLessonKopecks: 250000,
+    savingsKopecks: 200000,
+    savingsPercent: 10,
+    payLink: "",
+    hasInvoice: false,
+  },
   nextLesson: null,
 };
 
@@ -67,6 +105,7 @@ export const MY_FULL = {
       origStart: "",
     },
   ],
+  packageOffer: null,
   payments: [
     { id: "p1", amountKopecks: 600000, note: "Автосчёт: занятия на месяц вперёд (4 ч)", payLink: "https://yookassa.test/pay", kind: "advance" },
   ],
@@ -106,6 +145,9 @@ export async function mockApi(
     }
     if (url.includes("/api/occurrences")) {
       return route.fulfill({ json: { occurrences: ["2026-07-14T07:00:00.000Z", "2026-07-21T07:00:00.000Z"] } });
+    }
+    if (url.includes("/api/pay-package")) {
+      return route.fulfill({ json: { ok: true, payLink: "https://yookassa.test/package", amountKopecks: 1800000 } });
     }
     return route.fulfill({ json: { ok: true } });
   });

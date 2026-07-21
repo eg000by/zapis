@@ -21,7 +21,21 @@ vi.mock("@/lib/google", () => ({
   setEventColor: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn() }));
-vi.mock("@/lib/payments", () => ({ sumPaidKopecks: vi.fn(async () => 0) }));
+// paidHoursBreakdown выводится из мока sumPaidKopecks (тесты задают сумму оплат).
+vi.mock("@/lib/payments", () => {
+  const sumPaidKopecks = vi.fn(async () => 0);
+  return {
+    sumPaidKopecks,
+    paidHoursBreakdown: vi.fn(async (id: string, rate: number) => {
+      const money = await sumPaidKopecks();
+      return {
+        paidHours: rate > 0 ? Math.floor(money / rate) : 0,
+        moneyKopecks: money,
+        packageHours: 0,
+      };
+    }),
+  };
+});
 
 const NOW = new Date("2026-07-12T09:00:00.000Z").getTime();
 

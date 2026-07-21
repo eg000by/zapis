@@ -39,6 +39,39 @@ export function dayWindow(weekday: number): { start: number; end: number } | nul
 // Предметы для выбора в форме записи.
 export const SUBJECTS = ["Питон", "Фронтенд", "ОГЭ информатика", "ЕГЭ информатика", "Другое"];
 
+// Тарифы подготовки к экзаменам (ОГЭ/ЕГЭ по информатике). У экзаменационных учеников
+// два варианта оплаты в кабинете: поштучно по часовой ставке и месячный пакет из
+// packageLessons занятий со скидкой. Пакет тарифицируется не деньгами÷ставку, а ровно
+// packageLessons часами (иначе скидка «съела» бы часть занятий).
+export interface ExamTariff {
+  kind: "oge" | "ege";
+  label: string; // «ОГЭ» / «ЕГЭ» — для подписей в кабинете
+  hourlyKopecks: number; // цена одного занятия (часа)
+  packageLessons: number; // занятий в месячном пакете
+  packageKopecks: number; // цена месячного пакета
+}
+
+export const EXAM_TARIFFS: ExamTariff[] = [
+  { kind: "ege", label: "ЕГЭ", hourlyKopecks: 250000, packageLessons: 8, packageKopecks: 1800000 },
+  { kind: "oge", label: "ОГЭ", hourlyKopecks: 120000, packageLessons: 8, packageKopecks: 860000 },
+];
+
+// Определяет экзаменационный тариф по предмету ученика (по вхождению «ЕГЭ»/«ОГЭ»).
+// null — обычный предмет (биллинг как раньше: часовая ставка + автосчёт на месяц).
+export function detectExamTariff(subject: string): ExamTariff | null {
+  const s = (subject || "").toUpperCase();
+  if (s.includes("ЕГЭ")) return EXAM_TARIFFS.find((t) => t.kind === "ege") ?? null;
+  if (s.includes("ОГЭ")) return EXAM_TARIFFS.find((t) => t.kind === "oge") ?? null;
+  return null;
+}
+
+// Экономия месячного пакета против поштучной оплаты (в копейках и процентах).
+export function packageSavings(t: ExamTariff): { kopecks: number; percent: number } {
+  const full = t.hourlyKopecks * t.packageLessons;
+  const kopecks = full - t.packageKopecks;
+  return { kopecks, percent: Math.round((kopecks / full) * 100) };
+}
+
 // Пометка предварительной (неподтверждённой) заявки в названии события.
 export const PENDING_PREFIX = "⏳ ";
 

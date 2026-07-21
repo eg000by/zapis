@@ -5,18 +5,13 @@
 // кабинета (/api/my) — идемпотентно: суммы сверяются и обновляются, лишние
 // автосчета удаляются, при нуле — счёт снимается.
 import { computeStudentBalance, type StudentBalance } from "./balance";
-import {
-  createPayment,
-  deletePayment,
-  outstandingPayments,
-  updatePayment,
-  type PaymentKind,
-} from "./payments";
+import { createPayment, deletePayment, outstandingPayments, updatePayment } from "./payments";
 import { createYkPayment, yookassaConfigured } from "./yookassa";
 import { getStudent } from "./students";
 import { notifyStudent } from "./notify";
 import { escapeHtml } from "./telegram";
 import { getPayMethod, getSbpDetails } from "./settings";
+import { detectExamTariff } from "./config";
 
 // Окно автосчёта «вперёд»: занятия ближайших N дней.
 export const AUTO_ADVANCE_DAYS = 30;
@@ -27,9 +22,11 @@ export interface OpenInvoice {
   amountKopecks: number;
 }
 
+// Автосчета бывают только двух видов — «долг» и «вперёд» (manual/package сюда не идут).
+type AutoKind = "debt" | "advance";
 export type AutoAction =
-  | { action: "create"; kind: Exclude<PaymentKind, "manual">; amountKopecks: number }
-  | { action: "update"; id: string; kind: Exclude<PaymentKind, "manual">; amountKopecks: number }
+  | { action: "create"; kind: AutoKind; amountKopecks: number }
+  | { action: "update"; id: string; kind: AutoKind; amountKopecks: number }
   | { action: "delete"; id: string; kind: string };
 
 // Чистый планировщик: что сделать со счетами, чтобы они сошлись с балансом.
@@ -43,9 +40,10 @@ export function planAutoInvoices(input: {
   const actions: AutoAction[] = [];
 
   // Ручные неоплаченные счета считаем уже выставленными: сначала они покрывают долг,
-  // остаток — занятия «вперёд».
+  // остаток — занятия «вперёд». Пакетные офферы (kind=package) сюда НЕ входят: пока
+  // пакет не оплачен, он не гасит поштучные счета (иначе исчез бы выбор «поштучно»).
   const billedManual = input.openInvoices
-    .filter((p) => p.kind !== "debt" && p.kind !== "advance")
+    .filter((p) => p.kind !== "debt" && p.kind !== "advance" && p.kind !== "package")
     .reduce((s, p) => s + p.amountKopecks, 0);
   const debtTarget = Math.max(0, input.debtKopecks - billedManual);
   const manualLeft = Math.max(0, billedManual - input.debtKopecks);
@@ -80,14 +78,29 @@ export function advanceCostKopecks(balance: StudentBalance, now: Date): number {
   return hours * balance.rateKopecks;
 }
 
+// Стоимость одного ближайшего неоплаченного занятия — «вперёд» для экзаменационных
+// учеников (ОГЭ/ЕГЭ): им счёт выставляется на следующее занятие, а не на месяц.
+export function nextLessonCostKopecks(balance: StudentBalance): number {
+  for (const o of balance.items) {
+    if (!o.past && !o.paid) return o.hours * balance.rateKopecks;
+  }
+  return 0;
+}
+
 function fmtRub(kopecks: number): string {
   return `${(kopecks / 100).toLocaleString("ru-RU")} ₽`;
 }
 
-function noteFor(kind: "debt" | "advance", amountKopecks: number, rateKopecks: number): string {
+function noteFor(
+  kind: "debt" | "advance",
+  amountKopecks: number,
+  rateKopecks: number,
+  perLesson: boolean
+): string {
   const hours = Math.round(amountKopecks / rateKopecks);
-  return kind === "debt"
-    ? `Автосчёт: долг за проведённые занятия (${hours} ч)`
+  if (kind === "debt") return `Автосчёт: долг за проведённые занятия (${hours} ч)`;
+  return perLesson
+    ? `Автосчёт: следующее занятие (${hours} ч)`
     : `Автосчёт: занятия на месяц вперёд (${hours} ч)`;
 }
 
@@ -103,10 +116,16 @@ export async function ensureAutoInvoices(
   if (!balance) return null; // нет ставки — автосчета не считаются
 
   const now = new Date();
+  // Экзаменационным ученикам (ОГЭ/ЕГЭ) «вперёд» выставляем одно следующее занятие,
+  // а не месяц: месячную оплату они закрывают отдельным пакетом. Признак — предмет.
+  const student = await getStudent(studentId);
+  const examStudent = !!detectExamTariff(student?.subject || "");
   const open = await outstandingPayments(studentId);
   const actions = planAutoInvoices({
     debtKopecks: balance.debtKopecks,
-    advanceKopecks: advanceCostKopecks(balance, now),
+    advanceKopecks: examStudent
+      ? nextLessonCostKopecks(balance)
+      : advanceCostKopecks(balance, now),
     openInvoices: open.map((p) => ({ id: p.id, kind: p.kind, amountKopecks: p.amountKopecks })),
   });
 
@@ -121,14 +140,14 @@ export async function ensureAutoInvoices(
         studentId,
         amountKopecks: a.amountKopecks,
         kind: a.kind,
-        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks),
+        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks, examStudent),
       });
       changed.set(p.id, "create");
     } else {
       // Сумма изменилась — старая ссылка ЮKassa больше не соответствует счёту.
       await updatePayment(a.id, {
         amountKopecks: a.amountKopecks,
-        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks),
+        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks, examStudent),
         payLink: "",
         providerPaymentId: "",
       });

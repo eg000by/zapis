@@ -1,7 +1,7 @@
 // Личный кабинет ученика с записями: плашки, счета, способ оплаты, отсутствие
 // «25-го кадра» (сетка не мелькает, пока грузится /api/my).
 import { expect, test } from "@playwright/test";
-import { MY_FULL, mockApi, tokenUrl } from "./helpers";
+import { MY_EGE, MY_FULL, mockApi, tokenUrl } from "./helpers";
 
 test("кабинет: записи вместо сетки, все плашки на месте", async ({ page }) => {
   await mockApi(page, { my: MY_FULL });
@@ -50,6 +50,28 @@ test("режим «СБП-перевод»: реквизиты вместо кн
   await expect(page.getByText("Перевод по СБП на номер")).toBeVisible();
   await expect(page.getByRole("link", { name: /Оплатить по СБП/ })).toHaveCount(0);
   await expect(page.getByText("ждём ссылку на оплату")).toHaveCount(0);
+});
+
+test("экзамен ЕГЭ: два варианта оплаты — поштучный счёт и карточка пакета", async ({ page }) => {
+  await mockApi(page, { my: MY_EGE });
+  await page.goto(tokenUrl());
+
+  // Поштучный автосчёт (следующее занятие) — в блоке «К оплате».
+  await expect(page.getByText("Автосчёт: следующее занятие")).toBeVisible();
+
+  // Карточка пакета: цена, старая цена, выгода, кнопка.
+  const pkg = page.locator(".pkg-card");
+  await expect(pkg).toContainText("пакет «Месяц»");
+  await expect(pkg.locator(".pkg-price b")).toHaveText("18 000 ₽");
+  await expect(pkg.locator(".pkg-old")).toHaveText("20 000 ₽");
+  await expect(pkg.locator(".pkg-save")).toContainText("−10%");
+
+  // Клик по «Оформить пакет» уходит в /api/pay-package (и открывает ссылку оплаты).
+  const [req] = await Promise.all([
+    page.waitForRequest((r) => r.url().includes("/api/pay-package") && r.method() === "POST"),
+    pkg.getByRole("button", { name: "Оформить пакет" }).click(),
+  ]);
+  expect(req.url()).toContain("/api/pay-package");
 });
 
 test("нет «25-го кадра»: пока /api/my грузится — спиннер, сетка не мелькает", async ({ page }) => {

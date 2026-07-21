@@ -46,6 +46,25 @@ function isOwner(chatId: unknown): boolean {
   return !owner || String(chatId) === String(owner);
 }
 
+// Описание подтверждённого занятия в календаре (заменяет «ожидает подтверждения»,
+// добавляет ссылку на Телемост, если она есть в кабинете ученика).
+function confirmedDescription(opts: {
+  student: string;
+  subject: string;
+  recurring: boolean;
+  tg?: string;
+  meetLink?: string;
+}): string {
+  return (
+    `Занятие подтверждено.\n` +
+    `Ученик: ${opts.student}\n` +
+    `Предмет: ${opts.subject}\n` +
+    (opts.recurring ? `Повтор: еженедельно\n` : `Разовое занятие\n`) +
+    (opts.tg ? `Telegram: ${opts.tg}\n` : "") +
+    (opts.meetLink ? `Телемост: ${opts.meetLink}\n` : "")
+  );
+}
+
 // Webhook Telegram: подтверждение/отклонение заявок + управление CRM (Фаза 4).
 export async function POST(req: Request) {
   // Защита webhook секретным токеном (задаётся при setWebhook).
@@ -429,11 +448,24 @@ async function handleBookingAction(
 
   try {
     if (action === "c") {
+      // Обновляем описание события: убираем «ожидает подтверждения» и добавляем
+      // ссылку на Телемост ученика (если она закреплена в его кабинете).
+      let meetLink = "";
+      if (priv.studentId) {
+        try {
+          meetLink = (await getStudent(priv.studentId))?.meetLink || "";
+        } catch (e) {
+          console.error("meetLink lookup (confirm) failed", e);
+        }
+      }
+      const recurring = Array.isArray(ev.recurrence) && ev.recurrence.length > 0;
+      const description = confirmedDescription({ student, subject, recurring, tg, meetLink });
       await cal.events.patch({
         calendarId: CALENDAR_ID,
         eventId,
         requestBody: {
           summary: cleanSummary,
+          description,
           status: "confirmed",
           extendedProperties: { private: { status: "confirmed" } },
         },

@@ -4,6 +4,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { students, type Student } from "./schema";
+import { detectExamTariff } from "./config";
 
 // Заводит или обновляет ученика по contactKey (HMAC имени+предмета+tg, lib/link.ts).
 // contactKey стабилен для связки имя/предмет/tg, поэтому повторная бронь того же
@@ -21,6 +22,12 @@ export async function upsertStudent(input: {
   trial?: boolean;
   rateKopecks?: number;
 }): Promise<Student> {
+  // Ставка при создании: явная (если передана) → иначе часовая ставка экзаменационного
+  // тарифа по предмету (ОГЭ/ЕГЭ) → иначе 0 (задаётся позже). На апдейт существующего
+  // ученика это не влияет (set ниже трогает ставку только при явной положительной).
+  const examHourly = detectExamTariff(input.subject)?.hourlyKopecks ?? 0;
+  const insertRate =
+    input.rateKopecks && input.rateKopecks > 0 ? input.rateKopecks : examHourly;
   const [row] = await db()
     .insert(students)
     .values({
@@ -29,7 +36,7 @@ export async function upsertStudent(input: {
       tg: input.tg,
       contactKey: input.contactKey,
       trial: input.trial ?? false,
-      rateKopecks: input.rateKopecks && input.rateKopecks > 0 ? input.rateKopecks : 0,
+      rateKopecks: insertRate,
     })
     .onConflictDoUpdate({
       target: students.contactKey,

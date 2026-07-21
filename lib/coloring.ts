@@ -20,8 +20,8 @@ import {
 } from "./google";
 import { allocateBalance } from "./balance";
 import { getStudent } from "./students";
-import { sumPaidKopecks } from "./payments";
-import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
+import { paidHoursBreakdown } from "./payments";
+import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // colorId Google Calendar: 10 Basil (зелёный), 11 Tomato (красный), 6 Tangerine (оранжевый).
 // Серый (8) — «пропущено», Sage (2) — «бесплатное»: оба ставятся отдельно, покраской не
@@ -36,10 +36,11 @@ export async function recolorStudent(studentId: string): Promise<void> {
   const s = await getStudent(studentId);
   if (!s) return;
 
-  // Оплаченные ЧАСЫ из баланса (ставка — за час). Без ставки посчитать нельзя — тогда
-  // 0 (прошлые красные, будущие нейтральные), чтобы не осталось ложного «оплачено».
-  const paidKopecks = await sumPaidKopecks(s.id);
-  const paidHours = s.rateKopecks > 0 ? Math.floor(paidKopecks / s.rateKopecks) : 0;
+  // Оплаченные ЧАСЫ из баланса (ставка — за час). Пакетные оплаты кредитуют целые
+  // часы, а не деньги÷ставку. Без ставки посчитать нельзя — тогда 0 (прошлые
+  // красные, будущие нейтральные), чтобы не осталось ложного «оплачено».
+  const packageLessons = detectExamTariff(s.subject)?.packageLessons ?? 0;
+  const { paidHours } = await paidHoursBreakdown(s.id, s.rateKopecks, packageLessons);
 
   // 1. Сбрасываем цвет самих серий/событий в нейтраль — чтобы будущие неоплаченные
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения

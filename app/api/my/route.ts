@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
 import { listContactEvents, nextOccurrenceForContact } from "@/lib/google";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
-import { outstandingPayments } from "@/lib/payments";
+import { outstandingPackage, outstandingPayments } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { studentTgInfo } from "@/lib/notify";
 import { getPayMethod, getSbpDetails } from "@/lib/settings";
+import { detectExamTariff, packageSavings } from "@/lib/config";
 
 // Пустой блок оплат/баланса — когда ученика нет в CRM или БД недоступна.
 const NO_BILLING = {
@@ -14,6 +15,7 @@ const NO_BILLING = {
   meetLink: "",
   payHint: "",
   tg: { connected: false, link: "" },
+  packageOffer: null,
 } as {
   meetLink: string;
   // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
@@ -28,6 +30,17 @@ const NO_BILLING = {
     paidUntil: string | null;
     balanceKopecks: number;
     rateKopecks: number;
+  } | null;
+  // Месячный пакет для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты.
+  packageOffer: {
+    label: string;
+    lessons: number;
+    amountKopecks: number;
+    perLessonKopecks: number;
+    savingsKopecks: number;
+    savingsPercent: number;
+    payLink: string; // ссылка ЮKassa существующего счёта (в СБП-режиме пусто)
+    hasInvoice: boolean; // пакет уже выставлен и ждёт оплаты
   } | null;
 };
 
@@ -77,17 +90,39 @@ export async function GET(req: Request) {
           // Режим «СБП-перевод»: кнопки оплаты прячем, вместо них текст реквизитов.
           const method = await getPayMethod().catch(() => "yookassa" as const);
           const payHint = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
+
+          // Экзаменационный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты в кабинете.
+          const tariff = detectExamTariff(student?.subject || "");
+          let packageOffer = null as (typeof NO_BILLING)["packageOffer"];
+          if (tariff) {
+            const existing = await outstandingPackage(studentId).catch(() => null);
+            const sav = packageSavings(tariff);
+            packageOffer = {
+              label: tariff.label,
+              lessons: tariff.packageLessons,
+              amountKopecks: tariff.packageKopecks,
+              perLessonKopecks: tariff.hourlyKopecks,
+              savingsKopecks: sav.kopecks,
+              savingsPercent: sav.percent,
+              payLink: method === "sbp" ? "" : existing?.payLink || "",
+              hasInvoice: !!existing,
+            };
+          }
           return {
             meetLink: student?.meetLink || "",
             payHint,
             tg,
-            payments: rows.map((p) => ({
-              id: p.id,
-              amountKopecks: p.amountKopecks,
-              note: p.note,
-              payLink: method === "sbp" ? "" : p.payLink,
-              kind: p.kind,
-            })),
+            packageOffer,
+            // Пакетные счета показываем отдельной карточкой, из общего списка исключаем.
+            payments: rows
+              .filter((p) => p.kind !== "package")
+              .map((p) => ({
+                id: p.id,
+                amountKopecks: p.amountKopecks,
+                note: p.note,
+                payLink: method === "sbp" ? "" : p.payLink,
+                kind: p.kind,
+              })),
             balance: balance
               ? {
                   debtKopecks: balance.debtKopecks,
@@ -113,6 +148,7 @@ export async function GET(req: Request) {
       meetLink: billing.meetLink,
       payHint: billing.payHint,
       tg: billing.tg,
+      packageOffer: billing.packageOffer,
       nextLesson,
     });
   } catch (e) {

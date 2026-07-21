@@ -2,11 +2,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { allocateBalance, computeStudentBalance } from "@/lib/balance";
 import { listContactOccurrences } from "@/lib/google";
 import { getStudent } from "@/lib/students";
-import { sumPaidKopecks } from "@/lib/payments";
+import { paidHoursBreakdown, sumPaidKopecks } from "@/lib/payments";
 
 vi.mock("@/lib/google", () => ({ listContactOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
-vi.mock("@/lib/payments", () => ({ sumPaidKopecks: vi.fn(async () => 0) }));
+// paidHoursBreakdown выводится из мока sumPaidKopecks (тесты задают сумму оплат в
+// копейках) — обычные оплаты без пакетов: часы = деньги÷ставку.
+vi.mock("@/lib/payments", () => {
+  const sumPaidKopecks = vi.fn(async () => 0);
+  return {
+    sumPaidKopecks,
+    paidHoursBreakdown: vi.fn(async (id: string, rate: number) => {
+      const money = await sumPaidKopecks();
+      return {
+        paidHours: rate > 0 ? Math.floor(money / rate) : 0,
+        moneyKopecks: money,
+        packageHours: 0,
+      };
+    }),
+  };
+});
 
 const NOW = new Date("2026-07-12T09:00:00.000Z");
 
@@ -89,6 +104,35 @@ describe("computeStudentBalance — баланс в деньгах", () => {
       aheadHours: 1,
       paidUntil: FUT1,
       balanceKopecks: 50000,
+    });
+  });
+
+  it("пакет ЕГЭ кредитует 8 занятий, а не деньги÷ставку (скидку не «съедает»)", async () => {
+    // Предмет экзаменационный → computeStudentBalance попросит packageLessons=8.
+    vi.mocked(getStudent).mockResolvedValue({
+      id: "s",
+      contactKey: "k",
+      subject: "ЕГЭ информатика",
+      rateKopecks: 250000,
+    } as any);
+    // Оплачен пакет: деньги 0, но 8 часов кредита (реальная оплата 18000 < 8×2500).
+    vi.mocked(paidHoursBreakdown).mockResolvedValueOnce({
+      paidHours: 8,
+      moneyKopecks: 0,
+      packageHours: 8,
+    });
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      occ(PAST1), occ(PAST2), occ(FUT1), occ(FUT2),
+    ] as any);
+
+    const b = (await computeStudentBalance("s"))!;
+    // 8 часов покрыли 2 прошедших + 2 будущих; долга нет, остаток 4 часа вперёд.
+    expect(b).toMatchObject({
+      pastPaidHours: 2,
+      aheadHours: 2,
+      debtHours: 0,
+      debtKopecks: 0,
+      leftoverHours: 4,
     });
   });
 
