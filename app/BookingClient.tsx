@@ -180,6 +180,10 @@ export default function BookingClient({
   const blocks = useMemo(() => groupConsecutive(selected), [selected]);
 
   const hasBookings = !!(my && my.length > 0);
+  // Есть ли подтверждённые занятия. Пока нет — в кабинете не показываем ничего
+  // «занятийного» (Телемост, баланс, счета, пакет, ближайшее занятие): только сетку
+  // записи и плашку про МСК. Заявки в статусе «ждёт подтверждения» сюда не считаются.
+  const hasConfirmedLessons = !!(my && my.some((e) => e.status === "confirmed"));
   // Сетка выбирает новое время переноса, когда выбраны запись, режим move и режим (и дата — для once).
   const rescheduling =
     !!rsEvent && rsKind === "move" && (rsMode === "all" || (rsMode === "once" && !!rsOcc));
@@ -511,19 +515,19 @@ export default function BookingClient({
       {/* Пока не знаем, есть ли записи, — спиннер вместо сетки (без «25-го кадра»). */}
       {myLoading && <div className="spinner" />}
 
-      {nextLesson && (
+      {hasConfirmedLessons && nextLesson && (
         <div className="next-lesson">
           📌 Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
         </div>
       )}
 
-      {meetLink && (
+      {hasConfirmedLessons && meetLink && (
         <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
           🎥 Подключиться к занятию (Яндекс Телемост) ↗
         </a>
       )}
 
-      {balance && (balance.debtHours > 0 || balance.aheadHours > 0 || balance.balanceKopecks > 0) && (
+      {hasConfirmedLessons && balance && (balance.debtHours > 0 || balance.aheadHours > 0 || balance.balanceKopecks > 0) && (
         <div className="card my-card">
           <div className="day-title">Баланс</div>
           {balance.debtHours > 0 && (
@@ -544,7 +548,7 @@ export default function BookingClient({
         </div>
       )}
 
-      {payments.length > 0 && (
+      {hasConfirmedLessons && payments.length > 0 && (
         <div className="card my-card">
           <div className="day-title">К оплате</div>
           {payments.map((p) => (
@@ -574,7 +578,7 @@ export default function BookingClient({
         </div>
       )}
 
-      {packageOffer && (
+      {hasConfirmedLessons && packageOffer && (
         <div className="card my-card pkg-card">
           <div className="day-title">Выгоднее — пакет «Месяц»</div>
           <p className="pkg-lead">

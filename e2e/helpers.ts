@@ -67,8 +67,22 @@ export const MY_EMPTY = {
 };
 
 // Кабинет экзаменационного ученика (ЕГЭ): поштучный счёт + карточка месячного пакета.
+// Есть подтверждённое занятие — иначе «занятийные» блоки в кабинете не показываются.
 export const MY_EGE = {
-  events: [],
+  events: [
+    {
+      id: "ege1",
+      student: "Тестовый Егор",
+      subject: "ЕГЭ информатика",
+      status: "confirmed",
+      start: "2026-07-14T07:00:00.000Z",
+      recurring: true,
+      weeks: 26,
+      lessons: 1,
+      moved: false,
+      origStart: "",
+    },
+  ],
   payments: [
     { id: "adv", amountKopecks: 250000, note: "Автосчёт: следующее занятие (1 ч)", payLink: "https://yookassa.test/lesson", kind: "advance" },
   ],
