@@ -49,8 +49,8 @@ vi.mock("@/lib/lessons", () => ({
 }));
 vi.mock("@/lib/coloring", () => ({
   recolorStudent: vi.fn(async () => {}),
-  markLessonMissed: vi.fn(async () => true),
-  unmarkLessonMissed: vi.fn(async () => true),
+  markLessonMissed: vi.fn(async () => ({ found: true, studentId: "stu-1" })),
+  unmarkLessonMissed: vi.fn(async () => ({ found: true, studentId: "stu-1" })),
 }));
 vi.mock("@/lib/payments", async (importOriginal) => {
   // Чистые хелперы вида счёта (package:N) — настоящие, запросов в БД в них нет.
@@ -862,5 +862,15 @@ describe("кнопки утреннего отчёта", () => {
     expect(unmarkLessonMissed).toHaveBeenCalledWith("ev_x");
     [, msg] = vi.mocked(answerCallback).mock.calls.at(-1)!;
     expect(msg).toContain("учтено");
+  });
+
+  it("обе кнопки сверяют счета ученика: пропуск снимает счёт, «Прошло» оставляет долг", async () => {
+    const { ensureAutoInvoices } = await import("@/lib/autobill");
+    await tgCallback("lmiss:ev_x");
+    expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", expect.any(String));
+
+    vi.mocked(ensureAutoInvoices).mockClear();
+    await tgCallback("ldone:ev_x");
+    expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", expect.any(String));
   });
 });

@@ -45,10 +45,23 @@ import {
   toggleStudentArchive,
 } from "@/lib/crm-bot";
 import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
+import { ensureAutoInvoices } from "@/lib/autobill";
 
 export const dynamic = "force-dynamic";
 
 const ok = () => NextResponse.json({ ok: true });
+
+// Сверка счетов ученика после отметки занятия (best-effort: сбой БД/ЮKassa не
+// должен ломать ответ на кнопку). Внутри — тот же расчёт, что и в кабинете.
+async function syncInvoices(studentId: string | null): Promise<void> {
+  if (!studentId) return;
+  try {
+    const s = await getStudent(studentId);
+    await ensureAutoInvoices(studentId, s?.name || "");
+  } catch (e) {
+    console.error("syncInvoices failed", studentId, e);
+  }
+}
 
 function isOwner(chatId: unknown): boolean {
   const owner = process.env.TELEGRAM_CHAT_ID;
@@ -221,8 +234,10 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   // Утренний отчёт: «Прошло» — подтверждение (и откат ошибочного «Не прошло»),
   // «Не прошло» — серый цвет (пропуск, не тарифицируется).
   if (data.startsWith("ldone:")) {
-    const found = await unmarkLessonMissed(data.slice(6));
-    await answerCallback(cq.id, found ? "Занятие учтено ✅" : "Занятие не найдено");
+    const res = await unmarkLessonMissed(data.slice(6));
+    // Занятие состоялось — сверяем счета: неоплаченное прошедшее становится долгом.
+    await syncInvoices(res.studentId);
+    await answerCallback(cq.id, res.found ? "Занятие учтено ✅" : "Занятие не найдено");
     return ok();
   }
   // Заметка к занятию прямо из утреннего отчёта (📝).
@@ -232,10 +247,13 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
   if (data.startsWith("lmiss:")) {
-    const found = await markLessonMissed(data.slice(6));
+    const res = await markLessonMissed(data.slice(6));
+    // Пропуск не тарифицируется — счёт за него (выставленный сразу после занятия)
+    // должен уйти, не дожидаясь, пока ученик откроет кабинет.
+    await syncInvoices(res.studentId);
     await answerCallback(
       cq.id,
-      found ? "Пропуск 🚫 — занятие не тарифицируется" : "Занятие не найдено"
+      res.found ? "Пропуск 🚫 — занятие не тарифицируется" : "Занятие не найдено"
     );
     return ok();
   }

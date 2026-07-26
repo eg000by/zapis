@@ -5,12 +5,14 @@ import { GET } from "@/app/api/cron/pulse/route";
 import { listDayOccurrences } from "@/lib/google";
 import { pingSent, recordPing } from "@/lib/pings";
 import { sendOwner } from "@/lib/telegram";
+import { ensureAutoInvoices } from "@/lib/autobill";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/pings", () => ({
   pingSent: vi.fn(async () => false),
   recordPing: vi.fn(async () => {}),
 }));
+vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
 vi.mock("@/lib/telegram", () => ({
   sendOwner: vi.fn(async () => {}),
   escapeHtml: (s: string) => s,
@@ -69,6 +71,28 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     expect(recordPing).toHaveBeenCalledWith("ev1_a");
   });
 
+  it("счёт за проведённое занятие выставляется сразу, не дожидаясь кабинета", async () => {
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ("2026-07-12T07:00:00.000Z"),
+      occ("2026-07-12T06:00:00.000Z", { instanceId: "ev1_b" }), // тот же ученик
+    ] as any);
+
+    const res = await call();
+    expect(await res.json()).toMatchObject({ sent: 2, billed: 1 });
+    // Один ученик — один пересчёт за прогон (внутри считается весь его баланс).
+    expect(ensureAutoInvoices).toHaveBeenCalledTimes(1);
+    expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", "Тест Тестов");
+  });
+
+  it("сбой автосчетов не роняет пульс (вопрос всё равно ушёл)", async () => {
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ("2026-07-12T07:00:00.000Z")] as any);
+    vi.mocked(ensureAutoInvoices).mockRejectedValueOnce(new Error("БД недоступна"));
+
+    const res = await call();
+    expect(await res.json()).toMatchObject({ ok: true, sent: 1, billed: 0 });
+    expect(sendOwner).toHaveBeenCalledOnce();
+  });
+
   it("идущее занятие не трогаем (конец блока ещё впереди)", async () => {
     // 11:10 МСК, 2 часа: конец 13:20 МСК > сейчас (12:00) — рано спрашивать.
     vi.mocked(listDayOccurrences).mockResolvedValue([
@@ -79,6 +103,7 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     expect(await res.json()).toMatchObject({ sent: 0 });
     expect(sendOwner).not.toHaveBeenCalled();
     expect(recordPing).not.toHaveBeenCalled();
+    expect(ensureAutoInvoices).not.toHaveBeenCalled(); // счёт «вперёд» тут ни при чём
   });
 
   it("уже спрашивали (ping) — не дублируем", async () => {

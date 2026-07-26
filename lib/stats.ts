@@ -4,13 +4,18 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { payments, students } from "./schema";
 import { FREE_COLOR_ID, MISSED_COLOR_ID, MSK_OFFSET_MINUTES } from "./config";
+import { summarizeOutstanding } from "./payments";
 import { listDayOccurrences } from "./google";
 
 export interface IncomeStats {
   totalKopecks: number; // всего получено за всё время
   thisMonthKopecks: number; // за текущий месяц (МСК)
   prevMonthKopecks: number; // за прошлый месяц
-  outstandingKopecks: number; // выставлено, но не оплачено
+  outstandingKopecks: number; // выставлено, но не оплачено (всего)
+  // Разбор неоплаченного по смыслу: долг за проведённые занятия vs предоплата.
+  debtKopecks: number; // счета за уже проведённые занятия + ручные
+  advanceKopecks: number; // автосчета «вперёд» — предоплата, не задолженность
+  packageOfferKopecks: number; // предложенные пакеты ОГЭ/ЕГЭ — ученик волен не брать
   activeStudents: number;
   paidCount: number; // число оплаченных счетов
   // Ожидаемый доход за текущий месяц: все занятия месяца (по календарю) × ставка
@@ -56,7 +61,7 @@ export function expectedIncome(
 // Чистый расчёт статистики из строк — вынесен для тестов (без БД).
 export function summarizeIncome(input: {
   paid: { amount: number; paidAt: Date | string | null }[];
-  unpaid: { amount: number }[];
+  unpaid: { amount: number; kind: string }[];
   studentsActive: boolean[];
   expectedMonthKopecks?: number | null;
   now?: Date;
@@ -84,11 +89,18 @@ export function summarizeIncome(input: {
     byMonth.push({ label: MONTHS_SHORT[m], kopecks: perMonth.get(total) || 0 });
   }
 
+  const outstanding = summarizeOutstanding(
+    input.unpaid.map((r) => ({ kind: r.kind, amountKopecks: r.amount }))
+  );
+
   return {
     totalKopecks,
     thisMonthKopecks: perMonth.get(curKey) || 0,
     prevMonthKopecks: perMonth.get(curKey - 1) || 0,
-    outstandingKopecks: input.unpaid.reduce((s, r) => s + r.amount, 0),
+    outstandingKopecks: outstanding.totalKopecks,
+    debtKopecks: outstanding.debtKopecks,
+    advanceKopecks: outstanding.advanceKopecks,
+    packageOfferKopecks: outstanding.packageKopecks,
     activeStudents: input.studentsActive.filter(Boolean).length,
     paidCount: input.paid.length,
     expectedMonthKopecks: input.expectedMonthKopecks ?? null,
@@ -102,7 +114,7 @@ export async function computeIncomeStats(now = new Date()): Promise<IncomeStats>
     .from(payments)
     .where(eq(payments.status, "paid"));
   const unpaid = await db()
-    .select({ amount: payments.amountKopecks })
+    .select({ amount: payments.amountKopecks, kind: payments.kind })
     .from(payments)
     .where(eq(payments.status, "unpaid"));
   const studentRows = await db()

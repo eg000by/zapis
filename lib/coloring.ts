@@ -98,19 +98,26 @@ export async function markPastLessonsFree(contactKey: string): Promise<void> {
   }
 }
 
+// Результат отметки занятия: найдено ли событие и чьё оно (id ученика нужен
+// вызывающему, чтобы пересчитать счета — занятие могло стать/перестать быть долгом).
+export interface LessonMarkResult {
+  found: boolean;
+  studentId: string | null;
+}
+
 // «Не прошло»: красит занятие серым (пропуск, не тарифицируется) и пересчитывает
-// остальные цвета/баланс ученика. Возвращает false, если событие не найдено.
-export async function markLessonMissed(instanceId: string): Promise<boolean> {
+// остальные цвета/баланс ученика.
+export async function markLessonMissed(instanceId: string): Promise<LessonMarkResult> {
   const cal = calendarClient();
   let ev;
   try {
     const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId: instanceId });
     ev = res.data;
   } catch {
-    return false;
+    return { found: false, studentId: null };
   }
   await setEventColor(instanceId, MISSED_COLOR_ID);
-  const studentId = ev.extendedProperties?.private?.studentId;
+  const studentId = ev.extendedProperties?.private?.studentId || null;
   if (studentId) {
     try {
       await recolorStudent(studentId);
@@ -118,24 +125,24 @@ export async function markLessonMissed(instanceId: string): Promise<boolean> {
       console.error("markLessonMissed recolor failed", e);
     }
   }
-  return true;
+  return { found: true, studentId };
 }
 
 // «Прошло»: подтверждает, что занятие состоялось. Снимает ошибочный серый (пропуск),
 // если был, и в ЛЮБОМ случае пересчитывает цвета ученика — чтобы прошедшее неоплаченное
 // занятие покрасилось в «долг» (красный), а не осталось нейтральным (время само по себе
 // перекраску не запускает — триггеры это оплата/подтверждение/пропуск).
-export async function unmarkLessonMissed(instanceId: string): Promise<boolean> {
+export async function unmarkLessonMissed(instanceId: string): Promise<LessonMarkResult> {
   const cal = calendarClient();
   let ev;
   try {
     const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId: instanceId });
     ev = res.data;
   } catch {
-    return false;
+    return { found: false, studentId: null };
   }
   if (ev.colorId === MISSED_COLOR_ID) await setEventColor(instanceId, null);
-  const studentId = ev.extendedProperties?.private?.studentId;
+  const studentId = ev.extendedProperties?.private?.studentId || null;
   if (studentId) {
     try {
       await recolorStudent(studentId);
@@ -143,5 +150,5 @@ export async function unmarkLessonMissed(instanceId: string): Promise<boolean> {
       console.error("unmarkLessonMissed recolor failed", e);
     }
   }
-  return true;
+  return { found: true, studentId };
 }

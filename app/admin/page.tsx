@@ -531,9 +531,18 @@ export default async function AdminPage({
             </div>
             <div>
               <div style={{ fontSize: 22, fontWeight: 700, color: "var(--danger)" }}>
-                {rub(stats.outstandingKopecks)} ₽
+                {rub(stats.debtKopecks)} ₽
               </div>
-              <div className="hint" style={{ margin: 0 }}>не оплачено</div>
+              <div className="hint" style={{ margin: 0 }}>долг за проведённые</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.advanceKopecks)} ₽</div>
+              <div className="hint" style={{ margin: 0 }}>
+                выставлено вперёд
+                {stats.packageOfferKopecks > 0
+                  ? ` · пакеты ${rub(stats.packageOfferKopecks)} ₽`
+                  : ""}
+              </div>
             </div>
             <div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.activeStudents}</div>

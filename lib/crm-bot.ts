@@ -37,6 +37,7 @@ import {
   outstandingPayments,
   setPayLink,
   setPaymentStatus,
+  summarizeOutstanding,
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
@@ -119,13 +120,17 @@ export async function showStudentCard(
     return;
   }
   const outstanding = await outstandingPayments(s.id);
-  const debt = outstanding.reduce((sum, p) => sum + p.amountKopecks, 0);
+  // Долгом считаем только счета за проведённые занятия: счёт «вперёд» и пакетный
+  // оффер — предоплата, ученик по ним ничего не задолжал.
+  const out = summarizeOutstanding(outstanding);
 
   const lines = [
     `🧑‍🎓 <b>${escapeHtml(s.name)}</b>${s.trial ? " · 🎯 пробный" : ""}${s.active ? "" : " · 🚫 архив"}`,
     `📚 ${escapeHtml(s.subject)}${s.tg ? ` · ${escapeHtml(s.tg)}` : ""}`,
-    `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(debt)} ₽</b>`,
+    `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
   ];
+  if (out.advanceKopecks > 0) lines.push(`⏭ Выставлено вперёд: ${rub(out.advanceKopecks)} ₽`);
+  if (out.packageKopecks > 0) lines.push(`📦 Предложен пакет: ${rub(out.packageKopecks)} ₽`);
   // Ссылка на запись — прямо в тексте карточки (в <code> копируется одним тапом).
   const base = botBaseUrl();
   if (base) {
@@ -173,7 +178,9 @@ export async function showStats(
       : "") +
     `За прошлый месяц: ${rub(st.prevMonthKopecks)} ₽\n` +
     `Всего получено: ${rub(st.totalKopecks)} ₽ (${st.paidCount} оплат)\n` +
-    `Не оплачено (выставлено): ${rub(st.outstandingKopecks)} ₽\n` +
+    `Долг за проведённые: ${rub(st.debtKopecks)} ₽\n` +
+    `Выставлено вперёд: ${rub(st.advanceKopecks)} ₽\n` +
+    (st.packageOfferKopecks > 0 ? `Предложено пакетов: ${rub(st.packageOfferKopecks)} ₽\n` : "") +
     `Активных учеников: ${st.activeStudents}\n\n` +
     `<b>Помесячно</b>\n<code>${bars}</code>`;
   await emit(chatId, messageId, text, inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
@@ -257,6 +264,12 @@ export async function showPayments(
   if (!pays.length) {
     lines.push("\nСчетов нет. Создать счёт можно на сайте /admin.");
   } else {
+    const out = summarizeOutstanding(pays.filter((p) => p.status === "unpaid"));
+    lines.push(
+      `\nДолг: <b>${rub(out.debtKopecks)} ₽</b>` +
+        (out.advanceKopecks > 0 ? ` · вперёд: ${rub(out.advanceKopecks)} ₽` : "") +
+        (out.packageKopecks > 0 ? ` · пакет: ${rub(out.packageKopecks)} ₽` : "")
+    );
     for (const p of pays) {
       lines.push(
         `${PAY_STATUS[p.status] || ""} ${rub(p.amountKopecks)} ₽${p.note ? ` · ${escapeHtml(p.note)}` : ""}`

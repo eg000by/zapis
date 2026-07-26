@@ -34,6 +34,36 @@ export function findPackageInvoice(rows: Payment[]): Payment | null {
   return rows.find((p) => isPackageKind(p.kind)) ?? null;
 }
 
+// Неоплаченные счета по смыслу: долг ≠ аванс ≠ предложение пакета. Долг — только
+// за УЖЕ проведённые занятия (автосчёт debt) и ручные счета преподавателя (он
+// выставил их осознанно). Счёт «вперёд» — предоплата за будущее занятие, а пакет
+// вообще предложение, которое ученик волен не принимать: показывать их как
+// задолженность нельзя ни в карточке, ни в аналитике.
+export interface OutstandingSummary {
+  debtKopecks: number;
+  advanceKopecks: number;
+  packageKopecks: number;
+  totalKopecks: number;
+}
+
+export function summarizeOutstanding(
+  rows: { kind: string; amountKopecks: number }[]
+): OutstandingSummary {
+  const sum: OutstandingSummary = {
+    debtKopecks: 0,
+    advanceKopecks: 0,
+    packageKopecks: 0,
+    totalKopecks: 0,
+  };
+  for (const r of rows) {
+    sum.totalKopecks += r.amountKopecks;
+    if (isPackageKind(r.kind)) sum.packageKopecks += r.amountKopecks;
+    else if (r.kind === "advance") sum.advanceKopecks += r.amountKopecks;
+    else sum.debtKopecks += r.amountKopecks; // debt и ручные счета
+  }
+  return sum;
+}
+
 export async function createPayment(input: {
   studentId: string;
   amountKopecks: number;

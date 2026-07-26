@@ -198,9 +198,9 @@ describe("unmarkLessonMissed — «Прошло» всегда пересчит�
       occ("2026-07-01T15:10:00.000Z"), // прошло, без оплаты → долг
     ] as any);
 
-    const found = await unmarkLessonMissed("i-2026-07-01T15:10:00.000Z");
+    const res = await unmarkLessonMissed("i-2026-07-01T15:10:00.000Z");
 
-    expect(found).toBe(true);
+    expect(res).toEqual({ found: true, studentId: "stu-1" });
     // Пересчёт покрасил прошедшее неоплаченное в «11» (красный/долг).
     expect(applied()["i-2026-07-01T15:10:00.000Z"]).toBe("11");
   });
@@ -238,7 +238,7 @@ describe("markLessonMissed / unmarkLessonMissed — кнопки «Не прош
     eventsGet.mockResolvedValue({
       data: { id: "ev_i", colorId: null, extendedProperties: { private: { studentId: "stu-1" } } },
     });
-    expect(await markLessonMissed("ev_i")).toBe(true);
+    expect(await markLessonMissed("ev_i")).toEqual({ found: true, studentId: "stu-1" });
     expect(setEventColor).toHaveBeenCalledWith("ev_i", "8");
     expect(getStudent).toHaveBeenCalledWith("stu-1"); // recolorStudent запущен
   });
@@ -247,19 +247,19 @@ describe("markLessonMissed / unmarkLessonMissed — кнопки «Не прош
     eventsGet.mockResolvedValue({
       data: { id: "ev_i", colorId: "8", extendedProperties: { private: { studentId: "stu-1" } } },
     });
-    expect(await unmarkLessonMissed("ev_i")).toBe(true);
+    expect(await unmarkLessonMissed("ev_i")).toEqual({ found: true, studentId: "stu-1" });
     expect(setEventColor).toHaveBeenCalledWith("ev_i", null);
   });
 
   it("«Прошло» по не-серому: ничего не патчим", async () => {
     eventsGet.mockResolvedValue({ data: { id: "ev_i", colorId: "10" } });
-    expect(await unmarkLessonMissed("ev_i")).toBe(true);
+    expect(await unmarkLessonMissed("ev_i")).toEqual({ found: true, studentId: null });
     expect(setEventColor).not.toHaveBeenCalled();
   });
 
-  it("событие не найдено → false", async () => {
+  it("событие не найдено → found: false", async () => {
     eventsGet.mockRejectedValue(new Error("404"));
-    expect(await markLessonMissed("нет")).toBe(false);
+    expect(await markLessonMissed("нет")).toEqual({ found: false, studentId: null });
     expect(setEventColor).not.toHaveBeenCalled();
   });
 });
