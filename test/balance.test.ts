@@ -18,6 +18,7 @@ vi.mock("@/lib/payments", () => {
         paidHours: rate > 0 ? Math.floor(money / rate) : 0,
         moneyKopecks: money,
         packageHours: 0,
+        packageKopecks: 0,
       };
     }),
   };
@@ -115,11 +116,13 @@ describe("computeStudentBalance — баланс в деньгах", () => {
       subject: "ЕГЭ информатика",
       rateKopecks: 250000,
     } as any);
-    // Оплачен пакет: деньги 0, но 8 часов кредита (реальная оплата 18000 < 8×2500).
+    // Оплачен пакет: непакетных денег 0, 18 000 ₽ пакетом и 8 часов кредита
+    // (реальная оплата 18000 < 8×2500).
     vi.mocked(paidHoursBreakdown).mockResolvedValueOnce({
       paidHours: 8,
       moneyKopecks: 0,
       packageHours: 8,
+      packageKopecks: 1800000,
     });
     vi.mocked(listContactOccurrences).mockResolvedValue([
       occ(PAST1), occ(PAST2), occ(FUT1), occ(FUT2),
@@ -133,7 +136,29 @@ describe("computeStudentBalance — баланс в деньгах", () => {
       debtHours: 0,
       debtKopecks: 0,
       leftoverHours: 4,
+      // Остаток в деньгах — от реально уплаченных 18 000 ₽ минус 4 занятия по ставке,
+      // а НЕ 4 × 2500 (иначе скидка пакета превратилась бы в лишние 2000 ₽ на балансе).
+      balanceKopecks: 800000,
     });
+  });
+
+  it("неизрасходованный пакет показывает ровно уплаченную сумму, а не часы × ставку", async () => {
+    vi.mocked(getStudent).mockResolvedValue({
+      id: "s",
+      contactKey: "k",
+      subject: "ЕГЭ информатика",
+      rateKopecks: 250000,
+    } as any);
+    vi.mocked(paidHoursBreakdown).mockResolvedValueOnce({
+      paidHours: 8,
+      moneyKopecks: 0,
+      packageHours: 8,
+      packageKopecks: 1800000,
+    });
+    vi.mocked(listContactOccurrences).mockResolvedValue([] as any);
+
+    const b = (await computeStudentBalance("s"))!;
+    expect(b).toMatchObject({ leftoverHours: 8, balanceKopecks: 1800000 });
   });
 
   it("проведённые без денег → долг в деньгах", async () => {

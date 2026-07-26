@@ -106,8 +106,7 @@ test("без подтверждённых занятий: Телемост, па
     balance: null,
     meetLink: "https://telemost.yandex.ru/j/e2e",
     payHint: "",
-    tg: { connected: false, link: "" },
-    packageOffer: MY_EGE.packageOffer,
+      packageOffer: MY_EGE.packageOffer,
     nextLesson: "2026-07-14T07:00:00.000Z",
   };
   await mockApi(page, { my });

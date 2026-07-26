@@ -41,7 +41,6 @@ vi.mock("@/lib/notify", () => ({
   notifyStudent: vi.fn(async () => {}),
   notifyStudentById: vi.fn(async () => {}),
   pinStudentLinks: vi.fn(async () => {}),
-  studentTgInfo: vi.fn(async () => ({ connected: false, link: "" })),
 }));
 vi.mock("@/lib/lessons", () => ({
   recordLesson: vi.fn(async () => {}),
@@ -53,7 +52,16 @@ vi.mock("@/lib/coloring", () => ({
   markLessonMissed: vi.fn(async () => true),
   unmarkLessonMissed: vi.fn(async () => true),
 }));
-vi.mock("@/lib/payments", () => ({ outstandingPayments: vi.fn(async () => []) }));
+vi.mock("@/lib/payments", async (importOriginal) => {
+  // Чистые хелперы вида счёта (package:N) — настоящие, запросов в БД в них нет.
+  const actual = await importOriginal<typeof import("@/lib/payments")>();
+  return {
+    findPackageInvoice: actual.findPackageInvoice,
+    isPackageKind: actual.isPackageKind,
+    packageLessonsOf: actual.packageLessonsOf,
+    outstandingPayments: vi.fn(async () => []),
+  };
+});
 // Автосчета тестируются отдельно (test/autobill.test.ts) — здесь глушим.
 vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
 vi.mock("@/lib/settings", () => ({
@@ -649,13 +657,13 @@ describe("/api/my — записи и плашка «ближайшее заня
       balance: null,
       meetLink: "",
       payHint: "",
-      tg: { connected: false, link: "" },
       packageOffer: null,
       nextLesson: null,
     });
   });
 
   it("отдаёт ссылку на Телемост из карточки ученика", async () => {
+    await bookConfirmed();
     const { getStudentByContactKey } = await import("@/lib/students");
     vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
       id: "stu-1",
@@ -666,7 +674,38 @@ describe("/api/my — записи и плашка «ближайшее заня
     expect(my.meetLink).toBe("https://telemost.yandex.ru/j/12345");
   });
 
+  it("без подтверждённых занятий не отдаёт ни Телемост, ни счета (гейт на сервере)", async () => {
+    // Только заявка в статусе «ждёт подтверждения»: постоянная ссылка на занятие и
+    // суммы счетов не должны уходить в ответ — их нельзя прятать только в вёрстке.
+    await post("book", { token: TOKEN(), start: TUE_9 });
+    const { getStudentByContactKey } = await import("@/lib/students");
+    const { ensureAutoInvoices } = await import("@/lib/autobill");
+    const { outstandingPayments } = await import("@/lib/payments");
+    vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
+      id: "stu-1",
+      name: "Тест Тестов",
+      meetLink: "https://telemost.yandex.ru/j/12345",
+    } as any);
+    vi.mocked(ensureAutoInvoices).mockResolvedValueOnce({
+      debtKopecks: 300000, debtHours: 2, aheadHours: 0,
+      paidUntil: null, balanceKopecks: 0, rateKopecks: 150000,
+      paidHours: 0, pastPaidHours: 0, leftoverHours: 0, items: [],
+    } as any);
+    vi.mocked(outstandingPayments).mockResolvedValueOnce([
+      { id: "p1", amountKopecks: 300000, note: "Автосчёт: долг", payLink: "https://yk", kind: "debt" },
+    ] as any);
+
+    const my = await getMy(TOKEN());
+    expect(my.events).toHaveLength(1); // заявка в списке видна
+    expect(my.meetLink).toBe("");
+    expect(my.payments).toEqual([]);
+    expect(my.balance).toBeNull();
+    expect(my.packageOffer).toBeNull();
+    expect(my.nextLesson).toBeNull();
+  });
+
   it("отдаёт баланс и счета, когда ученик есть в CRM", async () => {
+    await bookConfirmed();
     const { getStudentByContactKey } = await import("@/lib/students");
     const { ensureAutoInvoices } = await import("@/lib/autobill");
     const { outstandingPayments } = await import("@/lib/payments");
@@ -684,7 +723,7 @@ describe("/api/my — записи и плашка «ближайшее заня
     ] as any);
 
     const my = await getMy(TOKEN());
-    expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", "Тест Тестов");
+    expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", "Тест Тестов", expect.anything());
     expect(my.balance).toMatchObject({ debtKopecks: 300000, debtHours: 2, paidUntil: TUE_9 });
     expect(my.payments).toEqual([
       { id: "p1", amountKopecks: 300000, note: "Автосчёт: долг", payLink: "https://yk", kind: "debt" },

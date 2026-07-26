@@ -32,6 +32,7 @@ vi.mock("@/lib/payments", () => {
         paidHours: rate > 0 ? Math.floor(money / rate) : 0,
         moneyKopecks: money,
         packageHours: 0,
+        packageKopecks: 0,
       };
     }),
   };

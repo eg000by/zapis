@@ -8,12 +8,15 @@ import { computeStudentBalance, type StudentBalance } from "./balance";
 import {
   createPayment,
   deletePayment,
-  outstandingPackage,
+  findPackageInvoice,
+  isPackageKind,
   outstandingPayments,
+  packageKind,
   updatePayment,
 } from "./payments";
 import { createYkPayment, yookassaConfigured } from "./yookassa";
 import { getStudent } from "./students";
+import type { Student } from "./schema";
 import { notifyStudent } from "./notify";
 import { escapeHtml } from "./telegram";
 import { getPayMethod, getSbpDetails } from "./settings";
@@ -49,7 +52,7 @@ export function planAutoInvoices(input: {
   // остаток — занятия «вперёд». Пакетные офферы (kind=package) сюда НЕ входят: пока
   // пакет не оплачен, он не гасит поштучные счета (иначе исчез бы выбор «поштучно»).
   const billedManual = input.openInvoices
-    .filter((p) => p.kind !== "debt" && p.kind !== "advance" && p.kind !== "package")
+    .filter((p) => p.kind !== "debt" && p.kind !== "advance" && !isPackageKind(p.kind))
     .reduce((s, p) => s + p.amountKopecks, 0);
   const debtTarget = Math.max(0, input.debtKopecks - billedManual);
   const manualLeft = Math.max(0, billedManual - input.debtKopecks);
@@ -116,16 +119,20 @@ function noteFor(
 // недоступность БД/ЮKassa не должна ломать кабинет.
 export async function ensureAutoInvoices(
   studentId: string,
-  studentName: string
+  studentName: string,
+  preloaded?: Student | null
 ): Promise<StudentBalance | null> {
-  const balance = await computeStudentBalance(studentId);
+  // Строку ученика читаем один раз за запрос: её же передаём в расчёт баланса
+  // (кабинет уже загрузил ученика и отдаёт сюда — иначе три одинаковых SELECT'а).
+  const student = preloaded !== undefined ? preloaded : await getStudent(studentId);
+  const balance = await computeStudentBalance(studentId, student);
   if (!balance) return null; // нет ставки — автосчета не считаются
 
   const now = new Date();
   // Экзаменационным ученикам (ОГЭ/ЕГЭ) «вперёд» выставляем одно следующее занятие,
   // а не месяц: месячную оплату они закрывают отдельным пакетом. Признак — предмет.
-  const student = await getStudent(studentId);
-  const examStudent = !!detectExamTariff(student?.subject || "");
+  const examTariff = detectExamTariff(student?.subject || "");
+  const examStudent = !!examTariff;
   const open = await outstandingPayments(studentId);
   const actions = planAutoInvoices({
     debtKopecks: balance.debtKopecks,
@@ -164,18 +171,37 @@ export async function ensureAutoInvoices(
   // Месячный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты. Выставляем оффер автоматически,
   // но только когда у ученика уже есть подтверждённые занятия (balance.items). Пока
   // счёт не оплачен, он не гасит поштучные (исключён из billedManual в planAutoInvoices).
-  let createdPackage = false;
-  const examTariff = detectExamTariff(student?.subject || "");
+  // Сверяется так же идемпотентно, как debt/advance: дубли (гонка двух открытий
+  // кабинета) удаляются, изменившаяся цена тарифа переносится в неоплаченный счёт
+  // вместе со сбросом ссылки ЮKassa — иначе ученик платил бы по старой ссылке сумму,
+  // отличную от показанной в карточке.
+  let pkgChanged = false;
+  const pkgOpen = open.filter((p) => isPackageKind(p.kind));
   if (examTariff && balance.items.length > 0) {
-    const existing = await outstandingPackage(studentId);
+    for (const extra of pkgOpen.slice(1)) {
+      await deletePayment(extra.id);
+      pkgChanged = true;
+    }
+    const kind = packageKind(examTariff.packageLessons);
+    const note = `Пакет «Месяц» — ${examTariff.packageLessons} занятий (${examTariff.label})`;
+    const existing = pkgOpen[0];
     if (!existing) {
       await createPayment({
         studentId,
         amountKopecks: examTariff.packageKopecks,
-        kind: "package",
-        note: `Пакет «Месяц» — ${examTariff.packageLessons} занятий (${examTariff.label})`,
+        kind,
+        note,
       });
-      createdPackage = true;
+      pkgChanged = true;
+    } else if (existing.amountKopecks !== examTariff.packageKopecks || existing.kind !== kind) {
+      await updatePayment(existing.id, {
+        amountKopecks: examTariff.packageKopecks,
+        kind,
+        note,
+        payLink: "",
+        providerPaymentId: "",
+      });
+      pkgChanged = true;
     }
   }
 
@@ -187,7 +213,7 @@ export async function ensureAutoInvoices(
   // Ссылки на оплату: каждому неоплаченному счёту без ссылки — платёж ЮKassa.
   const freshLinks = new Map<string, string>();
   if (method === "yookassa" && yookassaConfigured()) {
-    const fresh = actions.length || createdPackage ? await outstandingPayments(studentId) : open;
+    const fresh = actions.length || pkgChanged ? await outstandingPayments(studentId) : open;
     for (const p of fresh) {
       if (p.payLink) continue;
       try {
@@ -209,7 +235,7 @@ export async function ensureAutoInvoices(
   // Уведомление ученику о новом/пересчитанном счёте (best-effort).
   if (changed.size) {
     try {
-      const s = await getStudent(studentId);
+      const s = student;
       if (s?.tgChatId) {
         const sbp = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
         const rows = (await outstandingPayments(studentId)).filter((p) => changed.has(p.id));

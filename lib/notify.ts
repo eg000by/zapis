@@ -2,25 +2,11 @@
 // поэтому ученик сам подключается по deep-link t.me/<бот>?start=<studentId> из кабинета —
 // /start привязывает его chat_id к строке ученика (students.tg_chat_id). Все отправки
 // best-effort: недоступность Telegram не должна ломать основной сценарий.
-import { botUsername, pinChatMessage, sendTo } from "./telegram";
+import { pinChatMessage, sendTo } from "./telegram";
 import { getStudent } from "./students";
 import { getOrCreateStudentLinkCode } from "./shortlink";
 import { siteBaseUrl } from "./config";
 import type { Student } from "./schema";
-
-// Статус подключения + ссылка подключения для кабинета. link пуста, когда username
-// бота неизвестен (нет токена/сети) — кнопку тогда не показываем.
-export async function studentTgInfo(
-  student: Pick<Student, "id" | "tgChatId"> | null
-): Promise<{ connected: boolean; link: string }> {
-  if (!student) return { connected: false, link: "" };
-  if (student.tgChatId) return { connected: true, link: "" };
-  const username = await botUsername();
-  return {
-    connected: false,
-    link: username ? `https://t.me/${username}?start=${student.id}` : "",
-  };
-}
 
 // Шлёт ученику сообщение, если он подключил уведомления. Ошибки глотаются (логируются).
 export async function notifyStudent(

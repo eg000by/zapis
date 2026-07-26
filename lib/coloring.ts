@@ -18,10 +18,9 @@ import {
   listContactOccurrences,
   setEventColor,
 } from "./google";
-import { allocateBalance } from "./balance";
+import { allocateBalance, computeStudentBalance } from "./balance";
 import { getStudent } from "./students";
-import { paidHoursBreakdown } from "./payments";
-import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
+import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // colorId Google Calendar: 10 Basil (зелёный), 11 Tomato (красный), 6 Tangerine (оранжевый).
 // Серый (8) — «пропущено», Sage (2) — «бесплатное»: оба ставятся отдельно, покраской не
@@ -35,12 +34,6 @@ const isUntariffed = (colorId: string | null) =>
 export async function recolorStudent(studentId: string): Promise<void> {
   const s = await getStudent(studentId);
   if (!s) return;
-
-  // Оплаченные ЧАСЫ из баланса (ставка — за час). Пакетные оплаты кредитуют целые
-  // часы, а не деньги÷ставку. Без ставки посчитать нельзя — тогда 0 (прошлые
-  // красные, будущие нейтральные), чтобы не осталось ложного «оплачено».
-  const packageLessons = detectExamTariff(s.subject)?.packageLessons ?? 0;
-  const { paidHours } = await paidHoursBreakdown(s.id, s.rateKopecks, packageLessons);
 
   // 1. Сбрасываем цвет самих серий/событий в нейтраль — чтобы будущие неоплаченные
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения
@@ -57,13 +50,21 @@ export async function recolorStudent(studentId: string): Promise<void> {
     }
   }
 
-  // 2. Разворачиваем повторы в отдельные занятия (после сброса мастеров их инстансы —
-  // уже нейтральные) и красим по балансовой раскладке (lib/balance.ts — общий walk
-  // с кабинетом и автосчетами: «всё-или-ничего» по блокам, с самых ранних).
-  // Пропущенные (серые) и бесплатные (Sage) занятия исключаем: не тарифицируются,
-  // цвет за ними сохраняется.
-  const occ = (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId));
-  const { items } = allocateBalance(occ, paidHours, new Date());
+  // 2. Красим по той же балансовой раскладке, что видит ученик в кабинете
+  // (computeStudentBalance: повторы развёрнуты поштучно, «всё-или-ничего» по блокам,
+  // с самых ранних; пропущенные и бесплатные исключены). Один источник правды —
+  // иначе календарь и кабинет могут разойтись (напр. оплаченный пакет при нулевой
+  // ставке красил бы занятия «оплачено», а кабинет не показывал бы вообще ничего).
+  // Ставка не задана (balance === null) — считаем, что не оплачено ничего: прошлые
+  // красные, будущие нейтральные, ложного «оплачено» не остаётся.
+  const balance = await computeStudentBalance(s.id, s);
+  const items =
+    balance?.items ??
+    allocateBalance(
+      (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId)),
+      0,
+      new Date()
+    ).items;
   for (const o of items) {
     const target = o.paid
       ? o.past

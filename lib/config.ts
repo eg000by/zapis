@@ -46,30 +46,64 @@ export const SUBJECTS = ["Питон", "Фронтенд", "ОГЭ информ�
 export interface ExamTariff {
   kind: "oge" | "ege";
   label: string; // «ОГЭ» / «ЕГЭ» — для подписей в кабинете
+  subjects: string[]; // канонические названия предмета (из SUBJECTS) — якорь тарифа
   hourlyKopecks: number; // цена одного занятия (часа)
   packageLessons: number; // занятий в месячном пакете
   packageKopecks: number; // цена месячного пакета
 }
 
 export const EXAM_TARIFFS: ExamTariff[] = [
-  { kind: "ege", label: "ЕГЭ", hourlyKopecks: 250000, packageLessons: 8, packageKopecks: 1800000 },
-  { kind: "oge", label: "ОГЭ", hourlyKopecks: 120000, packageLessons: 8, packageKopecks: 860000 },
+  {
+    kind: "ege",
+    label: "ЕГЭ",
+    subjects: ["ЕГЭ информатика"],
+    hourlyKopecks: 250000,
+    packageLessons: 8,
+    packageKopecks: 1800000,
+  },
+  {
+    kind: "oge",
+    label: "ОГЭ",
+    subjects: ["ОГЭ информатика"],
+    hourlyKopecks: 120000,
+    packageLessons: 8,
+    packageKopecks: 860000,
+  },
 ];
 
-// Определяет экзаменационный тариф по предмету ученика (по вхождению «ЕГЭ»/«ОГЭ»).
+// Определяет экзаменационный тариф по предмету ученика.
 // null — обычный предмет (биллинг как раньше: часовая ставка + автосчёт на месяц).
+//
+// Предмет — свободный текст (в боте есть «Другое»), поэтому проверять вхождение
+// подстроки нельзя: «Не ЕГЭ, просто информатика» молча включило бы экзаменационную
+// ставку, поштучный автосчёт и пакет. Экзаменационным считаем только предмет из
+// канонического списка тарифа либо начинающийся с «ЕГЭ»/«ОГЭ» отдельным словом.
 export function detectExamTariff(subject: string): ExamTariff | null {
-  const s = (subject || "").toUpperCase();
-  if (s.includes("ЕГЭ")) return EXAM_TARIFFS.find((t) => t.kind === "ege") ?? null;
-  if (s.includes("ОГЭ")) return EXAM_TARIFFS.find((t) => t.kind === "oge") ?? null;
+  const s = (subject || "").trim().toLowerCase();
+  if (!s) return null;
+  for (const t of EXAM_TARIFFS) {
+    if (t.subjects.some((n) => n.toLowerCase() === s)) return t;
+  }
+  // Начало строки отдельным словом («ЕГЭ по информатике»). \b с кириллицей не
+  // работает (ASCII-границы), поэтому разделитель перечисляем явно.
+  const head = /^(егэ|огэ)(?=$|[\s.,:;—-])/.exec(s)?.[1];
+  if (head === "егэ") return EXAM_TARIFFS.find((t) => t.kind === "ege") ?? null;
+  if (head === "огэ") return EXAM_TARIFFS.find((t) => t.kind === "oge") ?? null;
   return null;
 }
 
-// Экономия месячного пакета против поштучной оплаты (в копейках и процентах).
-export function packageSavings(t: ExamTariff): { kopecks: number; percent: number } {
-  const full = t.hourlyKopecks * t.packageLessons;
-  const kopecks = full - t.packageKopecks;
-  return { kopecks, percent: Math.round((kopecks / full) * 100) };
+// Экономия пакета против поштучной оплаты — по ФАКТИЧЕСКОЙ ставке ученика и цене
+// уже выставленного счёта (ставку преподаватель может задать индивидуально, а цена
+// пакета в счёте зафиксирована на момент выставления). Если выгоды нет — нули.
+export function packageSavings(input: {
+  hourlyKopecks: number;
+  lessons: number;
+  packageKopecks: number;
+}): { fullKopecks: number; kopecks: number; percent: number } {
+  const fullKopecks = input.hourlyKopecks * input.lessons;
+  const kopecks = fullKopecks - input.packageKopecks;
+  if (kopecks <= 0 || fullKopecks <= 0) return { fullKopecks, kopecks: 0, percent: 0 };
+  return { fullKopecks, kopecks, percent: Math.round((kopecks / fullKopecks) * 100) };
 }
 
 // Пометка предварительной (неподтверждённой) заявки в названии события.

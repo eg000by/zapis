@@ -40,8 +40,44 @@ export async function setEventColor(eventId: string, colorId: string | null): Pr
   });
 }
 
+// Описание занятия в календаре — единый шаблон для заявки (ожидает подтверждения),
+// подтверждения из бота и обновления ссылки на Телемост. Один текст в одном месте,
+// иначе поверхности расходятся (и «Телемост:» надо чинить в двух шаблонах сразу).
+export function lessonDescription(opts: {
+  student: string;
+  subject: string;
+  recurring: boolean;
+  confirmed: boolean;
+  trial?: boolean;
+  tg?: string;
+  meetLink?: string;
+}): string {
+  const single = opts.trial ? "Пробное занятие (разовое)\n" : "Разовое занятие\n";
+  return (
+    (opts.confirmed
+      ? `Занятие подтверждено.\n`
+      : `Заявка через сайт записи (ожидает подтверждения).\n`) +
+    `Ученик: ${opts.student}\n` +
+    `Предмет: ${opts.subject}\n` +
+    (opts.recurring ? `Повтор: еженедельно\n` : single) +
+    (opts.tg ? `Telegram: ${opts.tg}\n` : "") +
+    (opts.meetLink ? `Телемост: ${opts.meetLink}\n` : "")
+  );
+}
+
+// Повторяющееся ли занятие. У мастера серии есть recurrence, а у инстанса-исключения
+// (разовый перенос одной недели) — только recurringEventId, поэтому проверяем оба.
+export function isRecurringEvent(ev: {
+  recurrence?: string[] | null;
+  recurringEventId?: string | null;
+}): boolean {
+  return !!ev.recurringEventId || (Array.isArray(ev.recurrence) && ev.recurrence.length > 0);
+}
+
 // Перестраивает строку «Телемост: …» в описании события: убирает старую (если была)
 // и добавляет новую, когда ссылка задана. Хвостовые пустые строки подчищаем.
+// Запасной путь для старых событий, у которых в extendedProperties нет данных
+// для полной пересборки описания.
 function withMeetLink(description: string, meetLink: string): string {
   const lines = (description || "")
     .split("\n")
@@ -54,6 +90,12 @@ function withMeetLink(description: string, meetLink: string): string {
 // Обновляет ссылку на Телемост в описании всех подтверждённых событий ученика
 // (серии — по мастеру, одиночные — сами). Вызывается при добавлении/смене ссылки
 // в кабинете, чтобы она появилась в уже существующих событиях календаря.
+//
+// Описание пересобирается целиком: у событий, подтверждённых до появления этого
+// кода, в теле осталось «Заявка … (ожидает подтверждения)» — дописать под ним
+// Телемост и оставить неверную шапку нельзя. Патчи идут параллельно: вызывается
+// из формы /admin и из вебхука Telegram, последовательные round-trip'ы к календарю
+// задерживали бы ответ.
 export async function applyMeetLinkToEvents(key: string, meetLink: string): Promise<number> {
   const cal = calendarClient();
   const now = Date.now();
@@ -65,24 +107,39 @@ export async function applyMeetLinkToEvents(key: string, meetLink: string): Prom
     singleEvents: false,
     maxResults: 250,
   });
-  let updated = 0;
-  for (const ev of res.data.items || []) {
-    if (ev.status === "cancelled" || !ev.id) continue;
-    if ((ev.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
-    const next = withMeetLink(ev.description || "", meetLink);
-    if (next === (ev.description || "")) continue;
-    try {
-      await cal.events.patch({
-        calendarId: CALENDAR_ID,
-        eventId: ev.id,
-        requestBody: { description: next },
-      });
-      updated++;
-    } catch (e) {
-      console.error("applyMeetLinkToEvents patch failed", ev.id, e);
-    }
-  }
-  return updated;
+  const patched = await Promise.all(
+    (res.data.items || []).map(async (ev) => {
+      if (ev.status === "cancelled" || !ev.id) return 0;
+      const priv = ev.extendedProperties?.private || {};
+      if ((priv.status || "pending") !== "confirmed") return 0;
+      // Есть данные ученика в событии — пересобираем описание целиком; нет (совсем
+      // старое событие) — правим только строку «Телемост:».
+      const next =
+        priv.student && priv.subject
+          ? lessonDescription({
+              student: priv.student,
+              subject: priv.subject,
+              recurring: isRecurringEvent(ev),
+              confirmed: true,
+              tg: priv.tg,
+              meetLink,
+            })
+          : withMeetLink(ev.description || "", meetLink);
+      if (next === (ev.description || "")) return 0;
+      try {
+        await cal.events.patch({
+          calendarId: CALENDAR_ID,
+          eventId: ev.id,
+          requestBody: { description: next },
+        });
+        return 1;
+      } catch (e) {
+        console.error("applyMeetLinkToEvents patch failed", ev.id, e);
+        return 0;
+      }
+    })
+  );
+  return patched.reduce<number>((sum, n) => sum + n, 0);
 }
 
 // Одно занятие (инстанс серии или одиночное событие) для поштучной покраски.

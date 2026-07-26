@@ -3,6 +3,7 @@ import {
   CALENDAR_ID,
   calendarClient,
   fetchBusy,
+  lessonDescription,
   listContactEvents,
   liveEventIdsForContact,
 } from "@/lib/google";
@@ -197,12 +198,14 @@ export async function POST(req: Request) {
         calendarId: CALENDAR_ID,
         requestBody: {
           summary: `${PENDING_PREFIX}${student} — ${subject}`,
-          description:
-            `Заявка через сайт записи (ожидает подтверждения).\n` +
-            `Ученик: ${student}\n` +
-            `Предмет: ${subject}\n` +
-            (plan.recurrence ? `Повтор: еженедельно\n` : `Пробное занятие (разовое)\n`) +
-            (contact.tg ? `Telegram: ${contact.tg}\n` : ""),
+          description: lessonDescription({
+            student,
+            subject,
+            recurring: !!plan.recurrence,
+            confirmed: false,
+            trial: contact.trial,
+            tg: contact.tg,
+          }),
           start: { dateTime: startIso, timeZone: TIMEZONE },
           end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
           status: "tentative",

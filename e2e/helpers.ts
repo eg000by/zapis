@@ -61,7 +61,6 @@ export const MY_EMPTY = {
   balance: null,
   meetLink: "",
   payHint: "",
-  tg: { connected: false, link: "" },
   packageOffer: null,
   nextLesson: null,
 };
@@ -89,7 +88,6 @@ export const MY_EGE = {
   balance: null,
   meetLink: "",
   payHint: "",
-  tg: { connected: false, link: "" },
   packageOffer: {
     label: "ЕГЭ",
     lessons: 8,
@@ -132,7 +130,6 @@ export const MY_FULL = {
   },
   meetLink: "https://telemost.yandex.ru/j/e2e",
   payHint: "",
-  tg: { connected: false, link: "https://t.me/e2e_bot?start=stu-1" },
   nextLesson: "2026-07-14T07:00:00.000Z",
 };
 

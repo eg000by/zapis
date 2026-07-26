@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { deleteStudent, getStudent, updateStudent } from "@/lib/students";
+import {
+  deleteStudent,
+  getStudent,
+  promoteStudentToFull,
+  setStudentMeetLink,
+  updateStudent,
+} from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
 import {
   createPayment,
@@ -8,7 +14,7 @@ import {
   setPaymentStatus,
 } from "@/lib/payments";
 import { markPastLessonsFree, recolorStudent } from "@/lib/coloring";
-import { applyMeetLinkToEvents, deleteFutureEventsForContact } from "@/lib/google";
+import { deleteFutureEventsForContact } from "@/lib/google";
 
 export const dynamic = "force-dynamic";
 
@@ -45,21 +51,14 @@ export async function POST(req: Request) {
     } else if (action === "student.active") {
       await updateStudent(studentId, { active: String(form.get("active")) === "1" });
     } else if (action === "student.meetlink") {
-      const meetLink = String(form.get("meetLink") || "").trim();
-      await updateStudent(studentId, { meetLink });
-      // Обновляем ссылку в описании уже существующих событий календаря (best-effort).
-      try {
-        const s = await getStudent(studentId);
-        if (s) await applyMeetLinkToEvents(s.contactKey, meetLink);
-      } catch (e) {
-        console.error("applyMeetLinkToEvents (admin) failed", e);
-      }
+      // Сохраняем ссылку и обновляем её в описании уже созданных событий календаря
+      // (общая операция с ботом — lib/students.ts).
+      await setStudentMeetLink(studentId, String(form.get("meetLink") || ""));
     } else if (action === "student.mkfull") {
-      // Пробный → полноценный: снимаем trial, при указанной ставке — задаём её,
-      // прошедшее пробное помечаем бесплатным (не долг), пересчитываем цвета.
-      const s = await getStudent(studentId);
+      // Пробный → полноценный: снимаем trial, задаём ставку (указанную или тарифную
+      // для ОГЭ/ЕГЭ), прошедшее пробное помечаем бесплатным (не долг), красим заново.
       const rub = Math.max(0, Math.round(Number(form.get("rate") || 0)));
-      await updateStudent(studentId, { trial: false, ...(rub > 0 ? { rateKopecks: rub * 100 } : {}) });
+      const s = await promoteStudentToFull(studentId, rub * 100);
       if (s) await recolorSafe(() => markPastLessonsFree(s.contactKey));
       await recolorSafe(() => recolorStudent(studentId));
     } else if (action === "settings.pay") {

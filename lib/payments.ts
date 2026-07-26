@@ -7,9 +7,32 @@ import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
 // manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт на месяц
-// вперёд (у экзаменационных — на одно следующее занятие); package — месячный пакет
-// ОГЭ/ЕГЭ (кредитует фиксированное число часов, а не деньги÷ставку).
-export type PaymentKind = "manual" | "debt" | "advance" | "package";
+// вперёд (у экзаменационных — на одно следующее занятие); package:N — месячный пакет
+// ОГЭ/ЕГЭ (кредитует ровно N часов, а не деньги÷ставку).
+export type PaymentKind = "manual" | "debt" | "advance" | `package:${number}`;
+
+// Число оплаченных занятий пакета хранится В САМОМ счёте (kind = «package:8»), а не
+// берётся из конфига при чтении: иначе правка тарифа задним числом переоценила бы
+// уже оплаченные пакеты (8 часов вдруг стали бы 10). Старые строки с kind="package"
+// (до этого формата) читаются с запасным значением из текущего тарифа.
+export function packageKind(lessons: number): PaymentKind {
+  return `package:${lessons}`;
+}
+
+export function isPackageKind(kind: string): boolean {
+  return kind === "package" || kind.startsWith("package:");
+}
+
+export function packageLessonsOf(kind: string, fallbackLessons: number): number {
+  const n = Number(kind.slice("package:".length));
+  return kind.startsWith("package:") && Number.isFinite(n) && n > 0 ? n : fallbackLessons;
+}
+
+// Пакетный счёт среди уже загруженных счетов ученика (самый свежий). Отдельного
+// запроса в БД не делаем — списки неоплаченных счетов вызывающие уже держат.
+export function findPackageInvoice(rows: Payment[]): Payment | null {
+  return rows.find((p) => isPackageKind(p.kind)) ?? null;
+}
 
 export async function createPayment(input: {
   studentId: string;
@@ -34,7 +57,7 @@ export async function createPayment(input: {
 // Точечное обновление счёта (сумма/заметка/ссылка/платёж провайдера) — для автосчетов.
 export async function updatePayment(
   id: string,
-  patch: Partial<Pick<Payment, "amountKopecks" | "note" | "payLink" | "providerPaymentId">>
+  patch: Partial<Pick<Payment, "amountKopecks" | "note" | "payLink" | "providerPaymentId" | "kind">>
 ): Promise<void> {
   await db().update(payments).set(patch).where(eq(payments.id, id));
 }
@@ -83,43 +106,42 @@ export async function sumPaidKopecks(studentId: string): Promise<number> {
 }
 
 // Оплаченные ЧАСЫ ученика — единый расчёт для баланса и покраски. Обычные счета
-// кредитуют деньги÷ставку; пакетные («месяц» ОГЭ/ЕГЭ) дают ровно packageLessons
-// часов независимо от скидки. moneyKopecks — деньги непакетных оплат (для остатка
-// на балансе). packageLessons = 0 → пакетов нет (обычный предмет).
+// кредитуют деньги÷ставку; пакетные («месяц» ОГЭ/ЕГЭ) дают ровно своё число часов
+// независимо от скидки. moneyKopecks — деньги непакетных оплат, packageKopecks —
+// пакетных (вместе дают всю полученную сумму для остатка на балансе).
+// fallbackPackageLessons — для старых строк kind="package" без числа занятий.
 export async function paidHoursBreakdown(
   studentId: string,
   rateKopecks: number,
-  packageLessons: number
-): Promise<{ paidHours: number; moneyKopecks: number; packageHours: number }> {
+  fallbackPackageLessons: number
+): Promise<{
+  paidHours: number;
+  moneyKopecks: number;
+  packageHours: number;
+  packageKopecks: number;
+}> {
   const rows = await db()
     .select({ amount: payments.amountKopecks, kind: payments.kind })
     .from(payments)
     .where(and(eq(payments.studentId, studentId), eq(payments.status, "paid")));
   let moneyKopecks = 0;
+  let packageKopecks = 0;
   let packageHours = 0;
   for (const r of rows) {
-    if (r.kind === "package") packageHours += packageLessons;
-    else moneyKopecks += r.amount;
+    // Сколько часов даёт пакет: из самого счёта, иначе (старые строки) из тарифа.
+    const lessons = isPackageKind(r.kind) ? packageLessonsOf(r.kind, fallbackPackageLessons) : 0;
+    if (lessons > 0) {
+      packageHours += lessons;
+      packageKopecks += r.amount;
+    } else {
+      // Не пакет — или пакет, число занятий которого определить нечем (старая строка
+      // у неэкзаменационного предмета). Тогда считаем как обычные деньги: полученная
+      // сумма не должна исчезать из баланса ни при каких обстоятельствах.
+      moneyKopecks += r.amount;
+    }
   }
   const fromMoney = rateKopecks > 0 ? Math.floor(moneyKopecks / rateKopecks) : 0;
-  return { paidHours: fromMoney + packageHours, moneyKopecks, packageHours };
-}
-
-// Неоплаченный пакетный счёт ученика (для повторного показа/переиспользования оффера).
-export async function outstandingPackage(studentId: string): Promise<Payment | null> {
-  const [row] = await db()
-    .select()
-    .from(payments)
-    .where(
-      and(
-        eq(payments.studentId, studentId),
-        eq(payments.status, "unpaid"),
-        eq(payments.kind, "package")
-      )
-    )
-    .orderBy(desc(payments.createdAt))
-    .limit(1);
-  return row ?? null;
+  return { paidHours: fromMoney + packageHours, moneyKopecks, packageHours, packageKopecks };
 }
 
 export async function setPaymentStatus(id: string, status: PaymentStatus): Promise<void> {

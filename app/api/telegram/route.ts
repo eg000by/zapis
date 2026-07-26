@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
+import {
+  CALENDAR_ID,
+  calendarClient,
+  fetchBusy,
+  isRecurringEvent,
+  lessonDescription,
+} from "@/lib/google";
 import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/lib/slots";
 import { answerCallback, editMessageText, escapeHtml, sendOwner, sendTo } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
@@ -47,25 +53,6 @@ const ok = () => NextResponse.json({ ok: true });
 function isOwner(chatId: unknown): boolean {
   const owner = process.env.TELEGRAM_CHAT_ID;
   return !owner || String(chatId) === String(owner);
-}
-
-// Описание подтверждённого занятия в календаре (заменяет «ожидает подтверждения»,
-// добавляет ссылку на Телемост, если она есть в кабинете ученика).
-function confirmedDescription(opts: {
-  student: string;
-  subject: string;
-  recurring: boolean;
-  tg?: string;
-  meetLink?: string;
-}): string {
-  return (
-    `Занятие подтверждено.\n` +
-    `Ученик: ${opts.student}\n` +
-    `Предмет: ${opts.subject}\n` +
-    (opts.recurring ? `Повтор: еженедельно\n` : `Разовое занятие\n`) +
-    (opts.tg ? `Telegram: ${opts.tg}\n` : "") +
-    (opts.meetLink ? `Телемост: ${opts.meetLink}\n` : "")
-  );
 }
 
 // Webhook Telegram: подтверждение/отклонение заявок + управление CRM (Фаза 4).
@@ -481,8 +468,16 @@ async function handleBookingAction(
           console.error("meetLink lookup (confirm) failed", e);
         }
       }
-      const recurring = Array.isArray(ev.recurrence) && ev.recurrence.length > 0;
-      const description = confirmedDescription({ student, subject, recurring, tg, meetLink });
+      // Разовый перенос одной недели — тоже занятие серии: у инстанса-исключения
+      // нет recurrence, признак повтора у него — recurringEventId (isRecurringEvent).
+      const description = lessonDescription({
+        student,
+        subject,
+        recurring: isRecurringEvent(ev),
+        confirmed: true,
+        tg,
+        meetLink,
+      });
       await cal.events.patch({
         calendarId: CALENDAR_ID,
         eventId,

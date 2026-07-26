@@ -14,12 +14,20 @@ import {
 import { createYkPayment, yookassaConfigured } from "@/lib/yookassa";
 
 vi.mock("@/lib/balance", () => ({ computeStudentBalance: vi.fn(async () => null) }));
-vi.mock("@/lib/payments", () => ({
-  createPayment: vi.fn(async () => ({ id: "new" })),
-  deletePayment: vi.fn(async () => {}),
-  updatePayment: vi.fn(async () => {}),
-  outstandingPayments: vi.fn(async () => []),
-}));
+// Чистые хелперы вида счёта (package:N) мокать нечего — берём настоящие.
+vi.mock("@/lib/payments", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/payments")>();
+  return {
+    findPackageInvoice: actual.findPackageInvoice,
+    isPackageKind: actual.isPackageKind,
+    packageKind: actual.packageKind,
+    packageLessonsOf: actual.packageLessonsOf,
+    createPayment: vi.fn(async () => ({ id: "new" })),
+    deletePayment: vi.fn(async () => {}),
+    updatePayment: vi.fn(async () => {}),
+    outstandingPayments: vi.fn(async () => []),
+  };
+});
 vi.mock("@/lib/yookassa", () => ({
   yookassaConfigured: vi.fn(() => false),
   createYkPayment: vi.fn(async () => ({ id: "yk-1", confirmationUrl: "https://yk/pay" })),

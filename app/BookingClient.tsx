@@ -586,12 +586,18 @@ export default function BookingClient({
           </p>
           <div className="pkg-price">
             <b>{fmtRub(packageOffer.amountKopecks)}</b>
-            <span className="pkg-old">
-              {fmtRub(packageOffer.perLessonKopecks * packageOffer.lessons)}
-            </span>
-            <span className="pkg-save">
-              −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
-            </span>
+            {/* Выгоду показываем, только если она есть: при индивидуальной ставке
+                пакет может не быть дешевле поштучной оплаты. */}
+            {packageOffer.savingsKopecks > 0 && (
+              <>
+                <span className="pkg-old">
+                  {fmtRub(packageOffer.perLessonKopecks * packageOffer.lessons)}
+                </span>
+                <span className="pkg-save">
+                  −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
+                </span>
+              </>
+            )}
           </div>
           {packageOffer.payLink ? (
             <a

@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
 import { listContactEvents, nextOccurrenceForContact } from "@/lib/google";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
-import { outstandingPackage, outstandingPayments } from "@/lib/payments";
+import {
+  findPackageInvoice,
+  isPackageKind,
+  outstandingPayments,
+  packageLessonsOf,
+} from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
-import { studentTgInfo } from "@/lib/notify";
 import { getPayMethod, getSbpDetails } from "@/lib/settings";
 import { detectExamTariff, packageSavings } from "@/lib/config";
 
@@ -14,14 +18,11 @@ const NO_BILLING = {
   balance: null,
   meetLink: "",
   payHint: "",
-  tg: { connected: false, link: "" },
   packageOffer: null,
 } as {
   meetLink: string;
   // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
   payHint: string;
-  // Уведомления в Telegram: подключены ли и deep-link для подключения.
-  tg: { connected: boolean; link: string };
   payments: { id: string; amountKopecks: number; note: string; payLink: string; kind: string }[];
   balance: {
     debtKopecks: number;
@@ -78,31 +79,40 @@ export async function GET(req: Request) {
           // Сверка автосчетов и ссылок оплаты; вернёт баланс (null — ставка не задана).
           const balance = await ensureAutoInvoices(
             studentId,
-            student?.name || decoded.info.name
+            student?.name || decoded.info.name,
+            student
           ).catch((e) => {
             console.error("/api/my ensureAutoInvoices failed", e);
             return null;
           });
 
           const rows = await outstandingPayments(studentId);
-          const tg = await studentTgInfo(student).catch(() => ({ connected: false, link: "" }));
           // Режим «СБП-перевод»: кнопки оплаты прячем, вместо них текст реквизитов.
           const method = await getPayMethod().catch(() => "yookassa" as const);
           const payHint = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
 
           // Экзаменационный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты. Показываем только
           // когда счёт-оффер уже выставлен (ensureAutoInvoices создаёт его при наличии
-          // подтверждённых занятий — до этого пакет ученику не показываем).
+          // подтверждённых занятий — до этого пакет ученику не показываем). Цену и число
+          // занятий берём из САМОГО счёта, а не из конфига: по ссылке ЮKassa спишется
+          // именно сумма счёта. Выгоду считаем от фактической ставки ученика (она может
+          // быть задана индивидуально) — иначе «старая цена» не сходится со счетами рядом.
           const tariff = detectExamTariff(student?.subject || "");
           let packageOffer = null as (typeof NO_BILLING)["packageOffer"];
-          const pkgInvoice = tariff ? await outstandingPackage(studentId).catch(() => null) : null;
+          const pkgInvoice = tariff ? findPackageInvoice(rows) : null;
           if (tariff && pkgInvoice) {
-            const sav = packageSavings(tariff);
+            const lessons = packageLessonsOf(pkgInvoice.kind, tariff.packageLessons);
+            const perLessonKopecks = balance?.rateKopecks || tariff.hourlyKopecks;
+            const sav = packageSavings({
+              hourlyKopecks: perLessonKopecks,
+              lessons,
+              packageKopecks: pkgInvoice.amountKopecks,
+            });
             packageOffer = {
               label: tariff.label,
-              lessons: tariff.packageLessons,
-              amountKopecks: tariff.packageKopecks,
-              perLessonKopecks: tariff.hourlyKopecks,
+              lessons,
+              amountKopecks: pkgInvoice.amountKopecks,
+              perLessonKopecks,
               savingsKopecks: sav.kopecks,
               savingsPercent: sav.percent,
               payLink: method === "sbp" ? "" : pkgInvoice.payLink || "",
@@ -111,11 +121,10 @@ export async function GET(req: Request) {
           return {
             meetLink: student?.meetLink || "",
             payHint,
-            tg,
             packageOffer,
             // Пакетные счета показываем отдельной карточкой, из общего списка исключаем.
             payments: rows
-              .filter((p) => p.kind !== "package")
+              .filter((p) => !isPackageKind(p.kind))
               .map((p) => ({
                 id: p.id,
                 amountKopecks: p.amountKopecks,
@@ -141,15 +150,20 @@ export async function GET(req: Request) {
       })(),
     ]);
 
+    // Пока у ученика нет ПОДТВЕРЖДЁННЫХ занятий, ничего «занятийного» не отдаём:
+    // ни ссылку на Телемост, ни счета, ни баланс, ни пакет. Заявка в статусе
+    // «ждёт подтверждения» сюда не считается. Гейт именно на сервере: скрывать это
+    // только в вёрстке — значит отдавать постоянную ссылку на занятие и суммы
+    // счетов любому, кто открыл кабинет по ссылке и ещё ничего не подтвердил.
+    const hasConfirmed = events.some((e) => e.status === "confirmed");
     return NextResponse.json({
       events,
-      payments: billing.payments,
-      balance: billing.balance,
-      meetLink: billing.meetLink,
-      payHint: billing.payHint,
-      tg: billing.tg,
-      packageOffer: billing.packageOffer,
-      nextLesson,
+      payments: hasConfirmed ? billing.payments : [],
+      balance: hasConfirmed ? billing.balance : null,
+      meetLink: hasConfirmed ? billing.meetLink : "",
+      payHint: hasConfirmed ? billing.payHint : "",
+      packageOffer: hasConfirmed ? billing.packageOffer : null,
+      nextLesson: hasConfirmed ? nextLesson : null,
     });
   } catch (e) {
     console.error("/api/my error", e);

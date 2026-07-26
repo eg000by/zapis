@@ -8,7 +8,15 @@ import {
   escapeHtml,
   type TgButton,
 } from "./telegram";
-import { deleteStudent, getStudent, listStudents, updateStudent, upsertStudent } from "./students";
+import {
+  deleteStudent,
+  getStudent,
+  listStudents,
+  promoteStudentToFull,
+  setStudentMeetLink,
+  updateStudent,
+  upsertStudent,
+} from "./students";
 import {
   findOrCreateOccurrenceLesson,
   getLesson,
@@ -16,7 +24,6 @@ import {
   setLessonNote,
 } from "./lessons";
 import {
-  applyMeetLinkToEvents,
   CALENDAR_ID,
   calendarClient,
   deleteFutureEventsForContact,
@@ -35,7 +42,7 @@ import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
 import { getOrCreateStudentLinkCode } from "./shortlink";
-import { MISSED_COLOR_ID, SUBJECTS, siteBaseUrl } from "./config";
+import { detectExamTariff, MISSED_COLOR_ID, SUBJECTS, siteBaseUrl } from "./config";
 import { computeIncomeStats } from "./stats";
 import { formatMskRange } from "./slots";
 import {
@@ -652,7 +659,9 @@ export async function chooseTrialForNew(chatId: number | string, trial: boolean)
 // Завершает перевод в полноценные: снимает trial, помечает прошедшее пробное
 // бесплатным (не долг), пересчитывает цвета и шлёт регулярную ссылку на запись.
 async function finalizeMkfull(chatId: number | string, s: { id: string; name: string; contactKey: string; rateKopecks: number }): Promise<void> {
-  await updateStudent(s.id, { trial: false });
+  // Ставка: уже заданная, иначе тарифная для ОГЭ/ЕГЭ (общая логика с /admin).
+  const full = await promoteStudentToFull(s.id);
+  const rateKopecks = full?.rateKopecks ?? s.rateKopecks;
   try {
     await markPastLessonsFree(s.contactKey);
     await recolorStudent(s.id);
@@ -661,7 +670,7 @@ async function finalizeMkfull(chatId: number | string, s: { id: string; name: st
   }
   await sendOwner(
     `✅ <b>${escapeHtml(s.name)}</b> — теперь полноценный ученик${
-      s.rateKopecks > 0 ? ` · ${rub(s.rateKopecks)} ₽/час` : ""
+      rateKopecks > 0 ? ` · ${rub(rateKopecks)} ₽/час` : ""
     }.\nПрошедшее пробное занятие отмечено бесплатным. Сейчас пришлю регулярную ссылку.`
   );
   await sendBookingLink(chatId, s.id, false);
@@ -680,7 +689,8 @@ export async function makeStudentFull(
     await emit(chatId, messageId, "Ученик не найден (возможно, уже удалён).");
     return;
   }
-  if (s.rateKopecks > 0) {
+  // Ставка известна (задана или тарифная для ОГЭ/ЕГЭ) — переводим сразу, не спрашивая.
+  if (s.rateKopecks > 0 || detectExamTariff(s.subject)) {
     if (messageId != null) {
       await editMessageText(chatId, messageId, `🎓 Перевод в полноценные: <b>${escapeHtml(s.name)}</b>`);
     }
@@ -708,6 +718,8 @@ export async function cancelPending(chatId: number | string): Promise<void> {
   try {
     if (st.action === "student.note" || st.action === "student.meetlink") {
       await showStudentCard(chatId, null, st.targetId);
+    } else if (st.action === "settings.sbp") {
+      await showPaySettings(chatId, null);
     } else if (st.action === "lesson.note") {
       const l = await getLesson(st.targetId);
       if (l) await showLessons(chatId, null, l.studentId);
@@ -900,14 +912,9 @@ export async function applyPendingInput(chatId: number | string, text: string): 
       await sendOwner("Это не похоже на ссылку. Пришлите адрес вида <code>https://telemost.yandex.ru/j/…</code> или <code>-</code>, чтобы убрать.");
       return true;
     }
-    await updateStudent(st.targetId, { meetLink: clear ? "" : value });
-    // Обновляем ссылку и в описании уже существующих событий календаря (best-effort).
-    try {
-      const s = await getStudent(st.targetId);
-      if (s) await applyMeetLinkToEvents(s.contactKey, clear ? "" : value);
-    } catch (e) {
-      console.error("applyMeetLinkToEvents (bot) failed", e);
-    }
+    // Сохраняем ссылку и обновляем её в описании уже созданных событий календаря
+    // (общая операция с /admin — lib/students.ts).
+    await setStudentMeetLink(st.targetId, clear ? "" : value);
     await clearState(String(chatId));
     await sendOwner(clear ? "✅ Ссылка Телемоста убрана." : "✅ Ссылка Телемоста закреплена в кабинете ученика.");
     await showStudentCard(chatId, null, st.targetId);

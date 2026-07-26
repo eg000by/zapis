@@ -5,6 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { students, type Student } from "./schema";
 import { detectExamTariff } from "./config";
+import { applyMeetLinkToEvents } from "./google";
 
 // Заводит или обновляет ученика по contactKey (HMAC имени+предмета+tg, lib/link.ts).
 // contactKey стабилен для связки имя/предмет/tg, поэтому повторная бронь того же
@@ -25,7 +26,13 @@ export async function upsertStudent(input: {
   // Ставка при создании: явная (если передана) → иначе часовая ставка экзаменационного
   // тарифа по предмету (ОГЭ/ЕГЭ) → иначе 0 (задаётся позже). На апдейт существующего
   // ученика это не влияет (set ниже трогает ставку только при явной положительной).
-  const examHourly = detectExamTariff(input.subject)?.hourlyKopecks ?? 0;
+  //
+  // Пробному ученику ставку НЕ проставляем: биллинг включается только ставкой, и с
+  // ней пробное занятие сразу стало бы долгом со счётом и предложением пакета — до
+  // того, как преподаватель перевёл ученика в полноценные (makeStudentFull, где
+  // прошедшее пробное помечается бесплатным и подставляется та же тарифная ставка).
+  const trial = input.trial ?? false;
+  const examHourly = trial ? 0 : (detectExamTariff(input.subject)?.hourlyKopecks ?? 0);
   const insertRate =
     input.rateKopecks && input.rateKopecks > 0 ? input.rateKopecks : examHourly;
   const [row] = await db()
@@ -35,7 +42,7 @@ export async function upsertStudent(input: {
       subject: input.subject,
       tg: input.tg,
       contactKey: input.contactKey,
-      trial: input.trial ?? false,
+      trial,
       rateKopecks: insertRate,
     })
     .onConflictDoUpdate({
@@ -95,6 +102,40 @@ export async function updateStudent(
   >
 ): Promise<void> {
   await db().update(students).set(fields).where(eq(students.id, id));
+}
+
+// Пробный → полноценный: снимает trial и задаёт ставку — явную, а если её не указали,
+// часовую ставку экзаменационного тарифа по предмету (ОГЭ/ЕГЭ). Общая операция для
+// /admin и бота; пометку прошедших занятий бесплатными и перекраску делает вызывающий
+// (они живут в lib/coloring.ts, который сам зависит от учеников).
+export async function promoteStudentToFull(
+  id: string,
+  rateKopecks?: number
+): Promise<Student | null> {
+  const s = await getStudent(id);
+  if (!s) return null;
+  const explicit = rateKopecks && rateKopecks > 0 ? rateKopecks : 0;
+  const fallback = s.rateKopecks > 0 ? 0 : (detectExamTariff(s.subject)?.hourlyKopecks ?? 0);
+  const rate = explicit || fallback;
+  await updateStudent(id, { trial: false, ...(rate > 0 ? { rateKopecks: rate } : {}) });
+  return { ...s, trial: false, rateKopecks: rate > 0 ? rate : s.rateKopecks };
+}
+
+// Закрепляет ссылку на Телемост за учеником и обновляет её в описании уже созданных
+// событий календаря (best-effort). Общая операция для /admin и бота — иначе
+// последовательность «сохранить + применить» копируется по поверхностям и разъезжается.
+export async function setStudentMeetLink(id: string, meetLink: string): Promise<void> {
+  let link = (meetLink || "").trim();
+  // В форме /admin легко вставить адрес без схемы — нормализуем, иначе ссылка
+  // в описании события и в кабинете окажется нерабочей.
+  if (link && !/^https?:\/\//i.test(link)) link = `https://${link}`;
+  await updateStudent(id, { meetLink: link });
+  try {
+    const s = await getStudent(id);
+    if (s) await applyMeetLinkToEvents(s.contactKey, link);
+  } catch (e) {
+    console.error("applyMeetLinkToEvents failed", e);
+  }
 }
 
 // Полное удаление ученика из учёта. Каскадом (FK onDelete: cascade) уходят его

@@ -8,6 +8,7 @@
 // (без перескока через большой блок к меньшему).
 import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
+import type { Student } from "./schema";
 import { paidHoursBreakdown } from "./payments";
 import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
@@ -80,12 +81,17 @@ export interface StudentBalance extends BalanceSummary {
   items: AllocatedOccurrence[];
 }
 
-export async function computeStudentBalance(studentId: string): Promise<StudentBalance | null> {
-  const s = await getStudent(studentId);
+// preloaded — уже загруженная строка ученика (кабинет и автосчета читают её один раз
+// и передают сюда, чтобы не ходить в БД за тем же самым по три раза за запрос).
+export async function computeStudentBalance(
+  studentId: string,
+  preloaded?: Student | null
+): Promise<StudentBalance | null> {
+  const s = preloaded !== undefined ? preloaded : await getStudent(studentId);
   if (!s || s.rateKopecks <= 0) return null;
   // Пакетные оплаты (месяц ОГЭ/ЕГЭ) кредитуют фиксированные часы, а не деньги÷ставку.
   const packageLessons = detectExamTariff(s.subject)?.packageLessons ?? 0;
-  const { paidHours, moneyKopecks, packageHours } = await paidHoursBreakdown(
+  const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(
     s.id,
     s.rateKopecks,
     packageLessons
@@ -93,15 +99,14 @@ export async function computeStudentBalance(studentId: string): Promise<StudentB
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
   const occ = (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId));
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
-  // Остаток на балансе: нераспределённые часы × ставка + «хвост» денег от деления
-  // непакетных оплат на ставку (пакетные часы целые, хвоста не дают).
-  const moneyHours = paidHours - packageHours;
+  // Остаток на балансе = все полученные деньги (включая пакетные) минус стоимость
+  // уже разложенных на занятия часов по ставке. Пакетные часы НЕ оцениваем по полной
+  // ставке: пакет со скидкой 18 000 ₽ должен показывать 18 000 ₽ остатка, а не 20 000 ₽.
   return {
     ...summary,
     items,
     rateKopecks: s.rateKopecks,
     debtKopecks: summary.debtHours * s.rateKopecks,
-    balanceKopecks:
-      summary.leftoverHours * s.rateKopecks + (moneyKopecks - moneyHours * s.rateKopecks),
+    balanceKopecks: moneyKopecks + packageKopecks - (paidHours - summary.leftoverHours) * s.rateKopecks,
   };
 }
