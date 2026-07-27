@@ -31,8 +31,10 @@ import {
   promptSbpDetails,
   promptStudentMeetLink,
   promptStudentNote,
+  renewSeriesBot,
   sendBookingLink,
   setPayMethodBot,
+  showDebtors,
   showLessons,
   showPayments,
   showPaySettings,
@@ -40,6 +42,7 @@ import {
   showStudentCard,
   showStudentTools,
   showStudentsList,
+  showWeekLoad,
   submitRateForNew,
   submitTgForNew,
   toggleStudentArchive,
@@ -125,9 +128,30 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  if (data === "load") {
+    await showWeekLoad(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "debts") {
+    await showDebtors(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
   if (data === "pay") {
     await showPaySettings(chatId, messageId);
     await answerCallback(cq.id);
+    return ok();
+  }
+  // Продление серии из напоминания «занятия скоро закончатся».
+  if (data === "renewno") {
+    await editMessageText(chatId, messageId, "👌 Ок, напомню ближе к концу серии.");
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("renew:")) {
+    const okRenew = await renewSeriesBot(chatId, messageId, data.slice(6));
+    await answerCallback(cq.id, okRenew ? "Продлено 🔁" : "Не удалось продлить");
     return ok();
   }
   if (data.startsWith("setpay:")) {
@@ -312,6 +336,8 @@ const HELP =
   "👥 /students — ученики, счета, заметки, ссылки\n" +
   "➕ /new — новый ученик + ссылка на запись\n" +
   "📊 /stats — доходы\n" +
+  "🗓 /load — загрузка недели и свободные слоты\n" +
+  "🧾 /debts — кто и сколько должен\n" +
   "💳 /pay — способ оплаты (ЮKassa / СБП)\n" +
   "❓ /help — эта справка\n\n" +
   "<b>Внутри карточки ученика:</b>\n" +
@@ -366,6 +392,14 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
   if (text.startsWith("/stats")) {
     await showStats(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/load")) {
+    await showWeekLoad(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/debts")) {
+    await showDebtors(chatId, null);
     return ok();
   }
   if (text.startsWith("/pay")) {

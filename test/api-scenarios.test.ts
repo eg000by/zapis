@@ -60,6 +60,7 @@ vi.mock("@/lib/payments", async (importOriginal) => {
     isPackageKind: actual.isPackageKind,
     packageLessonsOf: actual.packageLessonsOf,
     outstandingPayments: vi.fn(async () => []),
+    paidPayments: vi.fn(async () => []),
   };
 });
 // Автосчета тестируются отдельно (test/autobill.test.ts) — здесь глушим.
@@ -86,7 +87,7 @@ vi.mock("@/lib/crm-bot", () => {
 // «Сейчас»: суббота 12 июля 2026, 12:00 МСК.
 const NOW = new Date("2026-07-12T09:00:00.000Z");
 const INFO = { name: "Тест Тестов", subject: "Математика", tg: "@test", trial: false };
-const TOKEN = () => encodeToken(INFO);
+const TOKEN = (over: Partial<typeof INFO> = {}) => encodeToken({ ...INFO, ...over });
 const KEY = () => contactKey(INFO);
 
 // Слоты сетки (МСК): Вт/Чт/Сб 9–17, Пн/Ср 15–21. Вторник 14 июля 09:00 и повторы;
@@ -658,7 +659,9 @@ describe("/api/my — записи и плашка «ближайшее заня
       meetLink: "",
       payHint: "",
       packageOffer: null,
+      paidHistory: [],
       nextLesson: null,
+      lessonPriceKopecks: 0,
     });
   });
 
@@ -702,6 +705,32 @@ describe("/api/my — записи и плашка «ближайшее заня
     expect(my.balance).toBeNull();
     expect(my.packageOffer).toBeNull();
     expect(my.nextLesson).toBeNull();
+    expect(my.paidHistory).toEqual([]);
+  });
+
+  it("цена занятия отдаётся ДО подтверждения — её показываем в окне записи", async () => {
+    // Гейт закрывает «занятийные» данные (счета, Телемост, баланс), но не прайс:
+    // ученик должен видеть стоимость до того, как записался.
+    const { getStudentByContactKey } = await import("@/lib/students");
+    vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
+      id: "stu-1",
+      name: "Тест Тестов",
+      rateKopecks: 150000,
+    } as any);
+    const my = await getMy(TOKEN());
+    expect(my.lessonPriceKopecks).toBe(150000);
+    expect(my.payments).toEqual([]); // а «занятийное» по-прежнему закрыто
+  });
+
+  it("у пробного цены нет — занятие бесплатное", async () => {
+    const { getStudentByContactKey } = await import("@/lib/students");
+    vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
+      id: "stu-1",
+      name: "Тест Тестов",
+      rateKopecks: 150000,
+    } as any);
+    const my = await getMy(TOKEN({ trial: true }));
+    expect(my.lessonPriceKopecks).toBe(0);
   });
 
   it("отдаёт баланс и счета, когда ученик есть в CRM", async () => {

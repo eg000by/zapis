@@ -62,7 +62,9 @@ export const MY_EMPTY = {
   meetLink: "",
   payHint: "",
   packageOffer: null,
+  paidHistory: [],
   nextLesson: null,
+  lessonPriceKopecks: 150000, // 1500 ₽/час — цена видна ещё до записи
 };
 
 // Кабинет экзаменационного ученика (ЕГЭ): поштучный счёт + карточка месячного пакета.
@@ -91,13 +93,15 @@ export const MY_EGE = {
   packageOffer: {
     label: "ЕГЭ",
     lessons: 8,
-    amountKopecks: 1800000,
+    amountKopecks: 1700000,
     perLessonKopecks: 250000,
-    savingsKopecks: 200000,
-    savingsPercent: 10,
+    savingsKopecks: 300000,
+    savingsPercent: 15,
     payLink: "https://yookassa.test/package",
   },
+  paidHistory: [],
   nextLesson: null,
+  lessonPriceKopecks: 250000,
 };
 
 // Кабинет ученика с подтверждённой еженедельной записью, балансом и счётом.
@@ -117,7 +121,10 @@ export const MY_FULL = {
     },
   ],
   packageOffer: null,
+  // Два счёта: долг за проведённое занятие и предоплата на месяц вперёд —
+  // в кабинете они складываются в одну сумму с разбивкой.
   payments: [
+    { id: "d1", amountKopecks: 150000, note: "Автосчёт: долг за проведённые занятия (1 ч)", payLink: "https://yookassa.test/debt", kind: "debt" },
     { id: "p1", amountKopecks: 600000, note: "Автосчёт: занятия на месяц вперёд (4 ч)", payLink: "https://yookassa.test/pay", kind: "advance" },
   ],
   balance: {
@@ -130,7 +137,11 @@ export const MY_FULL = {
   },
   meetLink: "https://telemost.yandex.ru/j/e2e",
   payHint: "",
+  paidHistory: [
+    { id: "old1", amountKopecks: 600000, note: "Июнь, 4 занятия", paidAt: "2026-06-03T09:00:00.000Z" },
+  ],
   nextLesson: "2026-07-14T07:00:00.000Z",
+  lessonPriceKopecks: 150000,
 };
 
 // Перехватывает все /api/* (ничего не уходит в настоящие календарь/БД).

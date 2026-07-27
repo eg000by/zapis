@@ -37,6 +37,14 @@ interface MyPayment {
   kind: string; // manual | debt | advance
 }
 
+// Оплаченный счёт — история оплат в кабинете.
+interface PaidRow {
+  id: string;
+  amountKopecks: number;
+  note: string;
+  paidAt: string | null;
+}
+
 // Баланс оплат: долг / оплачено вперёд (до даты) / остаток. null — ставка не задана.
 interface MyBalance {
   debtKopecks: number;
@@ -47,7 +55,7 @@ interface MyBalance {
   rateKopecks: number;
 }
 
-// Месячный пакет для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты.
+// Пакет занятий (ОГЭ/ЕГЭ) — второй вариант оплаты ТОГО ЖЕ счёта.
 interface PackageOffer {
   label: string;
   lessons: number;
@@ -96,6 +104,11 @@ function fmtSlotMsk(iso: string, lessons = 1): string {
   return `${day}, ${start}–${hmMsk(end.toISOString())} (МСК)`;
 }
 
+// Первая буква заглавная: Intl отдаёт день недели строчным («вт, 14 июля»).
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // "Ср, 8 июля, 10:00 (МСК)" или, для блока, "…, 10:00–12:10 (МСК)".
 function fmtMsk(iso: string, lessons = 1): string {
   const s = new Intl.DateTimeFormat("ru-RU", {
@@ -106,20 +119,42 @@ function fmtMsk(iso: string, lessons = 1): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(iso));
-  if (lessons <= 1) return `${s} (МСК)`;
+  if (lessons <= 1) return `${cap(s)} (МСК)`;
   const spanMin = (lessons - 1) * SLOT_STEP_MINUTES + SLOT_MINUTES;
   const end = new Date(new Date(iso).getTime() + spanMin * 60000);
-  return `${s}–${hmMsk(end.toISOString())} (МСК)`;
+  return `${cap(s)}–${hmMsk(end.toISOString())} (МСК)`;
 }
 
 // "Ср, 8 июля" — короткая дата без времени (для списка дат разового переноса).
 function fmtDateMsk(iso: string): string {
+  return cap(
+    new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Moscow",
+      weekday: "short",
+      day: "numeric",
+      month: "long",
+    }).format(new Date(iso))
+  );
+}
+
+// "8 июля" — дата без дня недели (для заголовка дня в сетке).
+function dayMonthMsk(iso: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Moscow",
-    weekday: "short",
     day: "numeric",
     month: "long",
   }).format(new Date(iso));
+}
+
+// "8 июл" — совсем короткая дата для чипа дня недели (7 чипов в ряд на мобилке).
+function chipDateMsk(iso: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "numeric",
+    month: "short",
+  })
+    .format(new Date(iso))
+    .replace(/\.$/, "");
 }
 
 export default function BookingClient({
@@ -152,6 +187,9 @@ export default function BookingClient({
   const [payHint, setPayHint] = useState<string>("");
   const [balance, setBalance] = useState<MyBalance | null>(null);
   const [packageOffer, setPackageOffer] = useState<PackageOffer | null>(null);
+  const [paidHistory, setPaidHistory] = useState<PaidRow[]>([]);
+  // Цена одного занятия — показывается в подтверждении записи (0 — пробное/не задана).
+  const [lessonPrice, setLessonPrice] = useState(0);
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
   const [meetLink, setMeetLink] = useState<string>("");
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
@@ -169,12 +207,6 @@ export default function BookingClient({
   const [pickingNew, setPickingNew] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const slotInfo = useMemo(() => {
-    const m = new Map<string, { time: string; title: string }>();
-    (days || []).forEach((d) => d.slots.forEach((s) => m.set(s.start, { time: s.time, title: d.title })));
-    return m;
-  }, [days]);
 
   // Подряд идущие часы показываем одним блоком («10:00–13:00»).
   const blocks = useMemo(() => groupConsecutive(selected), [selected]);
@@ -195,6 +227,18 @@ export default function BookingClient({
   // с расписанием, которое тут же сменяется его кабинетом.
   const myLoading = my === null;
   const showGrid = (!myLoading && !hasBookings) || rescheduling || pickingNew;
+
+  // Деньги — одним блоком: сколько платить сейчас и из чего это состоит.
+  // Долгом считаем счета за уже проведённые занятия и ручные (kind ≠ advance),
+  // предоплатой — счета «вперёд». Пакет в сумму не входит: это ВТОРОЙ способ
+  // оплатить тот же счёт, а не ещё один платёж.
+  const dueTotal = payments.reduce((s, p) => s + p.amountKopecks, 0);
+  const dueDebt = payments
+    .filter((p) => p.kind !== "advance")
+    .reduce((s, p) => s + p.amountKopecks, 0);
+  const dueAhead = dueTotal - dueDebt;
+  const showPayCard =
+    hasConfirmedLessons && (dueTotal > 0 || paidHistory.length > 0 || (balance?.aheadHours ?? 0) > 0);
 
   // Если в окне подтверждения убрали все слоты — закрываем окно.
   useEffect(() => {
@@ -224,6 +268,8 @@ export default function BookingClient({
         setPayHint(d.payHint || "");
         setBalance(d.balance || null);
         setPackageOffer(d.packageOffer || null);
+        setPaidHistory(d.paidHistory || []);
+        setLessonPrice(d.lessonPriceKopecks || 0);
         setMeetLink(d.meetLink || "");
         setNextLesson(d.nextLesson || null);
       })
@@ -499,9 +545,21 @@ export default function BookingClient({
     <div className="wrap">
       <div className="hero">
         <h1>Здравствуйте, {greetName}! 👋</h1>
+        {/* Подзаголовок меняется по режиму экрана: пока выбираем время — приглашение
+            к записи; когда записи уже есть и показан кабинет — что здесь лежит. */}
         <p>
-          {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"} по
-          предмету «<b>{subject}</b>».
+          {myLoading ? (
+            "Загружаем ваши записи…"
+          ) : showGrid ? (
+            <>
+              {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"}{" "}
+              по предмету «<b>{subject}</b>».
+            </>
+          ) : (
+            <>
+              Ваши занятия и оплата по предмету «<b>{subject}</b>».
+            </>
+          )}
         </p>
         {showGrid && <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>}
       </div>
@@ -527,92 +585,158 @@ export default function BookingClient({
         </a>
       )}
 
-      {hasConfirmedLessons && balance && (balance.debtHours > 0 || balance.aheadHours > 0 || balance.balanceKopecks > 0) && (
-        <div className="card my-card">
-          <div className="day-title">Баланс</div>
-          {balance.debtHours > 0 && (
-            <div className="balance-row debt">
-              Долг: <b>{balance.debtHours} {lessonsWord(balance.debtHours)} · {fmtRub(balance.debtKopecks)}</b>
-            </div>
-          )}
-          {balance.aheadHours > 0 && balance.paidUntil && (
-            <div className="balance-row ok">
-              Оплачено вперёд: <b>{balance.aheadHours} {lessonsWord(balance.aheadHours)}</b> — до {fmtDateMsk(balance.paidUntil)}
-            </div>
-          )}
-          {balance.balanceKopecks > 0 && (
-            <div className="balance-row">
-              Остаток на балансе: <b>{fmtRub(balance.balanceKopecks)}</b>
-            </div>
-          )}
-        </div>
-      )}
-
-      {hasConfirmedLessons && payments.length > 0 && (
-        <div className="card my-card">
-          <div className="day-title">К оплате</div>
-          {payments.map((p) => (
-            <div key={p.id} className="my-row">
-              <div className="my-info">
-                <b>{(p.amountKopecks / 100).toLocaleString("ru-RU")} ₽</b>
-                {p.note && <span className="my-when">{p.note}</span>}
+      {/* Деньги — ОДИН блок: сумма к оплате, из чего она состоит, срок и способ.
+          Раньше здесь были две карточки («Баланс» и «К оплате») с разными числами,
+          и было непонятно, какое из них платить. */}
+      {showPayCard && (
+        <div className="card my-card pay-card">
+          {dueTotal > 0 ? (
+            <>
+              <div className="day-title">К оплате сейчас</div>
+              <div className="pay-total">{fmtRub(dueTotal)}</div>
+              <div className="pay-split">
+                {dueDebt > 0 && dueAhead > 0
+                  ? `из них долг за прошедшие — ${fmtRub(dueDebt)} · вперёд — ${fmtRub(dueAhead)}`
+                  : dueDebt > 0
+                    ? "долг за уже проведённые занятия"
+                    : "предоплата за будущие занятия"}
               </div>
-              <div className="my-actions">
-                {p.payLink ? (
-                  <a
-                    className="mini"
-                    href={p.payLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-                  >
-                    Оплатить по СБП ↗
+              <div className={`pay-due${dueDebt > 0 ? " overdue" : ""}`}>
+                {dueDebt > 0
+                  ? "⚠️ Занятия уже проведены — оплатите, пожалуйста, сегодня"
+                  : nextLesson
+                    ? `📅 Оплатить до ${fmtDateMsk(nextLesson)} — начала следующего занятия`
+                    : "📅 Оплатить до следующего занятия"}
+              </div>
+
+              {/* Экзаменационному ученику показываем ДВА способа оплатить один и тот же
+                  счёт: поштучно и пакетом. Пакет не добавляется к сумме — он её закрывает. */}
+              {packageOffer ? (
+                <div className="pay-options">
+                  <div className="pay-opt">
+                    <div className="pay-opt-head">
+                      <b>Как сейчас</b>
+                      <span className="pay-opt-price">{fmtRub(dueTotal)}</span>
+                    </div>
+                    <div className="pay-opt-note">
+                      {payments.length === 1 && payments[0].note
+                        ? payments[0].note
+                        : `${payments.length} ${lessonsWord(payments.length)} по счёту`}
+                    </div>
+                    {payments.length === 1 ? (
+                      payments[0].payLink ? (
+                        <a className="pay-btn" href={payments[0].payLink} target="_blank" rel="noreferrer">
+                          Оплатить {fmtRub(dueTotal)} ↗
+                        </a>
+                      ) : !payHint ? (
+                        <span className="badge wait">ждём ссылку на оплату</span>
+                      ) : null
+                    ) : (
+                      <div className="pay-list">
+                        {payments.map((p) => (
+                          <div key={p.id} className="pay-row">
+                            <span>{fmtRub(p.amountKopecks)}</span>
+                            {p.payLink ? (
+                              <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
+                                Оплатить ↗
+                              </a>
+                            ) : !payHint ? (
+                              <span className="badge wait">ждём ссылку</span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pay-opt best">
+                    <div className="pay-opt-head">
+                      <b>
+                        {packageOffer.lessons} {lessonsWord(packageOffer.lessons)} сразу
+                      </b>
+                      <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
+                      {/* Выгоду показываем, только если она есть: при индивидуальной
+                          ставке пакет может не быть дешевле поштучной оплаты. */}
+                      {packageOffer.savingsKopecks > 0 && (
+                        <span className="pkg-save">
+                          −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pay-opt-note">
+                      Пакет закрывает текущий счёт: занятия спишутся с него, платить отдельно
+                      не нужно.
+                    </div>
+                    {packageOffer.payLink ? (
+                      <a
+                        className="pay-btn primary"
+                        href={packageOffer.payLink}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Оплатить пакет {fmtRub(packageOffer.amountKopecks)} ↗
+                      </a>
+                    ) : !payHint ? (
+                      <span className="badge wait">ждём ссылку на оплату</span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : payments.length === 1 ? (
+                payments[0].payLink ? (
+                  <a className="pay-btn primary" href={payments[0].payLink} target="_blank" rel="noreferrer">
+                    Оплатить {fmtRub(dueTotal)} ↗
                   </a>
                 ) : !payHint ? (
                   <span className="badge wait">ждём ссылку на оплату</span>
-                ) : null}
-              </div>
-            </div>
-          ))}
-          {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
-        </div>
-      )}
-
-      {hasConfirmedLessons && packageOffer && (
-        <div className="card my-card pkg-card">
-          <div className="day-title">Выгоднее — пакет «Месяц»</div>
-          <p className="pkg-lead">
-            {packageOffer.lessons} занятий по подготовке к {packageOffer.label} одним платежом.
-          </p>
-          <div className="pkg-price">
-            <b>{fmtRub(packageOffer.amountKopecks)}</b>
-            {/* Выгоду показываем, только если она есть: при индивидуальной ставке
-                пакет может не быть дешевле поштучной оплаты. */}
-            {packageOffer.savingsKopecks > 0 && (
-              <>
-                <span className="pkg-old">
-                  {fmtRub(packageOffer.perLessonKopecks * packageOffer.lessons)}
-                </span>
-                <span className="pkg-save">
-                  −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
-                </span>
-              </>
-            )}
-          </div>
-          {packageOffer.payLink ? (
-            <a
-              className="mini pkg-btn"
-              href={packageOffer.payLink}
-              target="_blank"
-              rel="noreferrer"
-              style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-            >
-              Оплатить пакет по СБП ↗
-            </a>
-          ) : payHint ? (
-            <p className="hint" style={{ marginTop: 4 }}>💳 {payHint}</p>
+                ) : null
+              ) : (
+                <div className="pay-list">
+                  {payments.map((p) => (
+                    <div key={p.id} className="pay-row">
+                      <div className="my-info">
+                        <b>{fmtRub(p.amountKopecks)}</b>
+                        {p.note && <span className="my-when">{p.note}</span>}
+                      </div>
+                      {p.payLink ? (
+                        <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
+                          Оплатить ↗
+                        </a>
+                      ) : !payHint ? (
+                        <span className="badge wait">ждём ссылку</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
+            </>
           ) : (
-            <span className="badge wait">ждём ссылку на оплату</span>
+            <>
+              <div className="day-title">Оплата</div>
+              <div className="pay-ok">
+                ✅ Всё оплачено
+                {balance && balance.aheadHours > 0 && balance.paidUntil
+                  ? ` — вперёд ${balance.aheadHours} ${lessonsWord(balance.aheadHours)}, по ${fmtDateMsk(balance.paidUntil)}`
+                  : ""}
+              </div>
+              {balance && balance.balanceKopecks > 0 && (
+                <div className="pay-split">Остаток на балансе: {fmtRub(balance.balanceKopecks)}</div>
+              )}
+            </>
+          )}
+
+          {/* История оплат: «я же платил» ученик проверяет сам. */}
+          {paidHistory.length > 0 && (
+            <details className="pay-history">
+              <summary>Оплачено ранее ({paidHistory.length})</summary>
+              {paidHistory.map((h) => (
+                <div key={h.id} className="pay-hist-row">
+                  <span className="my-when">{h.paidAt ? fmtDateMsk(h.paidAt) : "—"}</span>
+                  <b>{fmtRub(h.amountKopecks)}</b>
+                  {h.note && <span className="my-when">{h.note}</span>}
+                </div>
+              ))}
+            </details>
           )}
         </div>
       )}
@@ -801,12 +925,18 @@ export default function BookingClient({
                 onClick={() => setActiveDay(i)}
               >
                 <b>{d.weekday}</b>
+                {/* Конкретная дата ближайшего наступления: без неё ученик (особенно
+                    на разовом пробном) не понимает, на какое число записывается. */}
+                {d.slots[0] && <small>{chipDateMsk(d.slots[0].start)}</small>}
               </button>
             ))}
           </div>
 
           <div className="card">
-            <div className="day-title">{days[activeDay].title}</div>
+            <div className="day-title">
+              {days[activeDay].title}
+              {days[activeDay].slots[0] ? `, ${dayMonthMsk(days[activeDay].slots[0].start)}` : ""}
+            </div>
             {days[activeDay].closed ? (
               <p className="hint" style={{ margin: "4px 2px" }}>
                 🌙 Выходной — в этот день занятий нет. Выберите другой день недели.
@@ -879,33 +1009,41 @@ export default function BookingClient({
             <p className="when">{subject}</p>
 
             <div className="summary">
-              {blocks.map((b) => {
-                const title = slotInfo.get(b.start)?.title || "";
-                const startLabel = slotInfo.get(b.start)?.time || hmMsk(b.start);
-                const timeLabel =
-                  b.slots.length > 1 ? `${startLabel}–${hmMsk(b.end)}` : startLabel;
-                return (
-                  <div key={b.start} className="summary-row">
-                    <div className="summary-when">
-                      {title}, {timeLabel} (МСК)
-                      <span className="summary-tag">{trial ? "разово" : "еженедельно"}</span>
-                    </div>
-                    <button
-                      className="chip-x"
-                      onClick={() => removeSlots(b.slots)}
-                      aria-label="Убрать"
-                    >
-                      ×
-                    </button>
+              {/* Конкретная дата, а не «Вторник»: ученик должен видеть, на какое
+                  число он записывается (для еженедельной серии — дата первого занятия). */}
+              {blocks.map((b) => (
+                <div key={b.start} className="summary-row">
+                  <div className="summary-when">
+                    {fmtMsk(b.start, b.slots.length)}
+                    <span className="summary-tag">{trial ? "разово" : "далее еженедельно"}</span>
                   </div>
-                );
-              })}
+                  <button
+                    className="chip-x"
+                    onClick={() => removeSlots(b.slots)}
+                    aria-label="Убрать"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
+
+            {/* Цена — до записи, а не постфактум из счёта. */}
+            {trial ? (
+              <p className="sheet-price">
+                Пробное занятие — <b>бесплатно</b>
+              </p>
+            ) : lessonPrice > 0 ? (
+              <p className="sheet-price">
+                {selected.length} {lessonsWord(selected.length)} × {fmtRub(lessonPrice)} ={" "}
+                <b>{fmtRub(lessonPrice * selected.length)}</b> в неделю
+              </p>
+            ) : null}
 
             <p className="sheet-note">
               {trial
                 ? "Разовое пробное занятие. Отменить или перенести можно в разделе «Ваши записи»."
-                : "Время закрепится за вами каждую неделю. Перенести или отменить можно в разделе «Ваши записи»."}
+                : "Время закрепится за вами каждую неделю, оплата — после подтверждения. Перенести или отменить можно в разделе «Ваши записи»."}
             </p>
 
             {formError && <div className="error-text">{formError}</div>}

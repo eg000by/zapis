@@ -4,8 +4,9 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { payments, students } from "./schema";
 import { FREE_COLOR_ID, MISSED_COLOR_ID, MSK_OFFSET_MINUTES } from "./config";
-import { summarizeOutstanding } from "./payments";
-import { listDayOccurrences } from "./google";
+import { isPackageKind, summarizeOutstanding } from "./payments";
+import { fetchBusy, listDayOccurrences } from "./google";
+import { buildWeek, weekWindowBounds, type DaySlots } from "./slots";
 
 export interface IncomeStats {
   totalKopecks: number; // всего получено за всё время
@@ -138,4 +139,115 @@ export async function computeIncomeStats(now = new Date()): Promise<IncomeStats>
     expectedMonthKopecks: expected,
     now,
   });
+}
+
+// ── Должники ───────────────────────────────────────────────────────────────
+// Кто и сколько должен — одним экраном. Долг = счета за уже проведённые занятия
+// и ручные счета преподавателя; аванс и предложенный пакет долгом не считаются
+// (та же семантика, что в карточке ученика и аналитике).
+export interface DebtorRow {
+  studentId: string;
+  name: string;
+  subject: string;
+  active: boolean;
+  debtKopecks: number;
+  advanceKopecks: number;
+  packageKopecks: number;
+  oldestAt: Date | null; // дата самого старого неоплаченного счёта-долга
+  invoices: number; // сколько счетов-долгов открыто
+}
+
+// Чистая группировка (для тестов): неоплаченные счета × ученики → должники,
+// от большего долга к меньшему. Ученики без долга не возвращаются.
+export function groupDebtors(
+  rows: { studentId: string; kind: string; amountKopecks: number; createdAt: Date | string | null }[],
+  studentRows: { id: string; name: string; subject: string; active: boolean }[]
+): DebtorRow[] {
+  const byId = new Map(studentRows.map((s) => [s.id, s]));
+  const acc = new Map<string, DebtorRow>();
+  for (const r of rows) {
+    const s = byId.get(r.studentId);
+    if (!s) continue; // счёт без ученика (удалён) — в сводку не идёт
+    const row =
+      acc.get(r.studentId) ??
+      {
+        studentId: s.id,
+        name: s.name,
+        subject: s.subject,
+        active: s.active,
+        debtKopecks: 0,
+        advanceKopecks: 0,
+        packageKopecks: 0,
+        oldestAt: null,
+        invoices: 0,
+      };
+    if (isPackageKind(r.kind)) row.packageKopecks += r.amountKopecks;
+    else if (r.kind === "advance") row.advanceKopecks += r.amountKopecks;
+    else {
+      row.debtKopecks += r.amountKopecks;
+      row.invoices++;
+      const at = r.createdAt ? new Date(r.createdAt) : null;
+      if (at && (!row.oldestAt || at < row.oldestAt)) row.oldestAt = at;
+    }
+    acc.set(r.studentId, row);
+  }
+  return [...acc.values()]
+    .filter((r) => r.debtKopecks > 0)
+    .sort((a, b) => b.debtKopecks - a.debtKopecks);
+}
+
+export async function listDebtors(): Promise<DebtorRow[]> {
+  const rows = await db()
+    .select({
+      studentId: payments.studentId,
+      kind: payments.kind,
+      amountKopecks: payments.amountKopecks,
+      createdAt: payments.createdAt,
+    })
+    .from(payments)
+    .where(eq(payments.status, "unpaid"));
+  const studentRows = await db()
+    .select({
+      id: students.id,
+      name: students.name,
+      subject: students.subject,
+      active: students.active,
+    })
+    .from(students);
+  return groupDebtors(rows, studentRows);
+}
+
+// ── Загрузка недели ────────────────────────────────────────────────────────
+// Сколько слотов рабочей недели занято. Это потолок выручки в штуках: свободный
+// слот — незаработанные деньги, поэтому свободные времена показываем списком.
+export interface WeekLoad {
+  total: number; // всего слотов в рабочей неделе
+  busy: number;
+  free: number;
+  percent: number; // загрузка, 0–100
+  freeByDay: { weekday: string; times: string[] }[]; // только дни, где есть свободное
+}
+
+export function summarizeWeekLoad(days: DaySlots[]): WeekLoad {
+  let total = 0;
+  let busy = 0;
+  const freeByDay: { weekday: string; times: string[] }[] = [];
+  for (const d of days) {
+    if (d.closed) continue; // выходной — в ёмкость не входит
+    const times: string[] = [];
+    for (const s of d.slots) {
+      total++;
+      if (s.busy) busy++;
+      else times.push(s.time);
+    }
+    if (times.length) freeByDay.push({ weekday: d.weekday, times });
+  }
+  const free = total - busy;
+  return { total, busy, free, percent: total ? Math.round((busy / total) * 100) : 0, freeByDay };
+}
+
+export async function computeWeekLoad(now = new Date()): Promise<WeekLoad> {
+  const { timeMin, timeMax } = weekWindowBounds(now);
+  const busy = await fetchBusy(timeMin, timeMax);
+  return summarizeWeekLoad(buildWeek(busy, now));
 }

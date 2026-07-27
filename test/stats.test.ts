@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expectedIncome, summarizeIncome } from "@/lib/stats";
+import { expectedIncome, groupDebtors, summarizeIncome, summarizeWeekLoad } from "@/lib/stats";
 
 // «Сейчас»: 14 июля 2026 (МСК).
 const NOW = new Date("2026-07-14T09:00:00.000Z");
@@ -111,5 +111,74 @@ describe("expectedIncome — ожидаемый доход за месяц по 
   it("ученик без ставки даёт 0 (не ломает подсчёт)", () => {
     const total = expectedIncome([{ hours: 3, colorId: null, studentId: "нет-такого" }], rates);
     expect(total).toBe(0);
+  });
+});
+
+describe("groupDebtors — кто и сколько должен", () => {
+  const studentRows = [
+    { id: "s1", name: "Аня", subject: "Питон", active: true },
+    { id: "s2", name: "Боря", subject: "ЕГЭ информатика", active: true },
+    { id: "s3", name: "Вика", subject: "Фронтенд", active: false },
+  ];
+
+  it("долгом считаются счета за проведённые и ручные; аванс и пакет — нет", () => {
+    const rows = groupDebtors(
+      [
+        { studentId: "s1", kind: "debt", amountKopecks: 300000, createdAt: "2026-07-01T10:00:00Z" },
+        { studentId: "s1", kind: "manual", amountKopecks: 100000, createdAt: "2026-07-05T10:00:00Z" },
+        { studentId: "s2", kind: "advance", amountKopecks: 250000, createdAt: null },
+        { studentId: "s2", kind: "package:8", amountKopecks: 1700000, createdAt: null },
+      ],
+      studentRows
+    );
+    // У Бори только аванс и пакет — он не должник.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: "Аня", debtKopecks: 400000, invoices: 2 });
+    // Возраст долга — по самому старому счёту.
+    expect(rows[0].oldestAt?.toISOString()).toBe("2026-07-01T10:00:00.000Z");
+  });
+
+  it("сортировка по убыванию долга, архивные тоже видны", () => {
+    const rows = groupDebtors(
+      [
+        { studentId: "s1", kind: "debt", amountKopecks: 100000, createdAt: null },
+        { studentId: "s3", kind: "debt", amountKopecks: 900000, createdAt: null },
+      ],
+      studentRows
+    );
+    expect(rows.map((r) => r.name)).toEqual(["Вика", "Аня"]);
+    expect(rows[0].active).toBe(false);
+  });
+
+  it("счёт удалённого ученика игнорируется", () => {
+    const rows = groupDebtors(
+      [{ studentId: "нет-такого", kind: "debt", amountKopecks: 500000, createdAt: null }],
+      studentRows
+    );
+    expect(rows).toHaveLength(0);
+  });
+});
+
+describe("summarizeWeekLoad — загрузка недели", () => {
+  const day = (weekday: string, slots: [string, boolean][], closed = false) => ({
+    date: `wd-${weekday}`,
+    title: weekday,
+    weekday,
+    closed,
+    slots: slots.map(([time, busy]) => ({ start: `2026-07-14T07:00:00.000Z`, time, busy })),
+  });
+
+  it("считает занятые/свободные и собирает свободные времена по дням", () => {
+    const load = summarizeWeekLoad([
+      day("Пн", [["10:00", true], ["11:10", false]]),
+      day("Вт", [["09:00", true], ["10:10", true]]),
+      day("Пт", [], true), // выходной — в ёмкость не входит
+    ]);
+    expect(load).toMatchObject({ total: 4, busy: 3, free: 1, percent: 75 });
+    expect(load.freeByDay).toEqual([{ weekday: "Пн", times: ["11:10"] }]);
+  });
+
+  it("пустое расписание не делит на ноль", () => {
+    expect(summarizeWeekLoad([])).toMatchObject({ total: 0, percent: 0, freeByDay: [] });
   });
 });

@@ -7,6 +7,7 @@ import {
   isPackageKind,
   outstandingPayments,
   packageLessonsOf,
+  paidPayments,
 } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { getPayMethod, getSbpDetails } from "@/lib/settings";
@@ -19,6 +20,8 @@ const NO_BILLING = {
   meetLink: "",
   payHint: "",
   packageOffer: null,
+  paidHistory: [],
+  lessonPriceKopecks: 0,
 } as {
   meetLink: string;
   // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
@@ -32,7 +35,8 @@ const NO_BILLING = {
     balanceKopecks: number;
     rateKopecks: number;
   } | null;
-  // Месячный пакет для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты.
+  // Пакет занятий для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты
+  // ТОГО ЖЕ счёта: оплатив пакет, ученик закрывает и текущий поштучный счёт.
   packageOffer: {
     label: string;
     lessons: number;
@@ -42,6 +46,10 @@ const NO_BILLING = {
     savingsPercent: number;
     payLink: string; // ссылка ЮKassa существующего счёта (в СБП-режиме пусто)
   } | null;
+  // История оплат — чтобы «я же платил» проверялось учеником, а не перепиской.
+  paidHistory: { id: string; amountKopecks: number; note: string; paidAt: string | null }[];
+  // Цена одного занятия — показывается в подтверждении записи (0 — пробное/не задана).
+  lessonPriceKopecks: number;
 };
 
 export const dynamic = "force-dynamic";
@@ -118,10 +126,27 @@ export async function GET(req: Request) {
               payLink: method === "sbp" ? "" : pkgInvoice.payLink || "",
             };
           }
+          // История оплат (последние) — best-effort, для блока «оплачено ранее».
+          const history = await paidPayments(studentId, 10).catch((e) => {
+            console.error("/api/my paid history failed", e);
+            return [];
+          });
+
           return {
             meetLink: student?.meetLink || "",
             payHint,
             packageOffer,
+            paidHistory: history.map((p) => ({
+              id: p.id,
+              amountKopecks: p.amountKopecks,
+              note: p.note,
+              paidAt: p.paidAt ? new Date(p.paidAt).toISOString() : null,
+            })),
+            // Цена занятия для экрана подтверждения записи: индивидуальная ставка,
+            // иначе тариф предмета. У пробного занятия цены нет — оно бесплатное.
+            lessonPriceKopecks: decoded.info.trial
+              ? 0
+              : student?.rateKopecks || tariff?.hourlyKopecks || 0,
             // Пакетные счета показываем отдельной карточкой, из общего списка исключаем.
             payments: rows
               .filter((p) => !isPackageKind(p.kind))
@@ -163,7 +188,11 @@ export async function GET(req: Request) {
       meetLink: hasConfirmed ? billing.meetLink : "",
       payHint: hasConfirmed ? billing.payHint : "",
       packageOffer: hasConfirmed ? billing.packageOffer : null,
+      paidHistory: hasConfirmed ? billing.paidHistory : [],
       nextLesson: hasConfirmed ? nextLesson : null,
+      // Цена занятия — не «занятийные» данные, а прайс: её ученик должен видеть
+      // ДО записи, на экране подтверждения. Поэтому гейтом не закрывается.
+      lessonPriceKopecks: billing.lessonPriceKopecks,
     });
   } catch (e) {
     console.error("/api/my error", e);

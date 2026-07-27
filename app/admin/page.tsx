@@ -489,11 +489,22 @@ export default async function AdminPage({
     console.error("admin pay settings", e);
   }
 
-  // Статистика доходов.
+  // Статистика доходов, загрузка недели и должники.
   let stats: import("@/lib/stats").IncomeStats | null = null;
+  let load: import("@/lib/stats").WeekLoad | null = null;
+  let debtors: import("@/lib/stats").DebtorRow[] = [];
   try {
-    const { computeIncomeStats } = await import("@/lib/stats");
+    const { computeIncomeStats, computeWeekLoad, listDebtors } = await import("@/lib/stats");
     stats = await computeIncomeStats();
+    // Загрузка и долги — best-effort: их сбой не должен ронять страницу.
+    load = await computeWeekLoad().catch((e) => {
+      console.error("admin week load", e);
+      return null;
+    });
+    debtors = await listDebtors().catch((e) => {
+      console.error("admin debtors", e);
+      return [];
+    });
   } catch (e) {
     console.error("admin income stats", e);
   }
@@ -548,6 +559,14 @@ export default async function AdminPage({
               <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.activeStudents}</div>
               <div className="hint" style={{ margin: 0 }}>активных учеников</div>
             </div>
+            {load && (
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{load.percent}%</div>
+                <div className="hint" style={{ margin: 0 }}>
+                  загрузка недели · занято {load.busy} из {load.total}
+                </div>
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 90 }}>
             {stats.byMonth.map((m, i) => {
@@ -566,6 +585,51 @@ export default async function AdminPage({
                   />
                   <div className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>{m.label}</div>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Долги одним списком: без него, чтобы понять «кто должен», приходилось
+          открывать карточку каждого ученика. */}
+      {debtors.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <label style={{ marginTop: 0 }}>🧾 Долги</label>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Всего {rub(debtors.reduce((s, d) => s + d.debtKopecks, 0))} ₽ по{" "}
+            {debtors.length} ученикам. Считаются только счета за проведённые занятия и
+            выставленные вручную.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {debtors.map((d) => {
+              const days = d.oldestAt
+                ? Math.max(
+                    0,
+                    Math.floor((Date.now() - new Date(d.oldestAt).getTime()) / 86400000)
+                  )
+                : null;
+              return (
+                <a
+                  key={d.studentId}
+                  href={link({ view: "student", id: d.studentId })}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "10px 0",
+                    borderTop: "1px solid var(--border, #e5e7eb)",
+                    textDecoration: "none",
+                  }}
+                >
+                  <span>
+                    <b>{d.name}</b> · {d.subject}
+                    {d.active ? "" : " · 🗄 архив"}
+                  </span>
+                  <span style={{ whiteSpace: "nowrap", color: "var(--danger, #dc2626)" }}>
+                    {rub(d.debtKopecks)} ₽{days != null ? ` · ${days} дн.` : ""}
+                  </span>
+                </a>
               );
             })}
           </div>

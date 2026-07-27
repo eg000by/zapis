@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { detectExamTariff, packageSavings, EXAM_TARIFFS } from "@/lib/config";
+import {
+  detectExamTariff,
+  packagePrice,
+  packageSavings,
+  packageTitle,
+  EXAM_TARIFFS,
+} from "@/lib/config";
 import { nextLessonCostKopecks, planAutoInvoices } from "@/lib/autobill";
 import { isPackageKind, packageKind, packageLessonsOf } from "@/lib/payments";
 import type { StudentBalance } from "@/lib/balance";
@@ -29,13 +35,19 @@ describe("detectExamTariff — тариф по предмету", () => {
     expect(detectExamTariff("Подготовка к ОГЭ по информатике")).toBeNull();
   });
 
-  it("ставка и цена пакета совпадают с прайсом", () => {
+  it("ставка и цена пакета совпадают с прайсом (скидка 15%)", () => {
     const ege = detectExamTariff("ЕГЭ")!;
     expect(ege.hourlyKopecks).toBe(250000); // 2500 ₽
-    expect(ege.packageKopecks).toBe(1800000); // 18 000 ₽
+    expect(ege.packageKopecks).toBe(1700000); // 8×2500 − 15% = 17 000 ₽
     const oge = detectExamTariff("ОГЭ")!;
     expect(oge.hourlyKopecks).toBe(120000); // 1200 ₽
-    expect(oge.packageKopecks).toBe(860000); // 8 600 ₽
+    expect(oge.packageKopecks).toBe(816000); // 8×1200 − 15% = 8 160 ₽
+  });
+
+  it("цена пакета считается от ставки и числа занятий", () => {
+    expect(packagePrice(250000, 8)).toBe(1700000);
+    expect(packagePrice(100000, 4)).toBe(340000); // 4×1000 = 4000 − 15% = 3400 ₽
+    expect(packageTitle(8)).toBe("пакет из 8 занятий");
   });
 });
 
@@ -48,28 +60,28 @@ const savingsOf = (kind: "ege" | "oge", hourlyKopecks?: number) => {
   });
 };
 
-describe("packageSavings — выгода месячного пакета", () => {
-  it("ЕГЭ: 8×2500=20000 − 18000 = 2000 (10%)", () => {
+describe("packageSavings — выгода пакета занятий", () => {
+  it("ЕГЭ: 8×2500=20000 − 17000 = 3000 (15%)", () => {
     const s = savingsOf("ege");
-    expect(s.kopecks).toBe(200000);
-    expect(s.percent).toBe(10);
+    expect(s.kopecks).toBe(300000);
+    expect(s.percent).toBe(15);
   });
 
-  it("ОГЭ: 8×1200=9600 − 8600 = 1000 (~10%)", () => {
+  it("ОГЭ: 8×1200=9600 − 8160 = 1440 (15%)", () => {
     const s = savingsOf("oge");
-    expect(s.kopecks).toBe(100000);
-    expect(s.percent).toBe(10);
+    expect(s.kopecks).toBe(144000);
+    expect(s.percent).toBe(15);
   });
 
   it("считается от фактической ставки ученика, а не от тарифной", () => {
-    // Индивидуальная ставка 3000 ₽: 8×3000 = 24000 − 18000 = 6000 (25%).
+    // Индивидуальная ставка 3000 ₽: 8×3000 = 24000 − 17000 = 7000 (29%).
     const s = savingsOf("ege", 300000);
-    expect(s.kopecks).toBe(600000);
-    expect(s.percent).toBe(25);
+    expect(s.kopecks).toBe(700000);
+    expect(s.percent).toBe(29);
   });
 
   it("выгоды нет (ставка ниже пакетной) — нули, а не отрицательная «экономия»", () => {
-    const s = savingsOf("ege", 200000); // 8×2000 = 16000 < 18000
+    const s = savingsOf("ege", 200000); // 8×2000 = 16000 < 17000
     expect(s).toMatchObject({ kopecks: 0, percent: 0 });
   });
 });

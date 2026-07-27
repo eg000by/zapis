@@ -27,6 +27,7 @@ import {
   CALENDAR_ID,
   calendarClient,
   deleteFutureEventsForContact,
+  extendSeries,
   listContactOccurrences,
 } from "./google";
 import {
@@ -43,8 +44,15 @@ import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
 import { getOrCreateStudentLinkCode } from "./shortlink";
-import { detectExamTariff, MISSED_COLOR_ID, SUBJECTS, siteBaseUrl } from "./config";
-import { computeIncomeStats } from "./stats";
+import {
+  detectExamTariff,
+  MISSED_COLOR_ID,
+  RECURRENCE_WEEKS,
+  SUBJECTS,
+  siteBaseUrl,
+} from "./config";
+import { computeIncomeStats, computeWeekLoad, listDebtors } from "./stats";
+import { fmtDate } from "./renew";
 import { formatMskRange } from "./slots";
 import {
   DEFAULT_SBP_DETAILS,
@@ -100,6 +108,7 @@ export async function showStudentsList(
 
   const rows: TgButton[][] = [
     [{ text: "➕ Новый ученик", data: "newstu" }, { text: "📊 Доходы", data: "stats" }],
+    [{ text: "🗓 Загрузка", data: "load" }, { text: "🧾 Долги", data: "debts" }],
   ];
   for (const s of active) rows.push([{ text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` }]);
   if (inArchive.length) rows.push([{ text: `🗄 Архив (${inArchive.length})`, data: "stusarch" }]);
@@ -184,6 +193,83 @@ export async function showStats(
     `Активных учеников: ${st.activeStudents}\n\n` +
     `<b>Помесячно</b>\n<code>${bars}</code>`;
   await emit(chatId, messageId, text, inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
+}
+
+// Загрузка недели: сколько слотов рабочего расписания занято и что свободно.
+// Свободный слот — это незаработанные деньги, поэтому список свободных времён
+// показываем прямо здесь: его можно сразу предложить ученику.
+export async function showWeekLoad(
+  chatId: number | string,
+  messageId: number | null
+): Promise<void> {
+  const load = await computeWeekLoad();
+  const lines = [
+    "🗓 <b>Загрузка недели</b>",
+    "",
+    `Занято <b>${load.busy} из ${load.total}</b> (${load.percent}%)`,
+  ];
+  if (load.total === 0) {
+    lines.push("Рабочих слотов нет — проверьте расписание в настройках сервиса.");
+  } else if (load.free === 0) {
+    lines.push("Свободных слотов нет — неделя занята полностью 🎉");
+  } else {
+    lines.push(`Свободно ${load.free}:`);
+    for (const d of load.freeByDay) lines.push(`<b>${d.weekday}</b>: ${d.times.join(", ")}`);
+  }
+  await emit(chatId, messageId, lines.join("\n"), inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
+}
+
+// Долги одним экраном: кто, сколько и как давно. Долгом считаются только счета за
+// проведённые занятия и ручные — аванс и предложенный пакет сюда не идут.
+export async function showDebtors(
+  chatId: number | string,
+  messageId: number | null
+): Promise<void> {
+  const rows = await listDebtors();
+  const lines = ["🧾 <b>Долги</b>"];
+  const kb: TgButton[][] = [];
+  if (!rows.length) {
+    lines.push("\nДолгов нет 🎉");
+  } else {
+    const total = rows.reduce((s, r) => s + r.debtKopecks, 0);
+    lines.push(`\nВсего: <b>${rub(total)} ₽</b> · учеников: ${rows.length}\n`);
+    const now = Date.now();
+    for (const r of rows) {
+      const days = r.oldestAt
+        ? Math.max(0, Math.floor((now - new Date(r.oldestAt).getTime()) / 86400000))
+        : null;
+      lines.push(
+        `🔴 ${escapeHtml(r.name)} — <b>${rub(r.debtKopecks)} ₽</b>` +
+          (days != null ? ` · ${days} дн.` : "") +
+          (r.active ? "" : " · 🗄 архив")
+      );
+    }
+    // Кнопки — на первых 10 должников (Telegram не любит длинные клавиатуры).
+    for (const r of rows.slice(0, 10)) {
+      kb.push([{ text: `${r.name} · ${rub(r.debtKopecks)} ₽`, data: `stu:${r.studentId}` }]);
+    }
+  }
+  kb.push([{ text: "⬅️ Ученики", data: "stus" }]);
+  await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(kb));
+}
+
+// Продление серии занятий из кнопки в напоминании «занятия скоро закончатся».
+export async function renewSeriesBot(
+  chatId: number | string,
+  messageId: number | null,
+  eventId: string
+): Promise<boolean> {
+  const last = await extendSeries(eventId, RECURRENCE_WEEKS);
+  if (!last) {
+    await emit(chatId, messageId, "Не удалось продлить: серия не найдена или уже бессрочная.");
+    return false;
+  }
+  await emit(
+    chatId,
+    messageId,
+    `✅ <b>Занятия продлены</b>\n\nЕщё ${RECURRENCE_WEEKS} недель. Последнее занятие — ${fmtDate(new Date(last))}.`
+  );
+  return true;
 }
 
 // Раздел «Способ оплаты» — паритет с /admin: ЮKassa (кнопка-ссылка) или СБП-перевод

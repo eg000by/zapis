@@ -207,6 +207,51 @@ export async function listContactOccurrences(key: string): Promise<ColorOccurren
   return out;
 }
 
+// Мастер-событие повторяющейся серии (по всем ученикам) — для проверки, что серия
+// скоро закончится (RRULE с COUNT/UNTIL) и её пора продлевать.
+export interface SeriesMaster {
+  id: string;
+  student: string;
+  studentId: string;
+  subject: string;
+  start: Date;
+  rrule: string;
+  finite: boolean; // есть COUNT/UNTIL — серия конечна и когда-нибудь оборвётся
+}
+
+export async function listSeriesMasters(): Promise<SeriesMaster[]> {
+  const cal = calendarClient();
+  const now = Date.now();
+  const res = await cal.events.list({
+    calendarId: CALENDAR_ID,
+    privateExtendedProperty: ["app=zapis"],
+    timeMin: new Date(now - 400 * 86400000).toISOString(),
+    timeMax: new Date(now + 400 * 86400000).toISOString(),
+    singleEvents: false,
+    maxResults: 250,
+  });
+  const out: SeriesMaster[] = [];
+  for (const ev of res.data.items || []) {
+    if (ev.status === "cancelled" || !ev.id) continue;
+    const priv = ev.extendedProperties?.private || {};
+    if ((priv.status || "pending") !== "confirmed") continue;
+    const rrule = (ev.recurrence || []).find((r) => /^RRULE:/i.test(r));
+    if (!rrule) continue;
+    const start = ev.start?.dateTime || ev.start?.date;
+    if (!start) continue;
+    out.push({
+      id: ev.id,
+      student: priv.student || "",
+      studentId: priv.studentId || "",
+      subject: priv.subject || "",
+      start: new Date(start),
+      rrule,
+      finite: /(^|;)(COUNT|UNTIL)=/i.test(rrule),
+    });
+  }
+  return out;
+}
+
 // Одно занятие за конкретный день — для утреннего отчёта и напоминаний.
 export interface DayOccurrence {
   instanceId: string;
@@ -314,6 +359,80 @@ function utcRuleStamp(d: Date): string {
     `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
     `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`
   );
+}
+
+// Разбирает момент RRULE (UNTIL): "20260714T090000Z" или "20260714". null — не распознан.
+function parseRuleStamp(stamp: string): Date | null {
+  const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?$/.exec(stamp.trim());
+  if (!m) return null;
+  const [, y, mo, d, hh, mi, ss] = m;
+  return new Date(
+    Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh || 0), Number(mi || 0), Number(ss || 0))
+  );
+}
+
+// Продлевает правило повтора на weeks недель: COUNT=N → COUNT=N+weeks (для FREQ=WEEKLY
+// одно наступление = одна неделя), UNTIL=дата → дата+weeks недель. Бесконечное правило
+// (ни COUNT, ни UNTIL) продлевать нечего — возвращаем null.
+export function extendRrule(rrule: string, weeks: number): string | null {
+  let changed = false;
+  const parts = rrule
+    .replace(/^RRULE:/i, "")
+    .split(";")
+    .filter(Boolean)
+    .map((p) => {
+      const count = /^COUNT=(\d+)$/i.exec(p);
+      if (count) {
+        changed = true;
+        return `COUNT=${Number(count[1]) + weeks}`;
+      }
+      const until = /^UNTIL=(.+)$/i.exec(p);
+      if (until) {
+        const at = parseRuleStamp(until[1]);
+        if (!at) return p;
+        changed = true;
+        return `UNTIL=${utcRuleStamp(new Date(at.getTime() + weeks * 7 * 86400000))}`;
+      }
+      return p;
+    });
+  return changed ? `RRULE:${parts.join(";")}` : null;
+}
+
+// Продлевает серию занятий на weeks недель. Возвращает ISO последнего наступления
+// после продления (null — событие не найдено, это не серия или правило бесконечное).
+export async function extendSeries(eventId: string, weeks: number): Promise<string | null> {
+  const cal = calendarClient();
+  const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId });
+  const ev = res.data;
+  if (!Array.isArray(ev.recurrence) || !ev.recurrence.length) return null;
+  let touched = false;
+  const recurrence = ev.recurrence.map((r) => {
+    if (!/^RRULE:/i.test(r)) return r;
+    const next = extendRrule(r, weeks);
+    if (!next) return r;
+    touched = true;
+    return next;
+  });
+  if (!touched) return null;
+  await cal.events.patch({ calendarId: CALENDAR_ID, eventId, requestBody: { recurrence } });
+  return lastOccurrenceOf(eventId, new Date());
+}
+
+// ISO последнего будущего наступления серии (null — будущих наступлений нет).
+export async function lastOccurrenceOf(eventId: string, from: Date): Promise<string | null> {
+  const cal = calendarClient();
+  const res = await cal.events.instances({
+    calendarId: CALENDAR_ID,
+    eventId,
+    timeMin: from.toISOString(),
+    maxResults: 250,
+  });
+  const starts = (res.data.items || [])
+    .filter((i) => i.status !== "cancelled")
+    .map((i) => i.start?.dateTime || i.start?.date || "")
+    .filter(Boolean)
+    .sort();
+  return starts.length ? new Date(starts[starts.length - 1]).toISOString() : null;
 }
 
 // Обрезает RRULE до момента stamp: убирает COUNT/UNTIL и ставит UNTIL=stamp

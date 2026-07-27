@@ -7,8 +7,8 @@ import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
 // manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт на месяц
-// вперёд (у экзаменационных — на одно следующее занятие); package:N — месячный пакет
-// ОГЭ/ЕГЭ (кредитует ровно N часов, а не деньги÷ставку).
+// вперёд (у экзаменационных — на одно следующее занятие); package:N — пакет из N
+// занятий ОГЭ/ЕГЭ (кредитует ровно N часов, а не деньги÷ставку).
 export type PaymentKind = "manual" | "debt" | "advance" | `package:${number}`;
 
 // Число оплаченных занятий пакета хранится В САМОМ счёте (kind = «package:8»), а не
@@ -123,6 +123,17 @@ export async function outstandingPayments(studentId: string): Promise<Payment[]>
     .from(payments)
     .where(and(eq(payments.studentId, studentId), eq(payments.status, "unpaid")))
     .orderBy(desc(payments.createdAt));
+}
+
+// Оплаченные счета ученика, свежие сверху — история оплат в кабинете («я же платил»
+// должно проверяться самим учеником, а не перепиской с преподавателем).
+export async function paidPayments(studentId: string, limit = 10): Promise<Payment[]> {
+  return db()
+    .select()
+    .from(payments)
+    .where(and(eq(payments.studentId, studentId), eq(payments.status, "paid")))
+    .orderBy(desc(payments.paidAt))
+    .limit(limit);
 }
 
 // Сумма всех оплаченных счетов ученика (копейки). Основа балансовой покраски:

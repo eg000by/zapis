@@ -40,16 +40,32 @@ export function dayWindow(weekday: number): { start: number; end: number } | nul
 export const SUBJECTS = ["Питон", "Фронтенд", "ОГЭ информатика", "ЕГЭ информатика", "Другое"];
 
 // Тарифы подготовки к экзаменам (ОГЭ/ЕГЭ по информатике). У экзаменационных учеников
-// два варианта оплаты в кабинете: поштучно по часовой ставке и месячный пакет из
-// packageLessons занятий со скидкой. Пакет тарифицируется не деньгами÷ставку, а ровно
-// packageLessons часами (иначе скидка «съела» бы часть занятий).
+// два варианта оплаты в кабинете: поштучно по часовой ставке и пакет из packageLessons
+// занятий со скидкой. Пакет тарифицируется не деньгами÷ставку, а ровно packageLessons
+// часами (иначе скидка «съела» бы часть занятий).
+//
+// Пакет НЕ называется «месяцем»: 8 занятий при одном занятии в неделю — это два месяца,
+// а не месяц. Везде (кабинет, счёт, бот) он называется по числу занятий.
 export interface ExamTariff {
   kind: "oge" | "ege";
   label: string; // «ОГЭ» / «ЕГЭ» — для подписей в кабинете
   subjects: string[]; // канонические названия предмета (из SUBJECTS) — якорь тарифа
   hourlyKopecks: number; // цена одного занятия (часа)
-  packageLessons: number; // занятий в месячном пакете
-  packageKopecks: number; // цена месячного пакета
+  packageLessons: number; // занятий в пакете
+  packageKopecks: number; // цена пакета (= hourly × lessons − PACKAGE_DISCOUNT_PERCENT)
+}
+
+// Скидка пакета против поштучной оплаты. Цены тарифов ниже посчитаны от неё.
+export const PACKAGE_DISCOUNT_PERCENT = 15;
+
+// Цена пакета по часовой ставке и числу занятий, со скидкой PACKAGE_DISCOUNT_PERCENT.
+export function packagePrice(hourlyKopecks: number, lessons: number): number {
+  return Math.round((hourlyKopecks * lessons * (100 - PACKAGE_DISCOUNT_PERCENT)) / 100);
+}
+
+// Название пакета для ученика и счёта: «пакет из 8 занятий».
+export function packageTitle(lessons: number): string {
+  return `пакет из ${lessons} занятий`;
 }
 
 export const EXAM_TARIFFS: ExamTariff[] = [
@@ -59,7 +75,7 @@ export const EXAM_TARIFFS: ExamTariff[] = [
     subjects: ["ЕГЭ информатика"],
     hourlyKopecks: 250000,
     packageLessons: 8,
-    packageKopecks: 1800000,
+    packageKopecks: packagePrice(250000, 8), // 17 000 ₽ вместо 20 000 ₽
   },
   {
     kind: "oge",
@@ -67,7 +83,7 @@ export const EXAM_TARIFFS: ExamTariff[] = [
     subjects: ["ОГЭ информатика"],
     hourlyKopecks: 120000,
     packageLessons: 8,
-    packageKopecks: 860000,
+    packageKopecks: packagePrice(120000, 8), // 8 160 ₽ вместо 9 600 ₽
   },
 ];
 

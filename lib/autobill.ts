@@ -168,7 +168,7 @@ export async function ensureAutoInvoices(
     }
   }
 
-  // Месячный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты. Выставляем оффер автоматически,
+  // Пакет занятий (ОГЭ/ЕГЭ) — второй вариант оплаты. Выставляем оффер автоматически,
   // но только когда у ученика уже есть подтверждённые занятия (balance.items). Пока
   // счёт не оплачен, он не гасит поштучные (исключён из billedManual в planAutoInvoices).
   // Сверяется так же идемпотентно, как debt/advance: дубли (гонка двух открытий
@@ -183,7 +183,7 @@ export async function ensureAutoInvoices(
       pkgChanged = true;
     }
     const kind = packageKind(examTariff.packageLessons);
-    const note = `Пакет «Месяц» — ${examTariff.packageLessons} занятий (${examTariff.label})`;
+    const note = `Пакет из ${examTariff.packageLessons} занятий (${examTariff.label})`;
     const existing = pkgOpen[0];
     if (!existing) {
       await createPayment({

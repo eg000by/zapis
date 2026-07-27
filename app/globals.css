@@ -109,7 +109,8 @@ body {
   display: block;
   color: var(--muted);
   font-size: 11px;
-  margin-bottom: 2px;
+  margin-top: 2px;
+  white-space: nowrap;
 }
 .day-chip b {
   font-size: 15px;
@@ -135,6 +136,10 @@ body {
 }
 .day-chip.active small {
   color: rgba(255, 255, 255, 0.85);
+}
+.day-chip.closed small {
+  color: inherit;
+  opacity: 0.7;
 }
 /* Выходной: день в сетке есть, но приглушён — записи в него нет. */
 .day-chip.closed {
@@ -540,48 +545,140 @@ a.meet-link:hover {
   filter: brightness(0.9);
 }
 
-/* Плашка «Баланс»: долг / оплачено вперёд / остаток */
-.balance-row {
-  padding: 8px 0;
-  font-size: 14px;
-  color: var(--text);
+/* ── Блок оплаты: одна карточка «К оплате сейчас» ────────────────────────── */
+.pay-total {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 2px 0 4px;
 }
-.balance-row + .balance-row {
-  border-top: 1px solid var(--border);
+.pay-split {
+  color: var(--muted);
+  font-size: 13px;
 }
-.balance-row.debt b {
+.pay-due {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pay-due.overdue {
   color: var(--danger);
 }
-.balance-row.ok b {
+.pay-ok {
+  font-size: 15px;
+  font-weight: 600;
   color: var(--success);
+  margin-bottom: 4px;
 }
 
-/* Карточка месячного пакета (ОГЭ/ЕГЭ) — второй вариант оплаты в кабинете. */
-.pkg-card {
-  border: 1px solid var(--accent);
+/* Кнопка оплаты (ссылка провайдера) */
+.pay-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1.5px solid var(--accent);
+  background: var(--card);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pay-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  width: 100%;
+}
+.pay-btn.small {
+  margin-top: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.pay-btn:hover {
+  filter: brightness(1.05);
+}
+
+/* Несколько счетов — списком, у каждого своя кнопка */
+.pay-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.pay-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.pay-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* Два способа оплатить ОДИН счёт: поштучно или пакетом */
+.pay-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.pay-opt {
+  padding: 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+}
+.pay-opt.best {
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
-.pkg-lead {
-  margin: 2px 0 10px;
-  font-size: 14px;
-  color: var(--text);
-}
-.pkg-price {
+.pay-opt-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px 10px;
-  margin-bottom: 12px;
+  gap: 6px 10px;
 }
-.pkg-price b {
-  font-size: 22px;
+.pay-opt-price {
+  font-size: 18px;
+  font-weight: 800;
   color: var(--accent);
 }
-.pkg-old {
+.pay-opt-note {
+  margin-top: 4px;
   color: var(--muted);
-  text-decoration: line-through;
+  font-size: 13px;
+}
+
+/* История оплат */
+.pay-history {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.pay-history summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pay-hist-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 8px 0 0;
   font-size: 14px;
 }
+
 .pkg-save {
   font-size: 12px;
   font-weight: 700;
@@ -590,16 +687,6 @@ a.meet-link:hover {
   padding: 3px 8px;
   border-radius: 999px;
 }
-.pkg-btn {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  font-weight: 700;
-}
-.pkg-btn:hover {
-  filter: brightness(1.05);
-}
-
 /* Тег «Перенос» на строке разово перенесённого занятия */
 .badge.move {
   background: rgba(217, 119, 6, 0.16);
@@ -651,24 +738,13 @@ a.meet-link:hover {
   color: #fff;
 }
 
-/* Чипы выбранных слотов в форме */
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 6px;
+/* Цена записи в окне подтверждения */
+.sheet-price {
+  margin: 12px 0 0;
+  font-size: 15px;
 }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-}
+
+/* Крестик «убрать слот» в окне подтверждения */
 .chip-x {
   border: none;
   background: transparent;

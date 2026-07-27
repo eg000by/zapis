@@ -13,8 +13,17 @@ test("сетка: приветствие, свободные и занятые �
   await mockApi(page);
   await page.goto(tokenUrl());
   await expect(page.getByRole("heading", { name: /Здравствуйте, Егор/ })).toBeVisible();
+  await expect(page.getByText("Выберите удобное время для занятий")).toBeVisible();
   await expect(page.locator(".slot", { hasText: "10:00" }).first()).toBeEnabled();
   await expect(page.locator(".slot.busy", { hasText: "11:10" })).toContainText("занято");
+});
+
+test("в сетке видна конкретная дата — в чипе дня и в заголовке", async ({ page }) => {
+  await mockApi(page);
+  await page.goto(tokenUrl());
+  // Первый слот вторника — 14 июля 2026.
+  await expect(page.locator(".day-chip", { hasText: "Вт" }).locator("small")).toHaveText("14 июл");
+  await expect(page.locator(".card .day-title").first()).toContainText("14 июля");
 });
 
 test("выходной день: чип серый, слотов нет, вместо сетки — пояснение", async ({ page }) => {
@@ -51,10 +60,11 @@ test("бронь: слот → «Записаться» → подтвержде
   await expect(page.locator(".picker-bar")).toContainText("Выбрано слотов: 1");
   await page.getByRole("button", { name: "Записаться →" }).click();
 
-  // Форма подтверждения: слот и пометка «еженедельно».
+  // Форма подтверждения: конкретная дата первого занятия, пометка про повтор и цена.
   await expect(page.getByRole("heading", { name: "Подтверждение записи" })).toBeVisible();
-  await expect(page.locator(".summary-row")).toContainText("Вторник, 14 июля, 10:00 (МСК)");
-  await expect(page.locator(".summary-tag")).toHaveText("еженедельно");
+  await expect(page.locator(".summary-row")).toContainText("Вт, 14 июля в 10:00 (МСК)");
+  await expect(page.locator(".summary-tag")).toHaveText("далее еженедельно");
+  await expect(page.locator(".sheet-price")).toContainText("1 занятие × 1 500 ₽ = 1 500 ₽ в неделю");
 
   await page.locator(".sheet").getByRole("button", { name: /^Записаться/ }).click();
   await expect(page.getByRole("heading", { name: "Заявка отправлена!" })).toBeVisible();
