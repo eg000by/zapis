@@ -551,7 +551,7 @@ export default async function AdminPage({
               <div className="hint" style={{ margin: 0 }}>
                 выставлено вперёд
                 {stats.packageOfferKopecks > 0
-                  ? ` · пакеты ${rub(stats.packageOfferKopecks)} ₽`
+                  ? ` · одним платежом ${rub(stats.packageOfferKopecks)} ₽`
                   : ""}
               </div>
             </div>

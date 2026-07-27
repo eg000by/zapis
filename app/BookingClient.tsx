@@ -55,8 +55,10 @@ interface MyBalance {
   rateKopecks: number;
 }
 
-// Пакет занятий (ОГЭ/ЕГЭ) — второй вариант оплаты ТОГО ЖЕ счёта.
+// Оплата вперёд одним платежом — второй вариант оплаты ТОГО ЖЕ счёта: пакет
+// со скидкой у ОГЭ/ЕГЭ (exam) либо занятия месяца по ставке у остальных.
 interface PackageOffer {
+  exam: boolean;
   label: string;
   lessons: number;
   amountKopecks: number;
@@ -78,6 +80,15 @@ function lessonsWord(n: number): string {
   if (d10 === 1 && d100 !== 11) return "занятие";
   if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "занятия";
   return "занятий";
+}
+
+// "счёт/счёта/счетов" по числу.
+function invoicesWord(n: number): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return "счёт";
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "счёта";
+  return "счетов";
 }
 
 // "13:00" в МСК из ISO-момента.
@@ -615,13 +626,13 @@ export default function BookingClient({
                 <div className="pay-options">
                   <div className="pay-opt">
                     <div className="pay-opt-head">
-                      <b>Как сейчас</b>
+                      <b>По одному занятию</b>
                       <span className="pay-opt-price">{fmtRub(dueTotal)}</span>
                     </div>
                     <div className="pay-opt-note">
                       {payments.length === 1 && payments[0].note
                         ? payments[0].note
-                        : `${payments.length} ${lessonsWord(payments.length)} по счёту`}
+                        : `${payments.length} ${invoicesWord(payments.length)}: долг и ближайшее занятие`}
                     </div>
                     {payments.length === 1 ? (
                       payments[0].payLink ? (
@@ -652,7 +663,9 @@ export default function BookingClient({
                   <div className="pay-opt best">
                     <div className="pay-opt-head">
                       <b>
-                        {packageOffer.lessons} {lessonsWord(packageOffer.lessons)} сразу
+                        {packageOffer.exam
+                          ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
+                          : `Месяц вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
                       </b>
                       <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
                       {/* Выгоду показываем, только если она есть: при индивидуальной
@@ -664,8 +677,9 @@ export default function BookingClient({
                       )}
                     </div>
                     <div className="pay-opt-note">
-                      Пакет закрывает текущий счёт: занятия спишутся с него, платить отдельно
-                      не нужно.
+                      {packageOffer.exam
+                        ? "Пакет закрывает текущий счёт: занятия спишутся с него, платить отдельно не нужно."
+                        : "Один платёж закрывает текущий счёт и остальные занятия месяца — платить отдельно не нужно."}
                     </div>
                     {packageOffer.payLink ? (
                       <a
@@ -674,7 +688,8 @@ export default function BookingClient({
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Оплатить пакет {fmtRub(packageOffer.amountKopecks)} ↗
+                        {packageOffer.exam ? "Оплатить пакет" : "Оплатить месяц"}{" "}
+                        {fmtRub(packageOffer.amountKopecks)} ↗
                       </a>
                     ) : !payHint ? (
                       <span className="badge wait">ждём ссылку на оплату</span>

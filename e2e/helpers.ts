@@ -91,6 +91,7 @@ export const MY_EGE = {
   meetLink: "",
   payHint: "",
   packageOffer: {
+    exam: true,
     label: "ЕГЭ",
     lessons: 8,
     amountKopecks: 1700000,

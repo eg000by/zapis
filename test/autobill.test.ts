@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  advanceCostKopecks,
-  ensureAutoInvoices,
-  planAutoInvoices,
-} from "@/lib/autobill";
+import { ensureAutoInvoices, monthOffer, planAutoInvoices } from "@/lib/autobill";
 import { computeStudentBalance } from "@/lib/balance";
 import {
   createPayment,
@@ -114,27 +110,40 @@ describe("planAutoInvoices — чистый планировщик", () => {
   });
 });
 
-describe("advanceCostKopecks — окно «месяц вперёд»", () => {
-  it("считает только будущие незакрытые занятия в пределах окна", () => {
-    const mk = (daysFromNow: number, paid: boolean, past = false, hours = 1) => ({
-      instanceId: "i",
-      start: new Date(NOW.getTime() + daysFromNow * 86400000),
-      hours,
-      colorId: null,
-      paid,
-      past,
-    });
+const mk = (daysFromNow: number, paid: boolean, past = false, hours = 1) => ({
+  instanceId: "i",
+  start: new Date(NOW.getTime() + daysFromNow * 86400000),
+  hours,
+  colorId: null,
+  paid,
+  past,
+});
+
+describe("monthOffer — предложение «оплатить месяц вперёд»", () => {
+  it("долг + все будущие занятия окна, оплаченные и дальние не считаются", () => {
     const balance = {
       rateKopecks: 150000,
+      debtHours: 1, // проведённое неоплаченное — предложение закрывает и его
       items: [
-        mk(-3, false, true), // прошлое (долг) — не в окне «вперёд»
+        mk(-3, false, true), // прошлое (тот самый долг)
         mk(2, true), // будущее, уже оплачено — не выставляем
-        mk(9, false), // будущее, не оплачено → в счёт
-        mk(16, false, false, 2), // блок 2 часа → в счёт
-        mk(40, false), // за пределами 30 дней — не в счёт
+        mk(9, false), // будущее, не оплачено → в предложение
+        mk(16, false, false, 2), // блок 2 часа → в предложение
+        mk(40, false), // за пределами 30 дней — не в предложение
       ],
     } as any;
-    expect(advanceCostKopecks(balance, NOW)).toBe(3 * 150000);
+    // 1 (долг) + 1 + 2 = 4 занятия по 1500 ₽.
+    expect(monthOffer(balance, NOW)).toEqual({ lessons: 4, kopecks: 4 * 150000 });
+  });
+
+  it("впереди всего одно занятие — предлагать нечего (это и есть счёт «вперёд»)", () => {
+    const balance = { rateKopecks: 150000, debtHours: 0, items: [mk(2, false)] } as any;
+    expect(monthOffer(balance, NOW)).toBeNull();
+  });
+
+  it("будущих занятий нет — предложения нет даже при долге", () => {
+    const balance = { rateKopecks: 150000, debtHours: 2, items: [mk(-3, false, true)] } as any;
+    expect(monthOffer(balance, NOW)).toBeNull();
   });
 });
 
@@ -180,6 +189,39 @@ describe("ensureAutoInvoices — применение к счетам", () => {
       kind: "debt",
       note: "Автосчёт: долг за проведённые занятия (2 ч)",
     });
+  });
+
+  it("обычному ученику: счёт на ОДНО следующее занятие + предложение на месяц", async () => {
+    // Раньше «вперёд» сразу выставлялся на месяц. Теперь по умолчанию — одно занятие,
+    // а месяц предлагается вторым вариантом оплаты того же счёта.
+    mockBalance({
+      debtKopecks: 0,
+      debtHours: 0,
+      items: [mk(2, false), mk(9, false), mk(16, false)],
+    });
+    await ensureAutoInvoices("stu-1", "Тест");
+
+    expect(createPayment).toHaveBeenCalledWith({
+      studentId: "stu-1",
+      amountKopecks: 150000,
+      kind: "advance",
+      note: "Автосчёт: следующее занятие (1 ч)",
+    });
+    expect(createPayment).toHaveBeenCalledWith({
+      studentId: "stu-1",
+      amountKopecks: 450000,
+      kind: "package:3",
+      note: "Оплата вперёд: 3 занятий одним платежом",
+    });
+  });
+
+  it("предлагать месяц нечем — висящее предложение снимается", async () => {
+    mockBalance({ debtKopecks: 0, debtHours: 0, items: [mk(2, false)] }); // одно занятие впереди
+    vi.mocked(outstandingPayments).mockResolvedValue([
+      { id: "pk1", kind: "package:4", amountKopecks: 600000, payLink: "" },
+    ] as any);
+    await ensureAutoInvoices("stu-1", "Тест");
+    expect(deletePayment).toHaveBeenCalledWith("pk1");
   });
 
   it("обновление суммы сбрасывает ссылку оплаты (старый платёж ЮKassa неактуален)", async () => {

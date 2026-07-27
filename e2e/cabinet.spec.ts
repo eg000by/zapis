@@ -82,7 +82,7 @@ test("экзамен ЕГЭ: два способа оплатить ОДИН с�
 
   const opts = pay.locator(".pay-opt");
   await expect(opts).toHaveCount(2);
-  await expect(opts.nth(0)).toContainText("Как сейчас");
+  await expect(opts.nth(0)).toContainText("По одному занятию");
   await expect(opts.nth(0).locator(".pay-opt-price")).toHaveText("2 500 ₽");
 
   const pkg = pay.locator(".pay-opt.best");
@@ -94,6 +94,36 @@ test("экзамен ЕГЭ: два способа оплатить ОДИН с�
   await expect(pkg.getByRole("link", { name: /Оплатить пакет/ })).toHaveAttribute(
     "href",
     "https://yookassa.test/package"
+  );
+});
+
+test("обычный ученик: второй вариант — весь месяц одним платежом, без скидки", async ({ page }) => {
+  const my = {
+    ...MY_FULL,
+    packageOffer: {
+      exam: false,
+      label: "",
+      lessons: 5,
+      amountKopecks: 750000,
+      perLessonKopecks: 150000,
+      savingsKopecks: 0, // скидки нет — бейдж выгоды не показываем
+      savingsPercent: 0,
+      payLink: "https://yookassa.test/month",
+    },
+  };
+  await mockApi(page, { my });
+  await page.goto(tokenUrl());
+
+  const pay = page.locator(".pay-card");
+  await expect(pay.locator(".pay-total")).toHaveText("7 500 ₽"); // предложение сумму не меняет
+  const month = pay.locator(".pay-opt.best");
+  await expect(month).toContainText("Месяц вперёд · 5 занятий");
+  await expect(month.locator(".pay-opt-price")).toHaveText("7 500 ₽");
+  await expect(month.locator(".pkg-save")).toHaveCount(0);
+  await expect(month).toContainText("закрывает текущий счёт");
+  await expect(month.getByRole("link", { name: /Оплатить месяц/ })).toHaveAttribute(
+    "href",
+    "https://yookassa.test/month"
   );
 });
 

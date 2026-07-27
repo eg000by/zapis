@@ -139,7 +139,8 @@ export async function showStudentCard(
     `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
   ];
   if (out.advanceKopecks > 0) lines.push(`⏭ Выставлено вперёд: ${rub(out.advanceKopecks)} ₽`);
-  if (out.packageKopecks > 0) lines.push(`📦 Предложен пакет: ${rub(out.packageKopecks)} ₽`);
+  if (out.packageKopecks > 0)
+    lines.push(`📦 Предложено вперёд одним платежом: ${rub(out.packageKopecks)} ₽`);
   // Ссылка на запись — прямо в тексте карточки (в <code> копируется одним тапом).
   const base = botBaseUrl();
   if (base) {
@@ -189,7 +190,9 @@ export async function showStats(
     `Всего получено: ${rub(st.totalKopecks)} ₽ (${st.paidCount} оплат)\n` +
     `Долг за проведённые: ${rub(st.debtKopecks)} ₽\n` +
     `Выставлено вперёд: ${rub(st.advanceKopecks)} ₽\n` +
-    (st.packageOfferKopecks > 0 ? `Предложено пакетов: ${rub(st.packageOfferKopecks)} ₽\n` : "") +
+    (st.packageOfferKopecks > 0
+      ? `Предложено вперёд одним платежом: ${rub(st.packageOfferKopecks)} ₽\n`
+      : "") +
     `Активных учеников: ${st.activeStudents}\n\n` +
     `<b>Помесячно</b>\n<code>${bars}</code>`;
   await emit(chatId, messageId, text, inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
@@ -354,7 +357,7 @@ export async function showPayments(
     lines.push(
       `\nДолг: <b>${rub(out.debtKopecks)} ₽</b>` +
         (out.advanceKopecks > 0 ? ` · вперёд: ${rub(out.advanceKopecks)} ₽` : "") +
-        (out.packageKopecks > 0 ? ` · пакет: ${rub(out.packageKopecks)} ₽` : "")
+        (out.packageKopecks > 0 ? ` · одним платежом: ${rub(out.packageKopecks)} ₽` : "")
     );
     for (const p of pays) {
       lines.push(

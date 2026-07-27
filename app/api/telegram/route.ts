@@ -7,7 +7,14 @@ import {
   lessonDescription,
 } from "@/lib/google";
 import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/lib/slots";
-import { answerCallback, editMessageText, escapeHtml, sendOwner, sendTo } from "@/lib/telegram";
+import {
+  answerCallback,
+  editMessageText,
+  escapeHtml,
+  sendOwner,
+  sendTo,
+  setMyCommands,
+} from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
@@ -331,17 +338,38 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   return ok();
 }
 
+// Единый список команд: из него строится и справка /help, и меню бота (кнопка «/»
+// в клиенте Telegram). Меню на стороне Telegram живёт до следующего setMyCommands,
+// поэтому обновляем его при каждом /start и /help — иначе после добавления команды
+// в меню остаются старые.
+const BOT_COMMANDS: { command: string; emoji: string; description: string }[] = [
+  { command: "students", emoji: "👥", description: "Ученики, счета, заметки, ссылки" },
+  { command: "new", emoji: "➕", description: "Новый ученик + ссылка на запись" },
+  { command: "stats", emoji: "📊", description: "Доходы за месяц и всего" },
+  { command: "load", emoji: "🗓", description: "Загрузка недели и свободные слоты" },
+  { command: "debts", emoji: "🧾", description: "Кто и сколько должен" },
+  { command: "pay", emoji: "💳", description: "Способ оплаты (ЮKassa / СБП)" },
+  { command: "cancel", emoji: "✖️", description: "Отменить текущий ввод" },
+  { command: "help", emoji: "❓", description: "Справка по командам" },
+];
+
 const HELP =
   "<b>🤖 Команды</b>\n\n" +
-  "👥 /students — ученики, счета, заметки, ссылки\n" +
-  "➕ /new — новый ученик + ссылка на запись\n" +
-  "📊 /stats — доходы\n" +
-  "🗓 /load — загрузка недели и свободные слоты\n" +
-  "🧾 /debts — кто и сколько должен\n" +
-  "💳 /pay — способ оплаты (ЮKassa / СБП)\n" +
-  "❓ /help — эта справка\n\n" +
-  "<b>Внутри карточки ученика:</b>\n" +
+  BOT_COMMANDS.map((c) => `${c.emoji} /${c.command} — ${c.description.toLowerCase()}`).join("\n") +
+  "\n\n<b>Внутри карточки ученика:</b>\n" +
   "💳 счета (создать / отметить / удалить) · 📅 занятия и заметки · ⚙️ Ещё (заметка, Телемост, архив, удаление). Ссылка на запись — в тексте карточки.";
+
+// Синхронизация меню команд с текущим списком (best-effort: сбой Telegram API не
+// должен ломать ответ на сообщение владельца).
+async function refreshBotMenu(): Promise<void> {
+  try {
+    await setMyCommands(
+      BOT_COMMANDS.map((c) => ({ command: c.command, description: `${c.emoji} ${c.description}` }))
+    );
+  } catch (e) {
+    console.error("setMyCommands failed", e);
+  }
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -382,6 +410,7 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
 
   if (text === "/start") {
+    await refreshBotMenu();
     await sendOwner(HELP);
     await showStudentsList(chatId, null);
     return ok();
@@ -411,6 +440,7 @@ async function handleMessage(msg: any): Promise<NextResponse> {
     return ok();
   }
   if (text.startsWith("/help")) {
+    await refreshBotMenu();
     await sendOwner(HELP);
     return ok();
   }

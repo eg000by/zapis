@@ -1,9 +1,14 @@
 // Автосчета: два отдельных счёта на ученика — «долг» (проведённые неоплаченные
-// занятия) и «на месяц вперёд» (будущие занятия ближайших AUTO_ADVANCE_DAYS дней,
-// не закрытые балансом). Ручные счета сохраняются и УМЕНЬШАЮТ автосчета (то, что
-// уже выставлено вручную, не выставляем второй раз). Вызывается при открытии
-// кабинета (/api/my) — идемпотентно: суммы сверяются и обновляются, лишние
-// автосчета удаляются, при нуле — счёт снимается.
+// занятия) и «вперёд» (одно ближайшее занятие). Ручные счета сохраняются и
+// УМЕНЬШАЮТ автосчета (то, что уже выставлено вручную, не выставляем второй раз).
+// Вызывается при открытии кабинета (/api/my) и после занятия (pulse) —
+// идемпотентно: суммы сверяются и обновляются, лишние автосчета удаляются,
+// при нуле — счёт снимается.
+//
+// Оплата вперёд одним платежом (счёт kind=package:N) — ВТОРОЙ способ закрыть тот же
+// счёт, а не ещё одно обязательство: у экзаменационных это пакет со скидкой, у
+// остальных — все занятия месяца. Пока такой счёт не оплачен, он не гасит поштучные
+// (исключён из billedManual) и не считается долгом.
 import { computeStudentBalance, type StudentBalance } from "./balance";
 import {
   createPayment,
@@ -77,14 +82,28 @@ export function planAutoInvoices(input: {
   return actions;
 }
 
-// Стоимость будущих занятий ближайших дней, не закрытых балансом.
-export function advanceCostKopecks(balance: StudentBalance, now: Date): number {
+// Предложение «оплатить вперёд одним платежом» для обычного (не экзаменационного)
+// ученика: долг за проведённые + ВСЕ будущие занятия ближайших AUTO_ADVANCE_DAYS
+// дней. Скидки нет — это ровно то же количество занятий по ставке, поэтому такой
+// платёж честно «закрывает текущий счёт».
+//
+// null, когда предлагать нечего: если впереди всего одно занятие, предложение
+// совпало бы со счётом «следующее занятие» — второй вариант оплаты был бы обманом.
+export function monthOffer(
+  balance: StudentBalance,
+  now: Date
+): { lessons: number; kopecks: number } | null {
   const horizon = now.getTime() + AUTO_ADVANCE_DAYS * 86400000;
-  let hours = 0;
+  let futureHours = 0;
+  let firstBlockHours = 0;
   for (const o of balance.items) {
-    if (!o.past && !o.paid && o.start.getTime() <= horizon) hours += o.hours;
+    if (o.past || o.paid || o.start.getTime() > horizon) continue;
+    if (!firstBlockHours) firstBlockHours = o.hours;
+    futureHours += o.hours;
   }
-  return hours * balance.rateKopecks;
+  if (futureHours <= firstBlockHours) return null;
+  const lessons = balance.debtHours + futureHours;
+  return { lessons, kopecks: lessons * balance.rateKopecks };
 }
 
 // Стоимость одного ближайшего неоплаченного занятия — «вперёд» для экзаменационных
@@ -100,17 +119,11 @@ function fmtRub(kopecks: number): string {
   return `${(kopecks / 100).toLocaleString("ru-RU")} ₽`;
 }
 
-function noteFor(
-  kind: "debt" | "advance",
-  amountKopecks: number,
-  rateKopecks: number,
-  perLesson: boolean
-): string {
+function noteFor(kind: "debt" | "advance", amountKopecks: number, rateKopecks: number): string {
   const hours = Math.round(amountKopecks / rateKopecks);
-  if (kind === "debt") return `Автосчёт: долг за проведённые занятия (${hours} ч)`;
-  return perLesson
-    ? `Автосчёт: следующее занятие (${hours} ч)`
-    : `Автосчёт: занятия на месяц вперёд (${hours} ч)`;
+  return kind === "debt"
+    ? `Автосчёт: долг за проведённые занятия (${hours} ч)`
+    : `Автосчёт: следующее занятие (${hours} ч)`;
 }
 
 // Сверяет автосчета ученика с балансом и (при настроенной ЮKassa) выдаёт ссылки
@@ -129,16 +142,14 @@ export async function ensureAutoInvoices(
   if (!balance) return null; // нет ставки — автосчета не считаются
 
   const now = new Date();
-  // Экзаменационным ученикам (ОГЭ/ЕГЭ) «вперёд» выставляем одно следующее занятие,
-  // а не месяц: месячную оплату они закрывают отдельным пакетом. Признак — предмет.
   const examTariff = detectExamTariff(student?.subject || "");
-  const examStudent = !!examTariff;
   const open = await outstandingPayments(studentId);
+  // «Вперёд» — всегда одно ближайшее занятие: платить сразу за месяц ученик может
+  // вторым вариантом (счёт-предложение ниже), но по умолчанию сумма к оплате
+  // маленькая и понятная.
   const actions = planAutoInvoices({
     debtKopecks: balance.debtKopecks,
-    advanceKopecks: examStudent
-      ? nextLessonCostKopecks(balance)
-      : advanceCostKopecks(balance, now),
+    advanceKopecks: nextLessonCostKopecks(balance),
     openInvoices: open.map((p) => ({ id: p.id, kind: p.kind, amountKopecks: p.amountKopecks })),
   });
 
@@ -153,14 +164,14 @@ export async function ensureAutoInvoices(
         studentId,
         amountKopecks: a.amountKopecks,
         kind: a.kind,
-        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks, examStudent),
+        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks),
       });
       changed.set(p.id, "create");
     } else {
       // Сумма изменилась — старая ссылка ЮKassa больше не соответствует счёту.
       await updatePayment(a.id, {
         amountKopecks: a.amountKopecks,
-        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks, examStudent),
+        note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks),
         payLink: "",
         providerPaymentId: "",
       });
@@ -168,39 +179,64 @@ export async function ensureAutoInvoices(
     }
   }
 
-  // Пакет занятий (ОГЭ/ЕГЭ) — второй вариант оплаты. Выставляем оффер автоматически,
-  // но только когда у ученика уже есть подтверждённые занятия (balance.items). Пока
-  // счёт не оплачен, он не гасит поштучные (исключён из billedManual в planAutoInvoices).
+  // Счёт-предложение «оплатить вперёд одним платежом»: у экзаменационных — пакет со
+  // скидкой, у остальных — все занятия месяца по ставке. Выставляем автоматически, но
+  // только когда у ученика уже есть подтверждённые занятия (balance.items). Пока счёт
+  // не оплачен, он не гасит поштучные (исключён из billedManual в planAutoInvoices).
   // Сверяется так же идемпотентно, как debt/advance: дубли (гонка двух открытий
-  // кабинета) удаляются, изменившаяся цена тарифа переносится в неоплаченный счёт
-  // вместе со сбросом ссылки ЮKassa — иначе ученик платил бы по старой ссылке сумму,
-  // отличную от показанной в карточке.
+  // кабинета) удаляются, изменившаяся цена переносится в неоплаченный счёт вместе со
+  // сбросом ссылки ЮKassa — иначе ученик платил бы по старой ссылке сумму, отличную
+  // от показанной в карточке.
+  const month = examTariff ? null : monthOffer(balance, now);
+  const offer =
+    balance.items.length === 0
+      ? null
+      : examTariff
+        ? {
+            lessons: examTariff.packageLessons,
+            kopecks: examTariff.packageKopecks,
+            note: `Пакет из ${examTariff.packageLessons} занятий (${examTariff.label})`,
+          }
+        : month
+          ? {
+              lessons: month.lessons,
+              kopecks: month.kopecks,
+              note: `Оплата вперёд: ${month.lessons} занятий одним платежом`,
+            }
+          : null;
+
   let pkgChanged = false;
   const pkgOpen = open.filter((p) => isPackageKind(p.kind));
-  if (examTariff && balance.items.length > 0) {
+  if (offer) {
     for (const extra of pkgOpen.slice(1)) {
       await deletePayment(extra.id);
       pkgChanged = true;
     }
-    const kind = packageKind(examTariff.packageLessons);
-    const note = `Пакет из ${examTariff.packageLessons} занятий (${examTariff.label})`;
+    const kind = packageKind(offer.lessons);
     const existing = pkgOpen[0];
     if (!existing) {
       await createPayment({
         studentId,
-        amountKopecks: examTariff.packageKopecks,
+        amountKopecks: offer.kopecks,
         kind,
-        note,
+        note: offer.note,
       });
       pkgChanged = true;
-    } else if (existing.amountKopecks !== examTariff.packageKopecks || existing.kind !== kind) {
+    } else if (existing.amountKopecks !== offer.kopecks || existing.kind !== kind) {
       await updatePayment(existing.id, {
-        amountKopecks: examTariff.packageKopecks,
+        amountKopecks: offer.kopecks,
         kind,
-        note,
+        note: offer.note,
         payLink: "",
         providerPaymentId: "",
       });
+      pkgChanged = true;
+    }
+  } else {
+    // Предлагать нечего (нет занятий, впереди одно занятие, ученик перестал быть
+    // экзаменационным) — висящее предложение снимаем, чтобы оно не пережило повод.
+    for (const extra of pkgOpen) {
+      await deletePayment(extra.id);
       pkgChanged = true;
     }
   }

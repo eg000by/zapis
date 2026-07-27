@@ -38,6 +38,7 @@ const NO_BILLING = {
   // Пакет занятий для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты
   // ТОГО ЖЕ счёта: оплатив пакет, ученик закрывает и текущий поштучный счёт.
   packageOffer: {
+    exam: boolean; // пакет ОГЭ/ЕГЭ со скидкой (иначе — занятия месяца по ставке)
     label: string;
     lessons: number;
     amountKopecks: number;
@@ -99,32 +100,39 @@ export async function GET(req: Request) {
           const method = await getPayMethod().catch(() => "yookassa" as const);
           const payHint = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
 
-          // Экзаменационный пакет (ОГЭ/ЕГЭ) — второй вариант оплаты. Показываем только
-          // когда счёт-оффер уже выставлен (ensureAutoInvoices создаёт его при наличии
-          // подтверждённых занятий — до этого пакет ученику не показываем). Цену и число
-          // занятий берём из САМОГО счёта, а не из конфига: по ссылке ЮKassa спишется
-          // именно сумма счёта. Выгоду считаем от фактической ставки ученика (она может
-          // быть задана индивидуально) — иначе «старая цена» не сходится со счетами рядом.
+          // Оплата вперёд одним платежом — второй вариант оплаты ТОГО ЖЕ счёта:
+          // у экзаменационных (ОГЭ/ЕГЭ) это пакет со скидкой, у остальных — занятия
+          // месяца по ставке. Показываем только когда счёт-предложение уже выставлен
+          // (ensureAutoInvoices создаёт его при наличии подтверждённых занятий). Цену и
+          // число занятий берём из САМОГО счёта, а не из конфига: по ссылке ЮKassa
+          // спишется именно сумма счёта. Выгоду считаем от фактической ставки ученика
+          // (она может быть задана индивидуально) — иначе «старая цена» не сходится со
+          // счетами рядом; у обычного ученика скидки нет и выгода выйдет нулевой.
           const tariff = detectExamTariff(student?.subject || "");
           let packageOffer = null as (typeof NO_BILLING)["packageOffer"];
-          const pkgInvoice = tariff ? findPackageInvoice(rows) : null;
-          if (tariff && pkgInvoice) {
-            const lessons = packageLessonsOf(pkgInvoice.kind, tariff.packageLessons);
-            const perLessonKopecks = balance?.rateKopecks || tariff.hourlyKopecks;
+          const pkgInvoice = findPackageInvoice(rows);
+          if (pkgInvoice) {
+            const lessons = packageLessonsOf(pkgInvoice.kind, tariff?.packageLessons ?? 0);
+            const perLessonKopecks = balance?.rateKopecks || tariff?.hourlyKopecks || 0;
             const sav = packageSavings({
               hourlyKopecks: perLessonKopecks,
               lessons,
               packageKopecks: pkgInvoice.amountKopecks,
             });
-            packageOffer = {
-              label: tariff.label,
-              lessons,
-              amountKopecks: pkgInvoice.amountKopecks,
-              perLessonKopecks,
-              savingsKopecks: sav.kopecks,
-              savingsPercent: sav.percent,
-              payLink: method === "sbp" ? "" : pkgInvoice.payLink || "",
-            };
+            // Число занятий определить нечем (старая строка kind="package" у обычного
+            // предмета) — предложение не показываем, чтобы не врать в подписи.
+            if (lessons > 0) {
+              packageOffer = {
+                exam: !!tariff,
+                label: tariff?.label ?? "",
+                lessons,
+                amountKopecks: pkgInvoice.amountKopecks,
+                perLessonKopecks,
+                savingsKopecks: sav.kopecks,
+                savingsPercent: sav.percent,
+                payLink: method === "sbp" ? "" : pkgInvoice.payLink || "",
+              };
+            }
           }
           // История оплат (последние) — best-effort, для блока «оплачено ранее».
           const history = await paidPayments(studentId, 10).catch((e) => {
