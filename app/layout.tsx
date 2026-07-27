@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Запись на занятие",
+  title: "Egorii.crm — запись на занятие",
   description: "Выберите удобное время и запишитесь на занятие",
 };
 

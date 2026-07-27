@@ -22,6 +22,23 @@ test("контакт преподавателя есть и на обычном 
   await expect(page.locator(".contact")).toContainText("@eg0by");
 });
 
+test("логотип Egorii.crm — только в подвале, в шапке его нет", async ({ page }) => {
+  await mockApi(page);
+  await page.goto(tokenUrl());
+  const logo = page.getByRole("img", { name: "Egorii.crm" });
+  await expect(logo).toHaveCount(1);
+  // Знак — монограмма «E» в фирменном flame-квадрате.
+  await expect(logo.locator(".logo-mark")).toHaveText("E");
+  await expect(logo.locator(".logo-mark")).toHaveCSS("background-color", "rgb(255, 58, 29)");
+
+  // Логотип ниже приветствия и ниже сетки — внимание он не перехватывает.
+  const hero = await page.locator(".hero h1").boundingBox();
+  const grid = await page.locator(".slots-grid").boundingBox();
+  const box = await logo.boundingBox();
+  expect(box!.y).toBeGreaterThan(hero!.y);
+  expect(box!.y).toBeGreaterThan(grid!.y + grid!.height);
+});
+
 test("сетка: приветствие, свободные и занятые слоты", async ({ page }) => {
   await mockApi(page);
   await page.goto(tokenUrl());

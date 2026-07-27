@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Иконка приложения Egorii.crm (комплект 2a): монограмма «E» в скруглённом
+       квадрате. Буква нарисована прямоугольниками, а не текстом: в favicon шрифт
+       рендерится системой и на чужой машине «E» уехала бы по размеру и весу. -->
+  <rect width="64" height="64" rx="14" fill="#FF3A1D"/>
+  <g fill="#FBF7F1">
+    <rect x="20" y="17" width="8" height="30"/>
+    <rect x="20" y="17" width="25" height="8"/>
+    <rect x="20" y="28.5" width="21" height="7"/>
+    <rect x="20" y="39" width="25" height="8"/>
+  </g>
+</svg>

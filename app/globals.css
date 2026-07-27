@@ -1,4 +1,15 @@
 :root {
+  /* Палитра бренда Egorii.crm (комплект лого 2a). Живёт отдельно от палитры
+     интерфейса: знак всегда в фирменных цветах, независимо от акцента страницы. */
+  --brand-flame: #ff3a1d;
+  --brand-amber: #ff8a3d;
+  --brand-ink: #0e1b3a;
+  --brand-paper: #fbf7f1;
+  /* Цвета самого знака — переключаются в тёмной теме на вариант «на тёмном фоне». */
+  --logo-bg: var(--brand-flame);
+  --logo-fg: var(--brand-paper);
+  --logo-name: var(--brand-ink);
+
   --bg: #f4f6fb;
   --card: #ffffff;
   --text: #1a1d29;
@@ -17,6 +28,12 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* Вариант знака «на тёмном фоне» из комплекта 2a: янтарный квадрат,
+       буква цвета подложки, название — бумажным. */
+    --logo-bg: var(--brand-amber);
+    --logo-fg: var(--brand-ink);
+    --logo-name: #f3f4f6;
+
     --bg: #0f1117;
     --card: #181b24;
     --text: #f3f4f6;
@@ -54,6 +71,77 @@ body {
   max-width: 640px;
   margin: 0 auto;
   padding: 20px 16px 64px;
+}
+
+/* ── Логотип Egorii.crm (комплект 2a) ───────────────────────────────────────
+   Всё считается от --logo-size (сторона знака), пропорции — из комплекта.
+   Правило безопасного поля: вокруг знака оставляем минимум высоту буквы «E». */
+.logo {
+  --logo-size: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--logo-size) * 0.21);
+  line-height: 1;
+}
+.logo-mark {
+  --logo-size: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--logo-size);
+  height: var(--logo-size);
+  border-radius: calc(var(--logo-size) * 0.22);
+  background: var(--logo-bg);
+  color: var(--logo-fg);
+  font-size: calc(var(--logo-size) * 0.54);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--logo-size) * 0.03);
+}
+.logo-name {
+  font-size: calc(var(--logo-size) * 0.42);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--logo-name);
+}
+.logo-suffix {
+  font-size: calc(var(--logo-size) * 0.21);
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Компактная связка для подвала: знак + «Egorii.crm» в строку, точка — flame
+   (как в вордмарке комплекта). Текст приглушён: подпись, а не заголовок. */
+.logo-inline {
+  gap: calc(var(--logo-size) * 0.4);
+}
+.logo-flat {
+  font-size: calc(var(--logo-size) * 0.65);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+.logo-dot {
+  color: var(--brand-flame);
+}
+
+/* Подвал: логотип и контакт преподавателя. Безопасное поле вокруг знака —
+   минимум высота буквы «E» (правило комплекта). */
+.site-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 36px;
 }
 
 .hero {
@@ -356,7 +444,7 @@ select:focus {
 
 /* Подпись «связаться с преподавателем» внизу страницы ученика */
 .contact {
-  margin: 28px 2px 0;
+  margin: 0 2px;
   text-align: center;
   color: var(--muted);
   font-size: 13px;
