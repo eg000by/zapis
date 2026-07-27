@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { groupConsecutive } from "@/lib/blocks";
 import { SLOT_MINUTES, SLOT_STEP_MINUTES } from "@/lib/config";
 import { shiftIntoWeekOf } from "@/lib/slots";
@@ -157,15 +157,14 @@ function dayMonthMsk(iso: string): string {
   }).format(new Date(iso));
 }
 
-// "8 июл" — совсем короткая дата для чипа дня недели (7 чипов в ряд на мобилке).
+// "08.07" — дата для чипа дня недели. Название месяца («8 июл») в ячейку не влезает:
+// на телефоне 360 px под чип остаётся ~42 px на все семь дней недели.
 function chipDateMsk(iso: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Moscow",
-    day: "numeric",
-    month: "short",
-  })
-    .format(new Date(iso))
-    .replace(/\.$/, "");
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(iso));
 }
 
 export default function BookingClient({
@@ -255,6 +254,20 @@ export default function BookingClient({
   useEffect(() => {
     if (sheetOpen && selected.length === 0) setSheetOpen(false);
   }, [sheetOpen, selected]);
+
+  // Панель переноса/отмены и сетка выбора нового времени появляются ниже по странице —
+  // на телефоне за пределами экрана. Подводим к ним взгляд сами: иначе после нажатия
+  // «Перенести» кажется, что кнопка не сработала.
+  const rsPanelRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (rsChoosing) rsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [rsChoosing, rsMode, rsOcc]);
+  useEffect(() => {
+    if (rescheduling || pickingNew) {
+      gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [rescheduling, pickingNew]);
 
   function loadSlots() {
     setDays(null);
@@ -532,6 +545,86 @@ export default function BookingClient({
     }
   }
 
+  // Панель выбора «одно занятие / вся серия» (и дат для одного занятия). Рендерится
+  // ВНУТРИ карточки записей, прямо под той записью, которую переносим/отменяем —
+  // раньше она уезжала под все карточки и на телефоне была за пределами экрана.
+  const rsPanel =
+    rsChoosing && rsEvent ? (
+      <div className="reschedule-bar column" ref={rsPanelRef}>
+        <span>
+          {rsKind === "cancel" ? "Отменяем" : "Переносим"}: <b>{rsEvent.student} — {rsEvent.subject}</b>
+          {" · "}
+          {fmtSlotMsk(rsEvent.start, rsEvent.lessons)}
+        </span>
+
+        {rsMode === null && (
+          <div className="choice-row">
+            <button
+              className="mini"
+              onClick={() => {
+                setRsMode("once");
+                loadOccurrences(rsEvent);
+              }}
+            >
+              📅 Только одно занятие
+            </button>
+            {rsKind === "cancel" ? (
+              <button
+                className="mini danger"
+                onClick={() => {
+                  if (confirm(`Отменить всю серию «${rsEvent.student} — ${rsEvent.subject}»?`)) {
+                    doCancel(rsEvent, "all");
+                  }
+                }}
+              >
+                🗑 Всю серию
+              </button>
+            ) : (
+              <button className="mini" onClick={() => { setRsMode("all"); setRsOcc(null); }}>
+                🔁 Каждую неделю
+              </button>
+            )}
+            <button className="mini" onClick={cancelReschedule}>
+              Закрыть
+            </button>
+          </div>
+        )}
+
+        {rsMode === "once" && !rsOcc && (
+          <>
+            <span className="my-when">
+              {rsDates === null
+                ? "Загрузка занятий…"
+                : rsDates.length === 0
+                  ? "Нет ближайших занятий."
+                  : `Какое занятие ${rsKind === "cancel" ? "отменяем" : "переносим"}?`}
+            </span>
+            <div className="choice-row">
+              {(rsDates || []).map((iso) => (
+                <button
+                  key={iso}
+                  className={`mini${rsKind === "cancel" ? " danger" : ""}`}
+                  onClick={() => {
+                    if (rsKind === "cancel") {
+                      if (confirm(`Отменить занятие ${fmtDateMsk(iso)}?`)) doCancel(rsEvent, "once", iso);
+                    } else {
+                      setRsOcc(iso);
+                      setNotice("Выберите новое время ниже для переноса.");
+                    }
+                  }}
+                >
+                  {fmtDateMsk(iso)}
+                </button>
+              ))}
+              <button className="mini" onClick={cancelReschedule}>
+                Закрыть
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    ) : null;
+
   // Экран успеха
   if (doneWhen) {
     return (
@@ -594,6 +687,80 @@ export default function BookingClient({
         <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
           🎥 Подключиться к занятию (Яндекс Телемост) ↗
         </a>
+      )}
+
+      {/* Записи — выше денег: расписание для ученика главнее счёта. */}
+      {my && my.length > 0 && (
+        <div className="card my-card">
+          <div className="day-title">Ваши записи</div>
+          {my.map((ev) => (
+            <div key={ev.id} className="my-item">
+              <div className="my-row">
+                <div className="my-info">
+                  <b>{ev.student} — {ev.subject}</b>
+                  {ev.moved ? (
+                    <>
+                      <span className="my-when">
+                        {ev.origStart ? `${fmtMsk(ev.origStart, ev.lessons)} → ` : ""}
+                        {fmtMsk(ev.start, ev.lessons)}
+                      </span>
+                      <span className="badge move">🔄 перенос</span>
+                    </>
+                  ) : (
+                    <span className="my-when">
+                      {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
+                      {ev.recurring ? " · еженедельно" : ""}
+                    </span>
+                  )}
+                  <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
+                    {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
+                  </span>
+                </div>
+                <div className="my-actions">
+                  <button
+                    className="mini"
+                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                    onClick={() => startReschedule(ev)}
+                  >
+                    Перенести
+                  </button>
+                  {ev.moved && (
+                    <button
+                      className="mini"
+                      disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                      onClick={() => returnEvent(ev)}
+                    >
+                      Вернуть
+                    </button>
+                  )}
+                  <button
+                    className="mini danger"
+                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                    onClick={() => startCancel(ev)}
+                  >
+                    Отменить
+                  </button>
+                </div>
+              </div>
+              {/* Выбор «одно занятие / вся серия» — сразу под своей записью. */}
+              {rsEvent?.id === ev.id && rsPanel}
+            </div>
+          ))}
+          {/* Пробное занятие одно — вторую запись не предлагаем. */}
+          {!rsEvent && !pickingNew && !trial && (
+            <button
+              className="mini"
+              style={{ marginTop: 12 }}
+              disabled={busyAction}
+              onClick={() => {
+                setPickingNew(true);
+                setNotice("Выберите время для новой записи ниже.");
+              }}
+            >
+              ＋ Записаться на другое время
+            </button>
+          )}
+        </div>
       )}
 
       {/* Деньги — ОДИН блок: сумма к оплате, из чего она состоит, срок и способ.
@@ -756,152 +923,6 @@ export default function BookingClient({
         </div>
       )}
 
-      {my && my.length > 0 && (
-        <div className="card my-card">
-          <div className="day-title">Ваши записи</div>
-          {my.map((ev) => (
-            <div key={ev.id} className="my-row">
-              <div className="my-info">
-                <b>{ev.student} — {ev.subject}</b>
-                {ev.moved ? (
-                  <>
-                    <span className="my-when">
-                      {ev.origStart ? `${fmtMsk(ev.origStart, ev.lessons)} → ` : ""}
-                      {fmtMsk(ev.start, ev.lessons)}
-                    </span>
-                    <span className="badge move">🔄 перенос</span>
-                  </>
-                ) : (
-                  <span className="my-when">
-                    {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
-                    {ev.recurring ? " · еженедельно" : ""}
-                  </span>
-                )}
-                <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
-                  {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
-                </span>
-              </div>
-              <div className="my-actions">
-                <button
-                  className="mini"
-                  disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                  onClick={() => startReschedule(ev)}
-                >
-                  Перенести
-                </button>
-                {ev.moved && (
-                  <button
-                    className="mini"
-                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                    onClick={() => returnEvent(ev)}
-                  >
-                    Вернуть
-                  </button>
-                )}
-                <button
-                  className="mini danger"
-                  disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                  onClick={() => startCancel(ev)}
-                >
-                  Отменить
-                </button>
-              </div>
-            </div>
-          ))}
-          {/* Пробное занятие одно — вторую запись не предлагаем. */}
-          {!rsEvent && !pickingNew && !trial && (
-            <button
-              className="mini"
-              style={{ marginTop: 12 }}
-              disabled={busyAction}
-              onClick={() => {
-                setPickingNew(true);
-                setNotice("Выберите время для новой записи ниже.");
-              }}
-            >
-              ＋ Записаться на другое время
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Промежуточный экран: выбор «одно занятие / вся серия» и, для одного, — даты. */}
-      {rsChoosing && rsEvent && (
-        <div className="reschedule-bar column">
-          <span>
-            {rsKind === "cancel" ? "Отменяем" : "Переносим"}: <b>{rsEvent.student} — {rsEvent.subject}</b>
-            {" · "}
-            {fmtSlotMsk(rsEvent.start, rsEvent.lessons)}
-          </span>
-
-          {rsMode === null && (
-            <div className="choice-row">
-              <button
-                className="mini"
-                onClick={() => {
-                  setRsMode("once");
-                  loadOccurrences(rsEvent);
-                }}
-              >
-                📅 Только одно занятие
-              </button>
-              {rsKind === "cancel" ? (
-                <button
-                  className="mini danger"
-                  onClick={() => {
-                    if (confirm(`Отменить всю серию «${rsEvent.student} — ${rsEvent.subject}»?`)) {
-                      doCancel(rsEvent, "all");
-                    }
-                  }}
-                >
-                  🗑 Всю серию
-                </button>
-              ) : (
-                <button className="mini" onClick={() => { setRsMode("all"); setRsOcc(null); }}>
-                  🔁 Каждую неделю
-                </button>
-              )}
-              <button className="mini" onClick={cancelReschedule}>
-                Закрыть
-              </button>
-            </div>
-          )}
-
-          {rsMode === "once" && !rsOcc && (
-            <>
-              <span className="my-when">
-                {rsDates === null
-                  ? "Загрузка занятий…"
-                  : rsDates.length === 0
-                    ? "Нет ближайших занятий."
-                    : `Какое занятие ${rsKind === "cancel" ? "отменяем" : "переносим"}?`}
-              </span>
-              <div className="choice-row">
-                {(rsDates || []).map((iso) => (
-                  <button
-                    key={iso}
-                    className={`mini${rsKind === "cancel" ? " danger" : ""}`}
-                    onClick={() => {
-                      if (rsKind === "cancel") {
-                        if (confirm(`Отменить занятие ${fmtDateMsk(iso)}?`)) doCancel(rsEvent, "once", iso);
-                      } else {
-                        setRsOcc(iso);
-                        setNotice("Выберите новое время ниже для переноса.");
-                      }
-                    }}
-                  >
-                    {fmtDateMsk(iso)}
-                  </button>
-                ))}
-                <button className="mini" onClick={cancelReschedule}>
-                  Закрыть
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       {/* Активный перенос: сетка ниже выбирает новое время. */}
       {rescheduling && (
         <div className="reschedule-bar">
@@ -932,7 +953,7 @@ export default function BookingClient({
 
       {showGrid && !loadError && days !== null && days.length > 0 && (
         <>
-          <div className="day-nav">
+          <div className="day-nav" ref={gridRef}>
             {days.map((d, i) => (
               <button
                 key={d.date}

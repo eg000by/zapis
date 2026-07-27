@@ -188,6 +188,30 @@ test("нет «25-го кадра»: пока /api/my грузится — сп�
   await expect(page.locator(".slots-grid")).toHaveCount(0);
 });
 
+test("записи показываются выше блока оплаты", async ({ page }) => {
+  await mockApi(page, { my: MY_FULL });
+  await page.goto(tokenUrl());
+  const records = await page.locator(".my-card", { hasText: "Ваши записи" }).boundingBox();
+  const pay = await page.locator(".pay-card").boundingBox();
+  expect(records!.y).toBeLessThan(pay!.y);
+});
+
+test("панель переноса раскрывается под своей записью и видна на экране", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 }); // невысокий экран телефона
+  await mockApi(page, { my: MY_FULL });
+  await page.goto(tokenUrl());
+
+  await page.getByRole("button", { name: "Перенести" }).click();
+  // Панель — внутри карточки записей, а не под всеми карточками страницы.
+  const panel = page.locator(".my-item .reschedule-bar");
+  await expect(panel).toContainText("Переносим");
+
+  // И она в пределах вьюпорта: страницу к ней подкручивает сам кабинет.
+  const box = await panel.boundingBox();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(700);
+});
+
 test("перенос серии: выбор «одно занятие / каждую неделю», затем даты", async ({ page }) => {
   await mockApi(page, { my: MY_FULL });
   await page.goto(tokenUrl());

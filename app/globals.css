@@ -108,7 +108,8 @@ body {
 .day-chip small {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  letter-spacing: -0.02em;
   margin-top: 2px;
   white-space: nowrap;
 }
@@ -433,8 +434,15 @@ select:focus {
   padding: 12px 0;
   border-top: 1px solid var(--border);
 }
-.my-row:first-of-type {
+/* Первая запись без разделителя. Каждая запись обёрнута в .my-item (внутри неё
+   может раскрываться панель переноса), поэтому :first-of-type тут не подходит. */
+.my-item:first-of-type > .my-row,
+.my-card > .my-row:first-of-type {
   border-top: none;
+}
+/* Панель переноса внутри карточки записей — прижата к своей записи. */
+.my-item > .reschedule-bar {
+  margin: 4px 0 12px;
 }
 .my-info {
   display: flex;

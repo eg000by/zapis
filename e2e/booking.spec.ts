@@ -22,7 +22,7 @@ test("в сетке видна конкретная дата — в чипе д�
   await mockApi(page);
   await page.goto(tokenUrl());
   // Первый слот вторника — 14 июля 2026.
-  await expect(page.locator(".day-chip", { hasText: "Вт" }).locator("small")).toHaveText("14 июл");
+  await expect(page.locator(".day-chip", { hasText: "Вт" }).locator("small")).toHaveText("14.07");
   await expect(page.locator(".card .day-title").first()).toContainText("14 июля");
 });
 
@@ -50,6 +50,12 @@ test("мобилка: все 7 дней недели видны и помеща�
   expect(last).not.toBeNull();
   expect(last!.x + last!.width).toBeLessThanOrEqual(360);
   await expect(chips.nth(6)).toBeVisible();
+
+  // Дата внутри чипа тоже должна помещаться: «14 июл» вылезал за края ячейки.
+  const overflow = await chips.evaluateAll((els) =>
+    els.filter((el) => el.scrollWidth > el.clientWidth + 1).length
+  );
+  expect(overflow).toBe(0);
 });
 
 test("бронь: слот → «Записаться» → подтверждение → успех", async ({ page }) => {
