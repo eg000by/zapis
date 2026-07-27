@@ -1,5 +1,6 @@
 import { decodeToken } from "@/lib/link";
 import { getTokenByCode } from "@/lib/shortlink";
+import { TEACHER_TG, teacherTgUrl } from "@/lib/config";
 import BookingClient from "../../BookingClient";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,13 @@ export default async function ShortLinkPage({ params }: { params: { code: string
           <p>
             Похоже, ссылка неверная или больше не действует.
             <br />
-            Попросите преподавателя прислать вашу персональную ссылку для записи.
+            Попросите преподавателя{TEACHER_TG ? " " : ""}
+            {TEACHER_TG && (
+              <a href={teacherTgUrl()} target="_blank" rel="noreferrer">
+                @{TEACHER_TG}
+              </a>
+            )}{" "}
+            прислать вашу персональную ссылку для записи.
           </p>
         </div>
       </div>

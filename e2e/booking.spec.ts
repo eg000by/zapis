@@ -2,11 +2,24 @@
 import { expect, test } from "@playwright/test";
 import { mockApi, SLOTS_WEEK, tokenUrl } from "./helpers";
 
-test("битая ссылка — вежливый экран без сетки", async ({ page }) => {
+test("битая ссылка — вежливый экран без сетки, но со связью с преподавателем", async ({ page }) => {
   await mockApi(page);
   await page.goto("/?t=мусор");
   await expect(page.getByText("Похоже, ссылка неполная или неверная.")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
+  // Сам ученик тут ничего сделать не может — контакт преподавателя обязателен,
+  // и он прямо в тексте («попросите преподавателя @eg0by…»), без второй подписи.
+  await expect(page.getByRole("link", { name: "@eg0by" })).toHaveAttribute(
+    "href",
+    "https://t.me/eg0by"
+  );
+  await expect(page.locator(".contact")).toHaveCount(0);
+});
+
+test("контакт преподавателя есть и на обычном экране записи", async ({ page }) => {
+  await mockApi(page);
+  await page.goto(tokenUrl());
+  await expect(page.locator(".contact")).toContainText("@eg0by");
 });
 
 test("сетка: приветствие, свободные и занятые слоты", async ({ page }) => {

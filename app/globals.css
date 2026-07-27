@@ -354,6 +354,19 @@ select:focus {
   max-width: 340px;
 }
 
+/* Подпись «связаться с преподавателем» внизу страницы ученика */
+.contact {
+  margin: 28px 2px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.contact a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .center-note {
   text-align: center;
   padding: 60px 20px;

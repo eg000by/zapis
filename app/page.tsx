@@ -1,4 +1,5 @@
 import { decodeToken } from "@/lib/link";
+import { TEACHER_TG, teacherTgUrl } from "@/lib/config";
 import BookingClient from "./BookingClient";
 
 export const dynamic = "force-dynamic";
@@ -23,14 +24,25 @@ export default function Page({
               <>
                 Срок действия ссылки истёк.
                 <br />
-                Напишите преподавателю — он пришлёт новую ссылку. Уже подтверждённые записи
-                остаются в силе.
+                Напишите преподавателю{TEACHER_TG ? " " : ""}
+                {TEACHER_TG && (
+                  <a href={teacherTgUrl()} target="_blank" rel="noreferrer">
+                    @{TEACHER_TG}
+                  </a>
+                )}{" "}
+                — он пришлёт новую ссылку. Уже подтверждённые записи остаются в силе.
               </>
             ) : (
               <>
                 Похоже, ссылка неполная или неверная.
                 <br />
-                Попросите преподавателя прислать вашу персональную ссылку для записи.
+                Попросите преподавателя{TEACHER_TG ? " " : ""}
+                {TEACHER_TG && (
+                  <a href={teacherTgUrl()} target="_blank" rel="noreferrer">
+                    @{TEACHER_TG}
+                  </a>
+                )}{" "}
+                прислать вашу персональную ссылку для записи.
               </>
             )}
           </p>

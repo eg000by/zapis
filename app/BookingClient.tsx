@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { groupConsecutive } from "@/lib/blocks";
 import { SLOT_MINUTES, SLOT_STEP_MINUTES } from "@/lib/config";
 import { shiftIntoWeekOf } from "@/lib/slots";
+import ContactFooter from "./ContactFooter";
 
 interface Slot {
   start: string;
@@ -641,6 +642,7 @@ export default function BookingClient({
             Готово
           </button>
         </div>
+        <ContactFooter />
       </div>
     );
   }
@@ -1025,6 +1027,8 @@ export default function BookingClient({
           Свернуть выбор времени
         </button>
       )}
+
+      <ContactFooter />
 
       {/* Нижняя панель выбора */}
       {!rescheduling && selected.length > 0 && !sheetOpen && (

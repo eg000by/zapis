@@ -122,6 +122,12 @@ export function packageSavings(input: {
   return { fullKopecks, kopecks, percent: Math.round((kopecks / fullKopecks) * 100) };
 }
 
+// Telegram преподавателя для связи с учениками (без «@»). Показывается подписью на
+// всех страницах ученика — включая экраны «ссылка истекла/неверна», где ученик уже
+// не может ничего сделать сам. Пусто — подпись не показывается.
+export const TEACHER_TG = "eg0by";
+export const teacherTgUrl = () => (TEACHER_TG ? `https://t.me/${TEACHER_TG}` : "");
+
 // Пометка предварительной (неподтверждённой) заявки в названии события.
 export const PENDING_PREFIX = "⏳ ";
 
