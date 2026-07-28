@@ -41,6 +41,7 @@ import {
   summarizeOutstanding,
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
+import { ensureAutoInvoices } from "./autobill";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
 import { getOrCreateStudentLinkCode } from "./shortlink";
@@ -875,8 +876,14 @@ export async function promptLessonNote(chatId: number | string, lessonId: string
   await sendOwner("✍️ Пришлите текст заметки по занятию одним сообщением:", cancelKb());
 }
 
-// Заметка из утреннего отчёта (кнопка 📝 у занятия): по инстансу календаря находим/
-// создаём строку занятия в БД и включаем обычный ввод заметки (lesson.note).
+// Заметка к занятию (кнопка 📝 в вопросе «как прошло?»): по инстансу календаря
+// находим/создаём строку занятия в БД и включаем обычный ввод заметки (lesson.note).
+//
+// Заметка пишется к состоявшемуся занятию, поэтому строка сразу заводится со статусом
+// «проведено» — и, как и «Прошло», это повод пересчитать цвета и счета: неоплаченное
+// прошедшее занятие становится долгом (красным). Уже помеченный пропуск (серый) не
+// трогаем: recolorStudent пропускает нетарифицируемые занятия, так что заметка к
+// пропуску его не «воскресит».
 export async function promptReportLessonNote(
   chatId: number | string,
   instanceId: string
@@ -901,6 +908,20 @@ export async function promptReportLessonNote(
     occurrenceStart: new Date(start),
     subject: priv.subject || null,
   });
+  // Занятие состоялось: сверяем счета и цвета (best-effort — ввод заметки не должен
+  // сорваться из-за недоступного календаря или БД).
+  try {
+    const s = await getStudent(priv.studentId);
+    await ensureAutoInvoices(priv.studentId, s?.name || "");
+  } catch (e) {
+    console.error("report note: autobill failed", priv.studentId, e);
+  }
+  try {
+    await recolorStudent(priv.studentId);
+  } catch (e) {
+    console.error("report note: recolor failed", priv.studentId, e);
+  }
+
   await setState(String(chatId), "lesson.note", lesson.id);
   const when = formatMskRange(new Date(start).toISOString(), Number(priv.lessons) || 1);
   await sendOwner(

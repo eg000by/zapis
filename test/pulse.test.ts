@@ -6,8 +6,10 @@ import { listDayOccurrences } from "@/lib/google";
 import { pingSent, recordPing } from "@/lib/pings";
 import { sendOwner } from "@/lib/telegram";
 import { ensureAutoInvoices } from "@/lib/autobill";
+import { recolorStudent } from "@/lib/coloring";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
+vi.mock("@/lib/coloring", () => ({ recolorStudent: vi.fn(async () => {}) }));
 vi.mock("@/lib/pings", () => ({
   pingSent: vi.fn(async () => false),
   recordPing: vi.fn(async () => {}),
@@ -82,6 +84,16 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     // Один ученик — один пересчёт за прогон (внутри считается весь его баланс).
     expect(ensureAutoInvoices).toHaveBeenCalledTimes(1);
     expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", "Тест Тестов");
+  });
+
+  it("цвета в календаре пульс не трогает — это решение преподавателя", async () => {
+    // Покраска «долг» идёт только от «Прошло»/📝: время само по себе не значит,
+    // что занятие состоялось. Ничего не нажали — занятие остаётся нейтральным.
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ("2026-07-12T07:00:00.000Z")] as any);
+
+    const res = await call();
+    expect(await res.json()).toMatchObject({ sent: 1, billed: 1 });
+    expect(recolorStudent).not.toHaveBeenCalled();
   });
 
   it("сбой автосчетов не роняет пульс (вопрос всё равно ушёл)", async () => {
