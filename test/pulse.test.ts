@@ -143,4 +143,14 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     expect((await call("Bearer s3cret")).status).toBe(200);
     delete process.env.CRON_SECRET;
   });
+
+  it("в проде без CRON_SECRET эндпоинт закрыт (503), а не открыт всем", async () => {
+    // Прежняя проверка была условной — незаданный секрет просто отключал её,
+    // и крон-эндпоинт торчал наружу. Теперь это громкая ошибка конфигурации.
+    vi.stubEnv("NODE_ENV", "production");
+    const res = await call();
+    expect(res.status).toBe(503);
+    expect(sendOwner).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
 });

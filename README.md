@@ -125,7 +125,12 @@ npm run dev
 Required env: Google OAuth (`GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN`, `CALENDAR_ID`),
 `DATABASE_URL`, `LINK_SIGNING_SECRET`, `ADMIN_SECRET`, Telegram
 (`TELEGRAM_BOT_TOKEN/CHAT_ID/WEBHOOK_SECRET`), optional YooKassa
-(`YOOKASSA_SHOP_ID/SECRET_KEY`) and `CRON_SECRET`. Migrations: `npm run db:migrate`.
+(`YOOKASSA_SHOP_ID/SECRET_KEY`). Migrations: `npm run db:migrate`.
+
+`CRON_SECRET` is **required in production**: `/api/cron/*` answers 503 without it rather
+than running unauthenticated (`lib/cron-auth.ts`). Vercel Cron signs its own requests
+with it automatically once it is set in the project env; GitHub Actions sends the same
+bearer token from a repository secret of the same name.
 
 ## Docker
 

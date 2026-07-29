@@ -90,4 +90,10 @@ describe("напоминания ученикам о сегодняшних за
     expect((await call("Bearer s3cret")).status).toBe(200);
     delete process.env.CRON_SECRET;
   });
+
+  it("в проде без CRON_SECRET эндпоинт закрыт (503)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await call()).status).toBe(503);
+    vi.unstubAllEnvs();
+  });
 });
