@@ -13,6 +13,7 @@ import {
   escapeHtml,
   sendOwner,
   sendTo,
+  deleteMyCommands,
   setMyCommands,
 } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
@@ -367,13 +368,28 @@ const HELP =
   "\n\n<b>Внутри карточки ученика:</b>\n" +
   "💳 счета (создать / отметить / удалить) · 📅 занятия и заметки · ⚙️ Ещё (заметка, Телемост, архив, удаление). Ссылка на запись — в тексте карточки.";
 
-// Синхронизация меню команд с текущим списком (best-effort: сбой Telegram API не
-// должен ломать ответ на сообщение владельца).
+// Что видит в меню ученик: единственная команда, которая ему доступна.
+const STUDENT_COMMANDS = [{ command: "stop", description: "🔕 Отключить уведомления" }];
+
+// Синхронизация меню команд (best-effort: сбой Telegram API не должен ломать ответ).
+//
+// КРИТИЧНО — область видимости. Без scope список уходит в «по умолчанию», и кнопка
+// «/» показывает ВСЕ команды CRM каждому, кто открыл бота, включая учеников
+// (выполнить их они не могли — гейт владельца, — но видели весь список). Поэтому:
+//   чат владельца      → полное меню CRM
+//   все личные чаты    → только /stop
+//   по умолчанию       → пусто, чтобы старый список нигде не остался висеть
 async function refreshBotMenu(): Promise<void> {
+  const owner = process.env.TELEGRAM_CHAT_ID;
   try {
-    await setMyCommands(
-      BOT_COMMANDS.map((c) => ({ command: c.command, description: `${c.emoji} ${c.description}` }))
-    );
+    await setMyCommands(STUDENT_COMMANDS, { type: "all_private_chats" });
+    await deleteMyCommands({ type: "default" });
+    if (owner) {
+      await setMyCommands(
+        BOT_COMMANDS.map((c) => ({ command: c.command, description: `${c.emoji} ${c.description}` })),
+        { type: "chat", chat_id: owner }
+      );
+    }
   } catch (e) {
     console.error("setMyCommands failed", e);
   }

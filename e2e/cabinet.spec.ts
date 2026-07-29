@@ -227,7 +227,8 @@ test("уведомления в Telegram: кнопка ведёт на бота 
   await page.goto(tokenUrl());
 
   const btn = page.locator("a.tg-link");
-  await expect(btn).toContainText("Уведомления в Telegram");
+  await expect(btn).toContainText("Подключить уведомления в Telegram");
+  await expect(btn).toContainText("Откроется бот");
   await expect(btn).toContainText("ссылку на Телемост");
   await expect(btn).toHaveAttribute("href", "https://t.me/zapis_test_bot?start=stu-1");
 });

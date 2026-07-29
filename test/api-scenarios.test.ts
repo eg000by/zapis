@@ -30,6 +30,8 @@ vi.mock("@/lib/telegram", () => ({
   inlineKeyboard: (rows: unknown) => ({ inline_keyboard: rows }),
   forceReply: () => ({ force_reply: true }),
   botUsername: vi.fn(async () => "test_bot"),
+  setMyCommands: vi.fn(async () => {}),
+  deleteMyCommands: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/students", () => ({
   upsertStudent: vi.fn(async () => ({ id: "stu-1" })),
@@ -868,6 +870,27 @@ describe("уведомления ученику в Telegram", () => {
     await tgMessage("/start 123e4567-e89b-42d3-a456-426614174999", 999000111);
     expect(updateStudent).not.toHaveBeenCalled();
     expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("не распознана"));
+  });
+
+  it("меню команд: CRM — только в чате владельца, ученикам — один /stop", async () => {
+    // Раньше setMyCommands звался без scope: список уходил в область «по умолчанию»,
+    // и кнопка «/» показывала все команды CRM каждому, кто открыл бота.
+    const { setMyCommands, deleteMyCommands } = await import("@/lib/telegram");
+    await tgMessage("/start", 111222333); // владелец
+
+    const calls = vi.mocked(setMyCommands).mock.calls;
+    const forStudents = calls.find((c) => c[1]?.type === "all_private_chats")!;
+    expect(forStudents[0].map((x) => x.command)).toEqual(["stop"]);
+
+    const forOwner = calls.find((c) => c[1]?.type === "chat")!;
+    expect(forOwner[1]).toEqual({ type: "chat", chat_id: "111222333" });
+    expect(forOwner[0].map((x) => x.command)).toContain("students");
+    expect(forOwner[0].map((x) => x.command)).toContain("stats");
+
+    // Старый общий список снимаем, чтобы он нигде не остался висеть.
+    expect(deleteMyCommands).toHaveBeenCalledWith({ type: "default" });
+    // И ни один вызов не уходит без области видимости.
+    expect(calls.every((c) => !!c[1])).toBe(true);
   });
 
   it("/stop отключает уведомления: привязка чата снимается", async () => {

@@ -707,8 +707,11 @@ export default function BookingClient({
         ) : (
           <a className="next-lesson tg-link" href={tgNotify.url} target="_blank" rel="noreferrer">
             <span>
-              🔔 <b>Уведомления в Telegram</b>
-              <small>Напомним о занятии заранее и пришлём ссылку на Телемост</small>
+              🔔 <b>Подключить уведомления в Telegram →</b>
+              <small>
+                Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
+                ссылку на Телемост.
+              </small>
             </span>
           </a>
         )

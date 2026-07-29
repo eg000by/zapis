@@ -186,9 +186,23 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Область видимости меню команд. Telegram выбирает список по приоритету:
+// конкретный чат → все личные чаты → по умолчанию. Без scope список уходит в
+// «по умолчанию» и виден ВСЕМ пользователям бота — включая учеников.
+export type CommandScope =
+  | { type: "default" }
+  | { type: "all_private_chats" }
+  | { type: "chat"; chat_id: string | number };
+
 // Регистрирует меню команд бота (список по кнопке «/» в клиенте Telegram).
 export async function setMyCommands(
-  commands: { command: string; description: string }[]
+  commands: { command: string; description: string }[],
+  scope?: CommandScope
 ): Promise<void> {
-  await api("setMyCommands", { commands });
+  await api("setMyCommands", { commands, ...(scope ? { scope } : {}) });
+}
+
+// Убирает меню команд в указанной области (пустой список = кнопки «/» нет).
+export async function deleteMyCommands(scope?: CommandScope): Promise<void> {
+  await api("deleteMyCommands", { ...(scope ? { scope } : {}) });
 }
