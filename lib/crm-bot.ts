@@ -339,6 +339,21 @@ export async function showStudentTools(
   await emit(chatId, messageId, `⚙️ <b>${escapeHtml(s.name)} — управление</b>`, keyboard);
 }
 
+// Сколько оплаченных счетов показывать на главном экране, прежде чем свернуть их
+// в «история оплат». Счета копятся вечно (каждую неделю новый автосчёт), а
+// действий требуют только неоплаченные — их и показываем всегда полностью.
+const PAID_PREVIEW = 3;
+// Размер страницы в истории оплат.
+const PAID_PAGE = 10;
+// Сколько символов заметки показывать в списке занятий.
+const NOTE_PREVIEW = 120;
+
+function payLine(p: { status: string; amountKopecks: number; note: string }): string {
+  return `${PAY_STATUS[p.status] || ""} ${rub(p.amountKopecks)} ₽${
+    p.note ? ` · ${escapeHtml(p.note)}` : ""
+  }`;
+}
+
 export async function showPayments(
   chatId: number | string,
   messageId: number | null,
@@ -350,35 +365,83 @@ export async function showPayments(
     return;
   }
   const pays = await listStudentPayments(s.id);
+  const unpaid = pays.filter((p) => p.status !== "paid");
+  const paid = pays.filter((p) => p.status === "paid");
+
   const lines = [`💳 <b>Счета — ${escapeHtml(s.name)}</b>`];
+  const rows: TgButton[][] = [[{ text: "➕ Новый счёт", data: `newp:${s.id}` }]];
+
   if (!pays.length) {
     lines.push("\nСчетов нет. Создать счёт можно на сайте /admin.");
   } else {
-    const out = summarizeOutstanding(pays.filter((p) => p.status === "unpaid"));
+    const out = summarizeOutstanding(unpaid);
     lines.push(
       `\nДолг: <b>${rub(out.debtKopecks)} ₽</b>` +
         (out.advanceKopecks > 0 ? ` · вперёд: ${rub(out.advanceKopecks)} ₽` : "") +
         (out.packageKopecks > 0 ? ` · одним платежом: ${rub(out.packageKopecks)} ₽` : "")
     );
-    for (const p of pays) {
-      lines.push(
-        `${PAY_STATUS[p.status] || ""} ${rub(p.amountKopecks)} ₽${p.note ? ` · ${escapeHtml(p.note)}` : ""}`
-      );
+
+    // Неоплаченные — целиком и с кнопками: это единственное, что требует действий.
+    if (unpaid.length) {
+      lines.push("\n<b>К оплате:</b>");
+      for (const p of unpaid) {
+        lines.push(payLine(p));
+        rows.push([
+          { text: `✅ Оплачено ${rub(p.amountKopecks)} ₽`, data: `payp:${p.id}` },
+          { text: "🔗 Ссылка", data: `plink:${p.id}` },
+        ]);
+        rows.push([{ text: `🗑 Удалить счёт ${rub(p.amountKopecks)} ₽`, data: `delp:${p.id}` }]);
+      }
+    }
+
+    // Оплаченные — короткой сводкой; полный список и кнопки удаления живут
+    // на отдельной странице, иначе клавиатура растёт без конца.
+    if (paid.length) {
+      lines.push(`\n<b>Оплачено раньше (${paid.length}):</b>`);
+      for (const p of paid.slice(0, PAID_PREVIEW)) lines.push(payLine(p));
+      if (paid.length > PAID_PREVIEW) {
+        lines.push(`… и ещё ${paid.length - PAID_PREVIEW}`);
+        rows.push([{ text: `🗂 История оплат (${paid.length})`, data: `phist:${s.id}:0` }]);
+      }
     }
   }
-  const rows: TgButton[][] = [[{ text: "➕ Новый счёт", data: `newp:${s.id}` }]];
-  for (const p of pays) {
-    if (p.status !== "paid") {
-      rows.push([
-        { text: `✅ Оплачено ${rub(p.amountKopecks)} ₽`, data: `payp:${p.id}` },
-        { text: "🔗 Ссылка", data: `plink:${p.id}` },
-      ]);
-    }
-    rows.push([
-      { text: `🗑 Удалить счёт ${rub(p.amountKopecks)} ₽`, data: `delp:${p.id}` },
-    ]);
-  }
+
   rows.push([{ text: "⬅️ Назад", data: `stu:${s.id}` }]);
+  await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
+}
+
+// История оплат постранично: сюда уезжает всё, что не помещается в карточку счетов.
+export async function showPaidHistory(
+  chatId: number | string,
+  messageId: number | null,
+  studentId: string,
+  page: number
+): Promise<void> {
+  const s = await getStudent(studentId);
+  if (!s) {
+    await emit(chatId, messageId, "Ученик не найден.");
+    return;
+  }
+  const paid = (await listStudentPayments(s.id)).filter((p) => p.status === "paid");
+  const pages = Math.max(1, Math.ceil(paid.length / PAID_PAGE));
+  const cur = Math.min(Math.max(0, page), pages - 1);
+  const slice = paid.slice(cur * PAID_PAGE, cur * PAID_PAGE + PAID_PAGE);
+
+  const lines = [
+    `🗂 <b>История оплат — ${escapeHtml(s.name)}</b>`,
+    `\nВсего оплачено счетов: <b>${paid.length}</b>${pages > 1 ? ` · страница ${cur + 1} из ${pages}` : ""}`,
+    "",
+  ];
+  for (const p of slice) lines.push(payLine(p));
+
+  const rows: TgButton[][] = slice.map((p) => [
+    { text: `🗑 Удалить счёт ${rub(p.amountKopecks)} ₽`, data: `delp:${p.id}` },
+  ]);
+  const nav: TgButton[] = [];
+  if (cur > 0) nav.push({ text: "◀️ Новее", data: `phist:${s.id}:${cur - 1}` });
+  if (cur < pages - 1) nav.push({ text: "Старее ▶️", data: `phist:${s.id}:${cur + 1}` });
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: "⬅️ К счетам", data: `pays:${s.id}` }]);
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
 }
 
@@ -413,9 +476,14 @@ export async function showLessons(
 
   const lines = [`📅 <b>Занятия — ${escapeHtml(s.name)}</b>`];
   const fmt = (o: (typeof occ)[number]) => formatMskRange(o.start.toISOString(), o.hours);
+  // Заметка — свободный текст, и подробная запись об одном занятии способна
+  // занять весь экран. В списке показываем начало; полностью заметка видна там,
+  // где её пишут (кнопка 📝 подставляет текущий текст).
   const noteLine = (o: (typeof occ)[number]) => {
     const n = notes.get(o.start.getTime());
-    return n ? `\n   📝 ${escapeHtml(n)}` : "";
+    if (!n) return "";
+    const short = n.length > NOTE_PREVIEW ? `${n.slice(0, NOTE_PREVIEW).trimEnd()}…` : n;
+    return `\n   📝 ${escapeHtml(short)}`;
   };
   if (past.length) {
     lines.push("\n<b>Прошедшие:</b>");

@@ -43,6 +43,7 @@ import {
   setPayMethodBot,
   showDebtors,
   showLessons,
+  showPaidHistory,
   showPayments,
   showPaySettings,
   showStats,
@@ -217,6 +218,13 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   if (data.startsWith("pays:")) {
     await showPayments(chatId, messageId, data.slice(5));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  // phist:<studentId>:<страница> — история оплат (всё, что не влезло в карточку).
+  if (data.startsWith("phist:")) {
+    const [sid, page] = data.slice(6).split(":");
+    await showPaidHistory(chatId, messageId, sid, Number(page) || 0);
     await answerCallback(cq.id);
     return ok();
   }

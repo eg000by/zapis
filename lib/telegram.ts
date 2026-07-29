@@ -76,11 +76,40 @@ export async function editMessageText(
   await api("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
-    text,
+    text: clampMessage(text),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
+}
+
+// Telegram не обрезает длинные сообщения, а отвечает ошибкой — экран просто не
+// открывается, и кнопка выглядит сломанной (api() ошибку только логирует). Режем
+// сами, по границе строк: строка целиком либо не входит вовсе, поэтому HTML-теги
+// (<b>…</b> живут внутри одной строки) не разрываются посередине.
+const TG_TEXT_LIMIT = 4096;
+
+function linesWord(n: number): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return "строка";
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "строки";
+  return "строк";
+}
+
+export function clampMessage(text: string, limit = TG_TEXT_LIMIT): string {
+  if (text.length <= limit) return text;
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  let used = 0;
+  const RESERVE = 40; // место под хвост «… ещё N строк»
+  for (const line of lines) {
+    if (used + line.length + 1 > limit - RESERVE) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  const hidden = lines.length - kept.length;
+  return `${kept.join("\n")}\n… ещё ${hidden} ${linesWord(hidden)}`;
 }
 
 // Отправка сообщения в произвольный чат (владельцу или ученику). Превью ссылок
@@ -93,7 +122,7 @@ export async function sendTo(
 ): Promise<{ message_id?: number } | null> {
   const data = await api("sendMessage", {
     chat_id: chatId,
-    text,
+    text: clampMessage(text),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),

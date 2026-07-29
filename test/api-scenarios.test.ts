@@ -76,7 +76,8 @@ vi.mock("@/lib/crm-bot", () => {
     "promptDeleteStudent", "promptLessonNote", "promptNewPayment", "promptNewStudent",
     "makeStudentFull",
     "promptPaymentLink", "promptReportLessonNote", "promptStudentMeetLink", "promptStudentNote", "sendBookingLink", "showLessons",
-    "showPayments", "showStats", "showStudentCard", "showStudentTools", "showStudentsList",
+    "showPaidHistory", "showPayments", "showStats", "showStudentCard", "showStudentTools",
+    "showStudentsList",
     "submitRateForNew", "submitTgForNew", "toggleStudentArchive",
   ];
   const out: Record<string, unknown> = {};
