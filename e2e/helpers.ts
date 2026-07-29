@@ -135,6 +135,7 @@ export const MY_FULL = {
     paidUntil: null,
     balanceKopecks: 0,
     rateKopecks: 150000,
+    nextPaid: false,
   },
   meetLink: "https://telemost.yandex.ru/j/e2e",
   payHint: "",

@@ -106,11 +106,15 @@ export function monthOffer(
   return { lessons, kopecks: lessons * balance.rateKopecks };
 }
 
-// Стоимость одного ближайшего неоплаченного занятия — «вперёд» для экзаменационных
-// учеников (ОГЭ/ЕГЭ): им счёт выставляется на следующее занятие, а не на месяц.
+// Стоимость счёта «вперёд» — ровно одно БЛИЖАЙШЕЕ занятие, и только если оно ещё не
+// закрыто балансом. Перескакивать через оплаченное занятие к следующему нельзя: иначе
+// ученик, оплативший занятие вперёд, в ту же секунду получал бы новый счёт и никогда
+// не видел состояния «всё оплачено». Счёт на занятие после появится сам, когда
+// оплаченное пройдёт и ближайшим станет следующее.
 export function nextLessonCostKopecks(balance: StudentBalance): number {
   for (const o of balance.items) {
-    if (!o.past && !o.paid) return o.hours * balance.rateKopecks;
+    if (o.past) continue;
+    return o.paid ? 0 : o.hours * balance.rateKopecks;
   }
   return 0;
 }

@@ -634,6 +634,11 @@ select:focus {
 .next-lesson b {
   color: var(--accent);
 }
+/* «✅ оплачено» на плашке ближайшего занятия — прижат вправо и не переносится */
+.next-lesson .badge {
+  margin-left: auto;
+  white-space: nowrap;
+}
 
 /* Ряд кнопок выбора (разово / еженедельно, даты для разового переноса) */
 .choice-row {
@@ -749,6 +754,12 @@ a.meet-link:hover {
 .pay-opt.best {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+/* Предложение заплатить дальше вперёд, когда счетов нет: не должно выглядеть
+   требованием — поэтому пунктир, а не сплошная рамка «к оплате». */
+.pay-opt.ahead {
+  margin-top: 14px;
+  border-style: dashed;
 }
 .pay-opt-head {
   display: flex;

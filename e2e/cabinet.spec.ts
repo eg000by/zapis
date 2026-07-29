@@ -127,6 +127,46 @@ test("обычный ученик: второй вариант — весь ме
   );
 });
 
+test("оплачено вперёд: видно на самом занятии и в блоке оплаты, счёта нет", async ({ page }) => {
+  // Ученик оплатил ближайшее занятие вперёд: счетов нет, но кабинет обязан
+  // показать, за что деньги ушли — иначе оплата выглядит как «ничего не изменилось».
+  const my = {
+    ...MY_FULL,
+    payments: [],
+    balance: {
+      ...MY_FULL.balance,
+      debtKopecks: 0,
+      debtHours: 0,
+      aheadHours: 1,
+      paidUntil: "2026-07-14T07:00:00.000Z",
+      nextPaid: true,
+    },
+    packageOffer: {
+      exam: false,
+      label: "",
+      lessons: 4,
+      amountKopecks: 600000,
+      perLessonKopecks: 150000,
+      savingsKopecks: 0,
+      savingsPercent: 0,
+      payLink: "https://yookassa.test/ahead",
+    },
+  };
+  await mockApi(page, { my });
+  await page.goto(tokenUrl());
+
+  await expect(page.locator(".next-lesson").first()).toContainText("оплачено");
+  const pay = page.locator(".pay-card");
+  await expect(pay.locator(".pay-ok")).toContainText("Ближайшее занятие оплачено");
+  await expect(pay).toContainText("Оплачено вперёд: 1 занятие, до Вт, 14 июля включительно");
+  await expect(pay).toContainText("платить сейчас ничего не нужно");
+  // Оплатить дальше вперёд можно, но это предложение, а не счёт.
+  const ahead = pay.locator(".pay-opt.ahead");
+  await expect(ahead).toContainText("Оплатить вперёд · 4 занятия");
+  await expect(ahead).toContainText("По желанию");
+  await expect(pay.locator(".pay-total")).toHaveCount(0);
+});
+
 test("экзамен ЕГЭ в режиме СБП: реквизиты вместо ссылок оплаты", async ({ page }) => {
   const my = {
     ...MY_EGE,

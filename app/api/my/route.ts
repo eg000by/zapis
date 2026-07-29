@@ -34,6 +34,9 @@ const NO_BILLING = {
     paidUntil: string | null;
     balanceKopecks: number;
     rateKopecks: number;
+    // Ближайшее занятие уже закрыто балансом — кабинет показывает это явно, иначе
+    // оплата вперёд выглядит как «деньги ушли, а ничего не изменилось».
+    nextPaid: boolean;
   } | null;
   // Пакет занятий для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты
   // ТОГО ЖЕ счёта: оплатив пакет, ученик закрывает и текущий поштучный счёт.
@@ -173,6 +176,7 @@ export async function GET(req: Request) {
                   paidUntil: balance.paidUntil,
                   balanceKopecks: balance.balanceKopecks,
                   rateKopecks: balance.rateKopecks,
+                  nextPaid: balance.nextPaid,
                 }
               : null,
           };

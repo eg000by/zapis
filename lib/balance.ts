@@ -28,6 +28,8 @@ export interface BalanceSummary {
   aheadHours: number; // будущие занятия, закрытые балансом (оплачено вперёд)
   leftoverHours: number; // куплено, но не разложено ни на одно известное занятие
   paidUntil: string | null; // ISO начала последнего закрытого балансом занятия
+  nextStart: string | null; // ISO ближайшего будущего занятия (null — впереди пусто)
+  nextPaid: boolean; // это ближайшее занятие уже закрыто балансом
 }
 
 // Чистый проход: раскладывает paidHours по занятиям (по возрастанию времени).
@@ -44,6 +46,8 @@ export function allocateBalance(
     aheadHours: 0,
     leftoverHours: 0,
     paidUntil: null,
+    nextStart: null,
+    nextPaid: false,
   };
   let remaining = paidHours;
   let exhausted = false;
@@ -56,6 +60,12 @@ export function allocateBalance(
       exhausted = true;
     }
     const past = o.start.getTime() < now.getTime();
+    // Ближайшее будущее занятие и его оплаченность — по нему решается, надо ли
+    // выставлять счёт «вперёд» и что показать в кабинете («занятие уже оплачено»).
+    if (!past && summary.nextStart === null) {
+      summary.nextStart = o.start.toISOString();
+      summary.nextPaid = paid;
+    }
     if (paid) {
       if (past) summary.pastPaidHours += o.hours;
       else summary.aheadHours += o.hours;

@@ -54,6 +54,7 @@ interface MyBalance {
   paidUntil: string | null;
   balanceKopecks: number;
   rateKopecks: number;
+  nextPaid: boolean; // ближайшее занятие уже закрыто балансом
 }
 
 // Оплата вперёд одним платежом — второй вариант оплаты ТОГО ЖЕ счёта: пакет
@@ -682,6 +683,9 @@ export default function BookingClient({
       {hasConfirmedLessons && nextLesson && (
         <div className="next-lesson">
           📌 Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
+          {/* Оплата вперёд должна быть видна там, где ученик смотрит на само занятие,
+              а не только в блоке денег. */}
+          {balance?.nextPaid && <span className="badge ok">✅ оплачено</span>}
         </div>
       )}
 
@@ -898,14 +902,47 @@ export default function BookingClient({
             <>
               <div className="day-title">Оплата</div>
               <div className="pay-ok">
-                ✅ Всё оплачено
+                ✅ {balance?.nextPaid ? "Ближайшее занятие оплачено" : "Всё оплачено"}
+              </div>
+              <div className="pay-split">
                 {balance && balance.aheadHours > 0 && balance.paidUntil
-                  ? ` — вперёд ${balance.aheadHours} ${lessonsWord(balance.aheadHours)}, по ${fmtDateMsk(balance.paidUntil)}`
-                  : ""}
+                  ? `Оплачено вперёд: ${balance.aheadHours} ${lessonsWord(balance.aheadHours)}, до ${fmtDateMsk(balance.paidUntil)} включительно · платить сейчас ничего не нужно`
+                  : "Платить сейчас ничего не нужно"}
               </div>
               {balance && balance.balanceKopecks > 0 && (
                 <div className="pay-split">Остаток на балансе: {fmtRub(balance.balanceKopecks)}</div>
               )}
+              {/* Оплатить ещё дальше вперёд — по желанию: счёта нет, поэтому это
+                  предложение, а не требование, и подписано именно так. */}
+              {packageOffer && (
+                <div className="pay-opt ahead">
+                  <div className="pay-opt-head">
+                    <b>
+                      {packageOffer.exam
+                        ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
+                        : `Оплатить вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
+                    </b>
+                    <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
+                    {packageOffer.savingsKopecks > 0 && (
+                      <span className="pkg-save">
+                        −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pay-opt-note">
+                    По желанию: закрыть следующие занятия одним платежом, чтобы не платить
+                    перед каждым.
+                  </div>
+                  {packageOffer.payLink ? (
+                    <a className="pay-btn" href={packageOffer.payLink} target="_blank" rel="noreferrer">
+                      Оплатить {fmtRub(packageOffer.amountKopecks)} ↗
+                    </a>
+                  ) : !payHint ? (
+                    <span className="badge wait">ждём ссылку на оплату</span>
+                  ) : null}
+                </div>
+              )}
+              {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
             </>
           )}
 

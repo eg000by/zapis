@@ -215,6 +215,34 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     });
   });
 
+  it("ближайшее занятие оплачено вперёд — счёт «вперёд» снимается, нового нет", async () => {
+    // Именно это ломалось на проде: ученик оплачивал занятие вперёд и в ту же
+    // секунду получал счёт на занятие ПОСЛЕ него — состояние «всё оплачено»
+    // не наступало никогда.
+    mockBalance({
+      debtKopecks: 0,
+      debtHours: 0,
+      aheadHours: 1,
+      items: [mk(2, true), mk(9, false), mk(16, false)],
+    });
+    vi.mocked(outstandingPayments).mockResolvedValue([
+      { id: "a1", kind: "advance", amountKopecks: 150000, payLink: "" },
+    ] as any);
+    await ensureAutoInvoices("stu-1", "Тест");
+
+    expect(deletePayment).toHaveBeenCalledWith("a1");
+    expect(createPayment).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "advance" })
+    );
+    // Предложение «оплатить вперёд одним платежом» остаётся: оно необязательное.
+    expect(createPayment).toHaveBeenCalledWith({
+      studentId: "stu-1",
+      amountKopecks: 300000,
+      kind: "package:2",
+      note: "Оплата вперёд: 2 занятий одним платежом",
+    });
+  });
+
   it("предлагать месяц нечем — висящее предложение снимается", async () => {
     mockBalance({ debtKopecks: 0, debtHours: 0, items: [mk(2, false)] }); // одно занятие впереди
     vi.mocked(outstandingPayments).mockResolvedValue([

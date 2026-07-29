@@ -98,6 +98,8 @@ function bal(items: { past: boolean; paid: boolean; hours: number }[]): StudentB
     aheadHours: 0,
     leftoverHours: 0,
     paidUntil: null,
+    nextStart: null,
+    nextPaid: false,
     items: items.map((i) => ({
       ...i,
       instanceId: "x",
@@ -109,18 +111,27 @@ function bal(items: { past: boolean; paid: boolean; hours: number }[]): StudentB
   };
 }
 
-describe("nextLessonCostKopecks — «вперёд» для экзаменационных = одно занятие", () => {
-  it("берёт первое будущее неоплаченное занятие × ставку", () => {
+describe("nextLessonCostKopecks — «вперёд» = ровно одно ближайшее занятие", () => {
+  it("берёт ближайшее будущее занятие × ставку", () => {
     const b = bal([
-      { past: true, paid: false, hours: 1 }, // долг — пропускаем
-      { past: false, paid: true, hours: 1 }, // будущее оплаченное — пропускаем
-      { past: false, paid: false, hours: 1 }, // ← это
+      { past: true, paid: false, hours: 1 }, // долг — считается отдельным счётом
+      { past: false, paid: false, hours: 2 }, // ← ближайшее будущее
       { past: false, paid: false, hours: 1 },
     ]);
-    expect(nextLessonCostKopecks(b)).toBe(250000);
+    expect(nextLessonCostKopecks(b)).toBe(500000);
   });
 
-  it("нет будущих неоплаченных — 0", () => {
+  it("ближайшее занятие уже оплачено — счёта «вперёд» нет", () => {
+    // Ученик заплатил вперёд: нельзя перескакивать через оплаченное занятие и
+    // выставлять счёт на следующее — иначе оплата вперёд ничего не меняет.
+    const b = bal([
+      { past: false, paid: true, hours: 1 },
+      { past: false, paid: false, hours: 1 },
+    ]);
+    expect(nextLessonCostKopecks(b)).toBe(0);
+  });
+
+  it("нет будущих занятий — 0", () => {
     expect(nextLessonCostKopecks(bal([{ past: true, paid: false, hours: 1 }]))).toBe(0);
   });
 });

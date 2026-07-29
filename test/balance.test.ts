@@ -73,6 +73,22 @@ describe("allocateBalance — раскладка оплаченных часов
   it("без занятий весь баланс — остаток", () => {
     expect(allocateBalance([], 2, NOW).summary.leftoverHours).toBe(2);
   });
+
+  it("ближайшее будущее занятие и его оплаченность — отдельными полями", () => {
+    // 3 часа закрывают оба прошедших и FUT1: ближайшее занятие оплачено вперёд.
+    const paid = allocateBalance([occ(PAST1), occ(PAST2), occ(FUT1), occ(FUT2)], 3, NOW);
+    expect(paid.summary).toMatchObject({ nextStart: FUT1, nextPaid: true });
+
+    // Тех же занятий, но денег хватило только на прошедшие — ближайшее не оплачено.
+    const unpaid = allocateBalance([occ(PAST1), occ(PAST2), occ(FUT1)], 2, NOW);
+    expect(unpaid.summary).toMatchObject({ nextStart: FUT1, nextPaid: false });
+
+    // Впереди ничего нет — показывать нечего.
+    expect(allocateBalance([occ(PAST1)], 1, NOW).summary).toMatchObject({
+      nextStart: null,
+      nextPaid: false,
+    });
+  });
 });
 
 describe("computeStudentBalance — баланс в деньгах", () => {
