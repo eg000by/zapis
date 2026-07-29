@@ -213,6 +213,35 @@ test("без подтверждённых занятий: Телемост, па
   await expect(page.locator(".pay-card")).toHaveCount(0);
   await expect(page.getByText("К оплате")).toHaveCount(0);
   await expect(page.getByText("Ближайшее занятие")).toHaveCount(0);
+  // Подключение уведомлений — тоже «занятийное»: пока занятие не подтверждено,
+  // предлагать ученику подписку не на что.
+  await expect(page.locator("a.tg-link")).toHaveCount(0);
+});
+
+test("уведомления в Telegram: кнопка ведёт на бота с deep-link ученика", async ({ page }) => {
+  const my = {
+    ...MY_FULL,
+    tgNotify: { url: "https://t.me/zapis_test_bot?start=stu-1", connected: false },
+  };
+  await mockApi(page, { my });
+  await page.goto(tokenUrl());
+
+  const btn = page.locator("a.tg-link");
+  await expect(btn).toContainText("Уведомления в Telegram");
+  await expect(btn).toContainText("ссылку на Телемост");
+  await expect(btn).toHaveAttribute("href", "https://t.me/zapis_test_bot?start=stu-1");
+});
+
+test("уведомления уже подключены — вместо кнопки статус", async ({ page }) => {
+  const my = {
+    ...MY_FULL,
+    tgNotify: { url: "https://t.me/zapis_test_bot?start=stu-1", connected: true },
+  };
+  await mockApi(page, { my });
+  await page.goto(tokenUrl());
+
+  await expect(page.locator(".tg-on")).toContainText("Уведомления в Telegram подключены");
+  await expect(page.locator("a.tg-link")).toHaveCount(0);
 });
 
 test("нет «25-го кадра»: пока /api/my грузится — спиннер, сетка не мелькает", async ({ page }) => {

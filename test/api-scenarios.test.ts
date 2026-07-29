@@ -663,6 +663,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       paidHistory: [],
       nextLesson: null,
       lessonPriceKopecks: 0,
+      tgNotify: null,
     });
   });
 

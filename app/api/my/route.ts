@@ -11,6 +11,7 @@ import {
 } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { getPayMethod, getSbpDetails } from "@/lib/settings";
+import { botUsername } from "@/lib/telegram";
 import { detectExamTariff, packageSavings } from "@/lib/config";
 
 // Пустой блок оплат/баланса — когда ученика нет в CRM или БД недоступна.
@@ -22,6 +23,7 @@ const NO_BILLING = {
   packageOffer: null,
   paidHistory: [],
   lessonPriceKopecks: 0,
+  tgNotify: null,
 } as {
   meetLink: string;
   // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
@@ -54,6 +56,9 @@ const NO_BILLING = {
   paidHistory: { id: string; amountKopecks: number; note: string; paidAt: string | null }[];
   // Цена одного занятия — показывается в подтверждении записи (0 — пробное/не задана).
   lessonPriceKopecks: number;
+  // Подключение уведомлений в Telegram: deep-link на бота и текущее состояние.
+  // null — предлагать нечего (ученик в архиве, бот не настроен).
+  tgNotify: { url: string; connected: boolean } | null;
 };
 
 export const dynamic = "force-dynamic";
@@ -143,7 +148,26 @@ export async function GET(req: Request) {
             return [];
           });
 
+          // Кнопка «Уведомления в Telegram» — только действующему ученику (не архив):
+          // бот не может написать первым, ученик подключается сам по deep-link
+          // t.me/<бот>?start=<id>, и /start привязывает его chat_id. Имя бота узнаём
+          // через getMe (кэшируется); не узнали — кнопку не показываем, чтобы не вести
+          // в никуда. Показ дополнительно закрыт гейтом hasConfirmed ниже.
+          const tgNotify = await (async () => {
+            if (!student?.active) return null;
+            const bot = await botUsername().catch(() => "");
+            if (!bot) return null;
+            return {
+              url: `https://t.me/${bot}?start=${student.id}`,
+              connected: !!student.tgChatId,
+            };
+          })().catch((e) => {
+            console.error("/api/my tgNotify failed", e);
+            return null;
+          });
+
           return {
+            tgNotify,
             meetLink: student?.meetLink || "",
             payHint,
             packageOffer,
@@ -201,6 +225,7 @@ export async function GET(req: Request) {
       payHint: hasConfirmed ? billing.payHint : "",
       packageOffer: hasConfirmed ? billing.packageOffer : null,
       paidHistory: hasConfirmed ? billing.paidHistory : [],
+      tgNotify: hasConfirmed ? billing.tgNotify : null,
       nextLesson: hasConfirmed ? nextLesson : null,
       // Цена занятия — не «занятийные» данные, а прайс: её ученик должен видеть
       // ДО записи, на экране подтверждения. Поэтому гейтом не закрывается.

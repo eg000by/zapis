@@ -640,6 +640,23 @@ select:focus {
   white-space: nowrap;
 }
 
+/* Подключение уведомлений в Telegram — плашка-ссылка на бота */
+a.tg-link {
+  text-decoration: none;
+  color: var(--text);
+}
+a.tg-link small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.next-lesson.tg-on {
+  color: var(--success);
+  font-weight: 600;
+}
+
 /* Ряд кнопок выбора (разово / еженедельно, даты для разового переноса) */
 .choice-row {
   display: flex;

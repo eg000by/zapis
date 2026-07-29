@@ -204,6 +204,8 @@ export default function BookingClient({
   const [lessonPrice, setLessonPrice] = useState(0);
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
   const [meetLink, setMeetLink] = useState<string>("");
+  // Подключение уведомлений в Telegram: deep-link на бота + подключено ли уже.
+  const [tgNotify, setTgNotify] = useState<{ url: string; connected: boolean } | null>(null);
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
@@ -297,6 +299,7 @@ export default function BookingClient({
         setPaidHistory(d.paidHistory || []);
         setLessonPrice(d.lessonPriceKopecks || 0);
         setMeetLink(d.meetLink || "");
+        setTgNotify(d.tgNotify || null);
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
@@ -693,6 +696,22 @@ export default function BookingClient({
         <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
           🎥 Подключиться к занятию (Яндекс Телемост) ↗
         </a>
+      )}
+
+      {/* Уведомления в Telegram. Бот не может написать первым — ученик подключается
+          сам по deep-link, и /start привязывает его чат. Подключённому кнопку не
+          показываем: нажимать больше нечего. */}
+      {hasConfirmedLessons && tgNotify && (
+        tgNotify.connected ? (
+          <div className="next-lesson tg-on">✅ Уведомления в Telegram подключены</div>
+        ) : (
+          <a className="next-lesson tg-link" href={tgNotify.url} target="_blank" rel="noreferrer">
+            <span>
+              🔔 <b>Уведомления в Telegram</b>
+              <small>Напомним о занятии заранее и пришлём ссылку на Телемост</small>
+            </span>
+          </a>
+        )
       )}
 
       {/* Записи — выше денег: расписание для ученика главнее счёта. */}

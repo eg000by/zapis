@@ -5,7 +5,7 @@
 import { pinChatMessage, sendTo } from "./telegram";
 import { getStudent } from "./students";
 import { getOrCreateStudentLinkCode } from "./shortlink";
-import { siteBaseUrl } from "./config";
+import { siteBaseUrl, teacherTgUrl } from "./config";
 import type { Student } from "./schema";
 
 // Шлёт ученику сообщение, если он подключил уведомления. Ошибки глотаются (логируются).
@@ -36,6 +36,10 @@ export async function pinStudentLinks(
       lines.push(`🗓 Личный кабинет (записи и оплата): ${base}/z/${code}`);
     }
     if (student.meetLink) lines.push(`🎥 Подключиться к занятию (Телемост): ${student.meetLink}`);
+    // Контакт преподавателя — в том же закрепе: чтобы «а как с вами связаться»
+    // не искалось по переписке.
+    const contact = teacherTgUrl();
+    if (contact) lines.push(`✉️ Вопрос преподавателю: ${contact}`);
     if (lines.length === 1) return; // закреплять нечего
     const msg = await sendTo(chatId, lines.join("\n"));
     if (msg?.message_id) await pinChatMessage(chatId, msg.message_id);
