@@ -22,9 +22,7 @@ import {
 import { createYkPayment, yookassaConfigured } from "./yookassa";
 import { getStudent } from "./students";
 import type { Student } from "./schema";
-import { notifyStudent } from "./notify";
-import { escapeHtml } from "./telegram";
-import { getPayMethod, getSbpDetails } from "./settings";
+import { getPayMethod } from "./settings";
 import { detectExamTariff } from "./config";
 
 // Окно автосчёта «вперёд»: занятия ближайших N дней.
@@ -157,20 +155,16 @@ export async function ensureAutoInvoices(
     openInvoices: open.map((p) => ({ id: p.id, kind: p.kind, amountKopecks: p.amountKopecks })),
   });
 
-  // id созданных/обновлённых счетов — по ним после генерации ссылок уйдёт
-  // уведомление ученику в Telegram (если он подключил уведомления).
-  const changed = new Map<string, "create" | "update">();
   for (const a of actions) {
     if (a.action === "delete") {
       await deletePayment(a.id);
     } else if (a.action === "create") {
-      const p = await createPayment({
+      await createPayment({
         studentId,
         amountKopecks: a.amountKopecks,
         kind: a.kind,
         note: noteFor(a.kind, a.amountKopecks, balance.rateKopecks),
       });
-      changed.set(p.id, "create");
     } else {
       // Сумма изменилась — старая ссылка ЮKassa больше не соответствует счёту.
       await updatePayment(a.id, {
@@ -179,7 +173,6 @@ export async function ensureAutoInvoices(
         payLink: "",
         providerPaymentId: "",
       });
-      changed.set(a.id, "update");
     }
   }
 
@@ -251,7 +244,6 @@ export async function ensureAutoInvoices(
   const method = await getPayMethod().catch(() => "yookassa" as const);
 
   // Ссылки на оплату: каждому неоплаченному счёту без ссылки — платёж ЮKassa.
-  const freshLinks = new Map<string, string>();
   if (method === "yookassa" && yookassaConfigured()) {
     const fresh = actions.length || pkgChanged ? await outstandingPayments(studentId) : open;
     for (const p of fresh) {
@@ -264,7 +256,6 @@ export async function ensureAutoInvoices(
         });
         if (yk.confirmationUrl) {
           await updatePayment(p.id, { payLink: yk.confirmationUrl, providerPaymentId: yk.id });
-          freshLinks.set(p.id, yk.confirmationUrl);
         }
       } catch (e) {
         console.error("yookassa link failed for payment", p.id, e);
@@ -272,32 +263,8 @@ export async function ensureAutoInvoices(
     }
   }
 
-  // Уведомление ученику о новом/пересчитанном счёте (best-effort).
-  if (changed.size) {
-    try {
-      const s = student;
-      if (s?.tgChatId) {
-        const sbp = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
-        const rows = (await outstandingPayments(studentId)).filter((p) => changed.has(p.id));
-        for (const p of rows) {
-          const header =
-            changed.get(p.id) === "create" ? "💳 <b>Выставлен счёт</b>" : "💳 <b>Счёт пересчитан</b>";
-          const link = p.payLink || freshLinks.get(p.id) || "";
-          const payLine = sbp
-            ? escapeHtml(sbp)
-            : link
-              ? `Оплатить по СБП: ${link}`
-              : "Ссылка на оплату — в личном кабинете.";
-          await notifyStudent(
-            s,
-            `${header}\n\n${fmtRub(p.amountKopecks)}${p.note ? ` · ${escapeHtml(p.note)}` : ""}\n${payLine}`
-          );
-        }
-      }
-    } catch (e) {
-      console.error("autobill notify failed", e);
-    }
-  }
-
+  // Ученику про счета и оплаты бот НЕ пишет: деньги живут в личном кабинете, а
+  // сообщения о выставленном счёте — самый быстрый способ добиться, чтобы человек
+  // отключил уведомления и перестал получать заодно и напоминания о занятиях.
   return balance;
 }

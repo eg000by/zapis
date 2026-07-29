@@ -70,7 +70,7 @@ describe("sendUpcomingLessonAlerts", () => {
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
 
     const t = ownerText();
-    expect(t).toContain("Через 30 мин занятие");
+    expect(t).toContain("Скоро занятие");
     expect(t).toContain("Стас");
     expect(t).toContain("https://telemost.yandex.ru/j/777");
     expect(t).toContain("Прошлое занятие (05.07): разбирали словари");
@@ -120,8 +120,9 @@ describe("sendUpcomingLessonAlerts", () => {
     await sendUpcomingLessonAlerts(NOW);
     expect(notifyStudent).toHaveBeenCalledOnce();
     const t = studentText();
-    expect(t).toContain("Через 30 мин");
-    expect(t).toContain("12:30");
+    // Сколько осталось — не пишем: крон может прийти раньше или позже.
+    expect(t).not.toMatch(/через \d+ мин/i);
+    expect(t).toContain("Начало в 12:30");
     expect(t).toContain("https://telemost.yandex.ru/j/777");
     expect(t).toContain("t.me/eg0by"); // контакт преподавателя
   });

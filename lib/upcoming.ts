@@ -73,15 +73,15 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
       if (await pingSent(key)) continue;
 
       const student = await getStudent(o.studentId).catch(() => null);
-      const minutes = Math.max(1, Math.round((o.start.getTime() - now.getTime()) / 60000));
       const meet = student?.meetLink || "";
 
-      // Преподавателю: с чем идём на занятие — ссылка и чем кончилось прошлое.
+      // Сколько осталось — НЕ пишем: прогон крона может опоздать или прийти раньше,
+      // и «через 45 минут» окажется враньём. Время начала верно всегда.
       const meetLine = meet
         ? `🎥 Телемост: ${meet}`
         : "⚠️ Ссылка на Телемост не задана — добавьте в карточке ученика.";
       await sendOwner(
-        `⏰ <b>Через ${minutes} мин занятие</b>\n\n` +
+        `⏰ <b>Скоро занятие</b>\n\n` +
           `🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(o.subject)}\n` +
           `🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n` +
           `${meetLine}\n\n` +
@@ -94,7 +94,7 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
         await notifyStudent(
           student,
           `⏰ <b>Скоро занятие</b>\n\n` +
-            `Через ${minutes} мин — в ${hmMsk(o.start)} (МСК).\n` +
+            `Начало в ${hmMsk(o.start)} (МСК).\n` +
             (meet ? `🎥 Подключиться: ${meet}\n` : "") +
             (contact ? `\nВопрос преподавателю: ${contact}` : "")
         );

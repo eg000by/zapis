@@ -35,6 +35,7 @@ vi.mock("@/lib/students", () => ({
   upsertStudent: vi.fn(async () => ({ id: "stu-1" })),
   getStudent: vi.fn(async () => null),
   getStudentByContactKey: vi.fn(async () => null),
+  getStudentByTgChatId: vi.fn(async () => null),
   updateStudent: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/notify", () => ({
@@ -867,6 +868,31 @@ describe("уведомления ученику в Telegram", () => {
     await tgMessage("/start 123e4567-e89b-42d3-a456-426614174999", 999000111);
     expect(updateStudent).not.toHaveBeenCalled();
     expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("не распознана"));
+  });
+
+  it("/stop отключает уведомления: привязка чата снимается", async () => {
+    const { getStudentByTgChatId } = await import("@/lib/students");
+    vi.mocked(getStudentByTgChatId).mockResolvedValueOnce({
+      id: "stu-9",
+      name: "Тест",
+      tgChatId: "999000111",
+    } as any);
+
+    await tgMessage("/stop", 999000111);
+    expect(updateStudent).toHaveBeenCalledWith("stu-9", { tgChatId: "" });
+    expect(sendTo).toHaveBeenCalledWith(
+      999000111,
+      expect.stringContaining("Уведомления отключены")
+    );
+  });
+
+  it("/stop от неподключённого чата ничего не меняет", async () => {
+    const { getStudentByTgChatId } = await import("@/lib/students");
+    vi.mocked(getStudentByTgChatId).mockResolvedValueOnce(null);
+
+    await tgMessage("/stop", 999000111);
+    expect(updateStudent).not.toHaveBeenCalled();
+    expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("не подключены"));
   });
 
   it("чужой чат без deep-link не получает CRM-команды", async () => {

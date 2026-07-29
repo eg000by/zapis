@@ -18,7 +18,7 @@ import {
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
-import { getStudent, updateStudent } from "@/lib/students";
+import { getStudent, getStudentByTgChatId, updateStudent } from "@/lib/students";
 import {
   applyPendingInput,
   cancelPending,
@@ -396,7 +396,7 @@ async function handleMessage(msg: any): Promise<NextResponse> {
       await updateStudent(s.id, { tgChatId: String(chatId) });
       await sendTo(
         chatId,
-        `🔔 <b>Уведомления подключены</b>\n\nЗдравствуйте, ${escapeHtml(s.name)}! Сюда будут приходить подтверждения записи, напоминания о занятиях и счета на оплату.`
+        `🔔 <b>Уведомления подключены</b>\n\nЗдравствуйте, ${escapeHtml(s.name)}! Сюда будут приходить подтверждения записи и напоминания о занятиях.\n\nОтключить в любой момент — командой /stop.`
       );
       // Закрепляем в чате ученика его постоянные ссылки (кабинет + Телемост).
       await pinStudentLinks(s, chatId);
@@ -407,6 +407,21 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
 
   if (!isOwner(chatId)) {
+    // Отключение уведомлений учеником: снимаем привязку чата, писать больше некуда.
+    // Обратно — той же кнопкой в кабинете, поэтому ничего не теряется.
+    if (text === "/stop") {
+      const s = await getStudentByTgChatId(String(chatId)).catch(() => null);
+      if (s) {
+        await updateStudent(s.id, { tgChatId: "" });
+        await sendTo(
+          chatId,
+          "🔕 <b>Уведомления отключены</b>\n\nБольше писать не буду. Включить обратно — кнопкой «Уведомления в Telegram» в личном кабинете."
+        );
+      } else {
+        await sendTo(chatId, "Уведомления и так не подключены.");
+      }
+      return ok();
+    }
     // Ученику (не владельцу) отвечаем только на /start без payload — подсказкой.
     if (text.startsWith("/start")) {
       await sendTo(

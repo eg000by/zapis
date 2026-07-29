@@ -4,7 +4,6 @@ import { getPayment, getPaymentByProviderId, setPaymentStatus, updatePayment } f
 import { getStudent } from "@/lib/students";
 import { recolorStudent } from "@/lib/coloring";
 import { escapeHtml, sendOwner } from "@/lib/telegram";
-import { notifyStudent } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -63,10 +62,8 @@ export async function POST(req: Request) {
         await sendOwner(
           `💰 <b>Оплата получена</b>\n\n🧑‍🎓 ${escapeHtml(s?.name || "")}\n💳 ${(our.amountKopecks / 100).toLocaleString("ru-RU")} ₽${our.note ? `\n📝 ${escapeHtml(our.note)}` : ""}`
         );
-        await notifyStudent(
-          s,
-          `✅ Оплата получена: <b>${(our.amountKopecks / 100).toLocaleString("ru-RU")} ₽</b>. Спасибо!`
-        );
+        // Ученику про оплату не пишем — деньги живут в личном кабинете, а бот у него
+        // только для занятий (иначе первое же денежное сообщение выключит канал).
       } catch (e) {
         console.error("webhook: notify failed", e);
       }

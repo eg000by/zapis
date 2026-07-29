@@ -83,6 +83,14 @@ export async function getStudentByContactKey(key: string): Promise<Student | nul
   return row ?? null;
 }
 
+// Ученик по его чату в Telegram — для /stop (отключить уведомления). Пустой chatId
+// не ищем: пустая строка стоит у всех неподключённых и нашла бы случайного ученика.
+export async function getStudentByTgChatId(chatId: string): Promise<Student | null> {
+  if (!chatId) return null;
+  const [row] = await db().select().from(students).where(eq(students.tgChatId, chatId)).limit(1);
+  return row ?? null;
+}
+
 export async function updateStudent(
   id: string,
   fields: Partial<
