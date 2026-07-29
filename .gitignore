@@ -11,7 +11,14 @@ next-env.d.ts.timestamp
 .DS_Store
 /service-account.json
 /.env.local.example
-/scripts
+# Папка для одноразовых скриптов остаётся вне репозитория, кроме рабочих команд БД.
+# (Именно /scripts/*, а не /scripts: исключённую папку обратно уже не «раз-исключить».)
+/scripts/*
+!/scripts/backup.mjs
+!/scripts/restore.mjs
+
+# Резервные копии БД: персональные данные и оплаты — в репозиторий не кладём
+/backups/
 
 # Playwright
 /test-results/

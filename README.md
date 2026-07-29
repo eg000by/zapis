@@ -63,18 +63,51 @@ Key decisions:
 
 ## Testing
 
-159 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+225 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
 → cancellation end to end, plus the balance model, auto-invoicing, payment webhook and
-cron digests. On top of that, 13 hermetic Playwright e2e tests drive the real
+cron digests. On top of that, 25 hermetic Playwright e2e tests drive the real
 booking UI in a browser with every `/api/*` call intercepted.
+
+Two of those suites exist because the bugs that reached production lived *between*
+correct functions, not inside them:
+
+- `test/balance-invariants.test.ts` — property-based (fast-check): hundreds of random
+  lesson/payment layouts must satisfy the laws of the balance model (no hour is lost or
+  invented, debt is never negative, all-or-nothing blocks, more money never makes things
+  worse).
+- `test/lifecycle.test.ts` — one continuous "month in a student's life" over the real
+  calendar, balance, auto-invoicing and colouring, with time moving forward: booking →
+  advance invoice → payment → lesson → debt → settlement.
 
 ```bash
 npm run test        # unit/scenario (Vitest)
 npm run test:e2e    # browser e2e (Playwright)
 ```
+
+## Backups
+
+Schema lives in `drizzle/` migrations, so backups only carry **data**: every `public`
+table is dumped to one gzipped JSON by the same driver the app uses — no `pg_dump`
+version-matching, identical locally and in CI.
+
+```bash
+npm run db:backup                                   # → backups/zapis-YYYY-MM-DD.json.gz
+npm run db:restore -- backups/zapis-2026-07-29.json.gz          # dry run
+npm run db:restore -- backups/zapis-2026-07-29.json.gz --yes    # apply
+```
+
+Restore truncates and reloads in foreign-key order inside a single transaction, so a
+failure halfway leaves the database untouched. Run `npm run db:migrate` first when
+restoring into an empty database.
+
+`.github/workflows/backup.yml` does the same weekly and uploads the dump as a GPG-encrypted
+artifact (90-day retention). **This repository is public and so are its artifacts** — the
+job refuses to run without a `BACKUP_PASSPHRASE` secret rather than publishing student
+names and payment records in the clear. Decrypt with
+`gpg --output backup.json.gz --decrypt <file>.gpg`.
 
 ## Stack
 

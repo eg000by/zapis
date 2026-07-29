@@ -1,0 +1,84 @@
+name: backup
+
+# Еженедельная резервная копия БД: воскресенье 06:20 МСК.
+# Копия шифруется и кладётся артефактом прогона (хранится 90 дней — предел GitHub).
+#
+# ШИФРОВАНИЕ ОБЯЗАТЕЛЬНО: репозиторий публичный, а артефакты публичного репозитория
+# может скачать кто угодно. Внутри копии — имена учеников, их Telegram и все оплаты.
+# Без секрета BACKUP_PASSPHRASE прогон падает намеренно, а не выкладывает открытый дамп.
+#
+# Нужные секреты репозитория (Settings → Secrets and variables → Actions):
+#   DATABASE_URL       — та же строка подключения, что в .env.local
+#   BACKUP_PASSPHRASE  — длинная случайная фраза; храните в менеджере паролей,
+#                        без неё копию не расшифровать
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — необязательные: сообщить, если бэкап упал
+#
+# Расшифровать скачанную копию:
+#   gpg --output backup.json.gz --decrypt zapis-ГГГГ-ММ-ДД.json.gz.gpg
+# Восстановить (см. README, раздел «Backups»):
+#   npm run db:migrate && npm run db:restore -- backup.json.gz --yes
+
+on:
+  schedule:
+    - cron: "20 3 * * 0"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Скриптам бэкапа нужен только драйвер postgres — devDependencies ни к чему.
+      - run: npm ci --omit=dev
+
+      - name: Проверить, что копию будет чем зашифровать
+        env:
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$PASSPHRASE" ]; then
+            echo "::error::Не задан секрет BACKUP_PASSPHRASE. Репозиторий публичный —"
+            echo "::error::незашифрованный дамп выложил бы данные учеников наружу."
+            exit 1
+          fi
+
+      - name: Снять копию
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:backup
+
+      - name: Зашифровать (AES-256, симметрично)
+        env:
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          for f in backups/*.json.gz; do
+            printf '%s' "$PASSPHRASE" | gpg --batch --yes --symmetric \
+              --cipher-algo AES256 --passphrase-fd 0 --output "$f.gpg" "$f"
+            rm -f "$f"
+          done
+          ls -lh backups/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: backups/*.gpg
+          retention-days: 90
+          if-no-files-found: error
+
+      # Молчаливо упавший бэкап — тот же ноль копий, только с иллюзией защиты.
+      - name: Сообщить в Telegram, если упало
+        if: failure() && env.TG_TOKEN != ''
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            -d "chat_id=$TG_CHAT" \
+            -d "text=⚠️ Бэкап базы не сделан. Прогон: $RUN_URL"
