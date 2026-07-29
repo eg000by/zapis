@@ -14,7 +14,8 @@ import postgres from "postgres";
 
 const DUMP_VERSION = 1;
 
-const url = process.env.DATABASE_URL;
+// trim: строка подключения часто приезжает из буфера обмена с переводом строки.
+const url = process.env.DATABASE_URL?.trim();
 if (!url) {
   console.error("Нет DATABASE_URL (локально — в .env.local, в CI — в секретах репозитория)");
   process.exit(1);

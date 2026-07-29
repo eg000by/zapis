@@ -39,6 +39,9 @@ jobs:
           URL: https://zapis-ten.vercel.app/api/cron/pulse
         run: |
           set -u
+          # Пробелы и перевод строки в конце секрета (частый гость при копировании
+          # через буфер обмена) делают заголовок невалидным — срезаем.
+          CRON_SECRET="$(printf '%s' "$CRON_SECRET" | tr -d '[:space:]')"
           fails=0
           for i in $(seq 1 10); do
             code=$(curl -sS -o /tmp/pulse.out -w '%{http_code}' -m 60 \

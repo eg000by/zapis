@@ -15,7 +15,7 @@ if (!file) {
   process.exit(1);
 }
 
-const url = process.env.DATABASE_URL;
+const url = process.env.DATABASE_URL?.trim();
 if (!url) {
   console.error("Нет DATABASE_URL");
   process.exit(1);
