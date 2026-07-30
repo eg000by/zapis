@@ -64,7 +64,7 @@ const NO_BILLING = {
 export const dynamic = "force-dynamic";
 
 // Список записей владельца ссылки + счета к оплате + баланс (долг / оплачено до /
-// остаток). При открытии кабинета же сверяются автосчета (долг и месяц вперёд).
+// остаток). При открытии кабинета же сверяются автосчета (долг и ближайшее занятие).
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const decoded = decodeToken(url.searchParams.get("token"));

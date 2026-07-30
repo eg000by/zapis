@@ -122,11 +122,11 @@ export const MY_FULL = {
     },
   ],
   packageOffer: null,
-  // Два счёта: долг за проведённое занятие и предоплата на месяц вперёд —
-  // в кабинете они складываются в одну сумму с разбивкой.
+  // Два счёта: долг за проведённое занятие и предоплата вперёд — в кабинете
+  // они складываются в одну сумму с разбивкой.
   payments: [
     { id: "d1", amountKopecks: 150000, note: "Автосчёт: долг за проведённые занятия (1 ч)", payLink: "https://yookassa.test/debt", kind: "debt" },
-    { id: "p1", amountKopecks: 600000, note: "Автосчёт: занятия на месяц вперёд (4 ч)", payLink: "https://yookassa.test/pay", kind: "advance" },
+    { id: "p1", amountKopecks: 600000, note: "Автосчёт: следующее занятие (4 ч)", payLink: "https://yookassa.test/pay", kind: "advance" },
   ],
   balance: {
     debtKopecks: 150000,

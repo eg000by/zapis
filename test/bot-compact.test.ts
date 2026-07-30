@@ -193,6 +193,22 @@ describe("showPaidHistory — постранично", () => {
   });
 });
 
+describe("promptDeleteStudent — предупреждение должно совпадать с тем, что реально удаляется", () => {
+  it("честно пишет, что будущие занятия уходят и из календаря", async () => {
+    // Раньше здесь стояло «События в Google Calendar останутся», хотя
+    // deleteStudentBot вызывает deleteFutureEventsForContact.
+    const { promptDeleteStudent } = await import("@/lib/crm-bot");
+    vi.mocked(listStudentPayments).mockResolvedValue([pay(1, "paid"), pay(2, "unpaid")] as never);
+
+    await promptDeleteStudent(1, null, "stu-1");
+    const { text } = sent();
+    expect(text).toContain("Будущие занятия удалятся и из Google Calendar");
+    expect(text).toContain("прошедшие останутся");
+    expect(text).not.toContain("События в Google Calendar останутся");
+    expect(text).toContain("счетов — 2");
+  });
+});
+
 describe("showLessons — длинная заметка не занимает весь экран", () => {
   it("заметку длиннее 120 символов показывает началом с многоточием", async () => {
     const start = new Date("2026-07-10T07:00:00.000Z");

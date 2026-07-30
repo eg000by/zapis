@@ -52,7 +52,7 @@ export const payments = pgTable("payments", {
   payLink: text("pay_link").notNull().default(""), // ссылка на оплату (ЮKassa/«Мой налог»)
   note: text("note").notNull().default(""), // напр. «Март, 4 занятия»
   // Происхождение счёта: manual — выставлен вручную; debt — автосчёт за проведённые
-  // неоплаченные занятия; advance — автосчёт за занятия на месяц вперёд.
+  // неоплаченные занятия; advance — автосчёт за одно ближайшее занятие.
   kind: text("kind").notNull().default("manual"),
   // id платежа в ЮKassa (для сверки вебхука и обновления ссылки).
   providerPaymentId: text("provider_payment_id").notNull().default(""),

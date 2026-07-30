@@ -584,7 +584,8 @@ export async function promptDeleteStudent(
   const text =
     `🗑 <b>Удалить ученика?</b>\n\n🧑‍🎓 ${escapeHtml(s.name)} · ${escapeHtml(s.subject)}\n` +
     `Вместе с ним удалятся: занятий — ${lessonsCount}, счетов — ${paysCount}, ссылка на запись.\n` +
-    `События в Google Calendar останутся.\n\n<b>Действие необратимо.</b>`;
+    `Будущие занятия удалятся и из Google Calendar, прошедшие останутся как история.\n\n` +
+    `<b>Действие необратимо.</b>`;
   const keyboard = inlineKeyboard([
     [
       { text: "❗ Удалить навсегда", data: `delstuok:${s.id}` },

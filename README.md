@@ -21,7 +21,8 @@ and real money.
   archive; the `/admin` web page exposes the same service layer (feature parity by design).
 - **Money** — hourly rate per student; a pure "balance walk" allocates paid hours over
   lessons chronologically and derives *debt*, *paid-until date* and *credit* from one
-  computation. Auto-invoicing issues two separate invoices (debt + month ahead),
+  computation. Auto-invoicing issues two separate invoices (debt + the single next
+  lesson), plus an optional "pay ahead in one payment" offer,
   reconciled idempotently on every cabinet visit. Online payments via YooKassa (SBP),
   with a webhook that never trusts the notification body — it re-fetches the payment
   status from the API.
@@ -30,11 +31,14 @@ and real money.
   keeps the accounting (students, invoices, notes). Lessons are auto-colored by payment
   status: green/red/orange, gray = missed (not billed).
 - **Service notifications for students** — an opt-in Telegram deep-link connects a
-  student's chat; they get booking confirmations, invoices with payment links, payment
-  receipts and same-day lesson reminders.
+  student's chat; they get booking confirmations, lesson reminders and an "upcoming
+  lesson" alert with the meeting link. Money is deliberately excluded — invoices live
+  in the cabinet, and a payment message is the fastest way to make someone mute the
+  bot. `/stop` disconnects; the CRM command menu is scoped to the owner's chat only.
 - **Post-lesson pulse** — right after a lesson ends the teacher gets a "how did it
-  go?" prompt (held / missed / add a note); a daily morning cron sends students
-  same-day reminders.
+  go?" prompt (held / missed / add a note). Reminders are timed to the lesson itself:
+  a morning lesson is announced at 19:00 the previous evening, anything later at 10:00
+  on the day.
 
 ## Architecture
 
@@ -63,12 +67,12 @@ Key decisions:
 
 ## Testing
 
-225 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+266 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
 → cancellation end to end, plus the balance model, auto-invoicing, payment webhook and
-cron digests. On top of that, 25 hermetic Playwright e2e tests drive the real
+cron digests. On top of that, 27 hermetic Playwright e2e tests drive the real
 booking UI in a browser with every `/api/*` call intercepted.
 
 Two of those suites exist because the bugs that reached production lived *between*
@@ -135,8 +139,8 @@ bearer token from a repository secret of the same name.
 ## Docker
 
 Self-hosting without Vercel — multi-stage image on Next.js standalone output, plus a
-scheduler sidecar that replaces Vercel Cron / GitHub Actions (15-minute lesson pulse,
-daily morning reminders):
+scheduler sidecar that replaces Vercel Cron / GitHub Actions (frequent lesson pulse —
+reminders and «upcoming lesson» alerts — plus the daily series-renewal check):
 
 ```bash
 docker compose up --build   # app on :3000 + cron sidecar; secrets from .env.local
@@ -167,7 +171,8 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
   `/admin` работает поверх того же сервисного слоя (паритет поверхностей).
 - **Деньги** — ставка ₽/час; «балансовый проход» раскладывает оплаченные часы по
   занятиям хронологически, и из одного вычисления получаются долг, «оплачено до» и
-  остаток. Автосчета: два отдельных счёта (долг + месяц вперёд), идемпотентная сверка
+  остаток. Автосчета: два отдельных счёта (долг + одно ближайшее занятие) и
+  необязательное предложение оплатить вперёд одним платежом, идемпотентная сверка
   при каждом входе в кабинет. Онлайн-оплата ЮKassa (СБП); вебхук не верит телу
   уведомления и перечитывает статус платежа из API.
 - **Календарь — источник правды расписания** — брони живут в событиях Google Calendar
@@ -175,18 +180,21 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
   учёт (ученики, счета, заметки). Занятия автоматически красятся по оплате:
   зелёный/красный/оранжевый, серый = пропуск (не тарифицируется).
 - **Уведомления ученикам** — подключение по deep-link в Telegram: подтверждения записи,
-  счета со ссылкой на оплату, подтверждения оплаты, напоминания в день занятия.
+  напоминание о занятии и «скоро занятие» со ссылкой на Телемост. Денег в них нет
+  намеренно: счета живут в кабинете, а сообщение про оплату — быстрый способ добиться,
+  чтобы человек отключил уведомления вместе с напоминаниями. Отписка — /stop, меню
+  команд CRM видно только в чате владельца.
 - **Пульс после занятия** — сразу после конца занятия преподавателю приходит «как
-  прошло?» (прошло / пропуск / заметка); утренний крон шлёт ученикам напоминания о
-  сегодняшних занятиях.
+  прошло?» (прошло / пропуск / заметка). Момент напоминания зависит от времени самого
+  занятия: утреннее (до 12:00) — накануне в 19:00, остальные — в 10:00 того же дня.
 
 ## Тесты
 
-159 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
+266 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,
-платёжный вебхук и кроны. Плюс 13 герметичных браузерных e2e на Playwright —
+платёжный вебхук и кроны. Плюс 27 герметичных браузерных e2e на Playwright —
 реальный UI записи с перехватом всех вызовов `/api/*`.
 
 ## Стек

@@ -167,6 +167,22 @@ describe("sendUpcomingLessonAlerts", () => {
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
   });
 
+  it("окно шире промежутка между прогонами крона (случай 30 июля)", async () => {
+    // Реальный сбой: пульс отработал в 07:20 МСК, следующий раз — в 10:11, а занятие
+    // начиналось в 10:10. С часовым окном оно целиком провалилось в промежуток и
+    // уведомления не было вовсе. Окно должно перекрывать такой простой.
+    const run = new Date("2026-07-30T04:20:00.000Z"); // 07:20 МСК
+    const lesson = new Date("2026-07-30T07:10:00.000Z"); // 10:10 МСК
+    expect(lesson.getTime() - run.getTime()).toBeLessThanOrEqual(
+      UPCOMING_LEAD_MINUTES * 60000
+    );
+
+    vi.setSystemTime(run);
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(lesson)] as never);
+    expect(await sendUpcomingLessonAlerts(run)).toEqual({ sent: 1 });
+    expect(ownerText()).toContain("Скоро занятие");
+  });
+
   it("окно запроса к календарю — ровно на UPCOMING_LEAD_MINUTES вперёд", async () => {
     await sendUpcomingLessonAlerts(NOW);
     const [from, to] = vi.mocked(listDayOccurrences).mock.calls[0];
