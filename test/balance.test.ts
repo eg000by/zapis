@@ -106,6 +106,20 @@ describe("computeStudentBalance — баланс в деньгах", () => {
     expect(await computeStudentBalance("s")).toBeNull();
   });
 
+  // Ставку в боте спрашивают ДО выбора «пробное / регулярное», поэтому у пробного
+  // ученика она вполне может быть проставлена. Баланса это не включает: пробное
+  // занятие бесплатное, и счёт в кабинете за него — обман.
+  it("null у пробного ученика, даже если ставка задана", async () => {
+    vi.mocked(getStudent).mockResolvedValue({
+      id: "s",
+      contactKey: "k",
+      rateKopecks: 150000,
+      trial: true,
+    } as any);
+    vi.mocked(listContactOccurrences).mockResolvedValue([occ(PAST1), occ(FUT1)] as any);
+    expect(await computeStudentBalance("s")).toBeNull();
+  });
+
   it("долг и остаток считаются от ставки, хвост от деления — в остаток", async () => {
     vi.mocked(getStudent).mockResolvedValue({ id: "s", contactKey: "k", rateKopecks: 150000 } as any);
     vi.mocked(sumPaidKopecks).mockResolvedValue(500000); // 3 часа + 50 000 коп. хвост

@@ -179,9 +179,10 @@ export async function GET(req: Request) {
             })),
             // Цена занятия для экрана подтверждения записи: индивидуальная ставка,
             // иначе тариф предмета. У пробного занятия цены нет — оно бесплатное.
-            lessonPriceKopecks: decoded.info.trial
-              ? 0
-              : student?.rateKopecks || tariff?.hourlyKopecks || 0,
+            lessonPriceKopecks:
+              decoded.info.trial || student?.trial
+                ? 0
+                : student?.rateKopecks || tariff?.hourlyKopecks || 0,
             // Пакетные счета показываем отдельной карточкой, из общего списка исключаем.
             payments: rows
               .filter((p) => !isPackageKind(p.kind))

@@ -140,6 +140,20 @@ export async function ensureAutoInvoices(
   // Строку ученика читаем один раз за запрос: её же передаём в расчёт баланса
   // (кабинет уже загрузил ученика и отдаёт сюда — иначе три одинаковых SELECT'а).
   const student = preloaded !== undefined ? preloaded : await getStudent(studentId);
+
+  // Пробное занятие бесплатное — счетов у пробного ученика быть не может. Если
+  // они успели выставиться (ставку спрашивают в боте до выбора «пробное»), снимаем
+  // их здесь: иначе кабинет предлагает оплатить занятие, за которое платить не надо.
+  // Ручные счета не трогаем — их выставил преподаватель осознанно.
+  if (student?.trial) {
+    for (const p of await outstandingPayments(studentId)) {
+      if (p.kind === "debt" || p.kind === "advance" || isPackageKind(p.kind)) {
+        await deletePayment(p.id);
+      }
+    }
+    return null;
+  }
+
   const balance = await computeStudentBalance(studentId, student);
   if (!balance) return null; // нет ставки — автосчета не считаются
 

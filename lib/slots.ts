@@ -70,12 +70,16 @@ export function windowBounds(now = new Date()): { timeMin: Date; timeMax: Date }
 }
 
 // Окно занятости для обезличенной недели: нужно покрыть ближайшее наступление
-// каждого слота (до 7 дней вперёд) и ещё AVAILABILITY_WEEKS−1 повторений.
-export function weekWindowBounds(now = new Date()): { timeMin: Date; timeMax: Date } {
+// каждого слота (до 7 дней вперёд) и ещё weeks−1 повторений. Для разовой записи
+// (пробное занятие) weeks = 1: заглядывать в следующие недели незачем.
+export function weekWindowBounds(
+  now = new Date(),
+  weeks = AVAILABILITY_WEEKS
+): { timeMin: Date; timeMax: Date } {
   const { y, m, d } = mskNowParts(now);
   const timeMin = now;
   // +7 дней на ближайшее наступление + недели повторений + сутки запаса.
-  const timeMax = mskWallToInstant(y, m, d + 7 + AVAILABILITY_WEEKS * 7 + 1, 0);
+  const timeMax = mskWallToInstant(y, m, d + 7 + Math.max(1, weeks) * 7 + 1, 0);
   return { timeMin, timeMax };
 }
 
@@ -93,8 +97,18 @@ function nextOccurrence(weekday: number, hh: number, mm: number, now: Date): Dat
 // Строит «обезличенную» неделю: доступные дни (из WORK_HOURS) со своей сеткой слотов —
 // у каждого дня своё рабочее окно. start слота — ISO ближайшего будущего наступления
 // (для записи серия начнётся с него). Слот занят, если хотя бы одно из ближайших
-// AVAILABILITY_WEEKS наступлений занято.
-export function buildWeek(busy: BusyEvent[], now = new Date()): DaySlots[] {
+// `weeks` наступлений занято.
+//
+// weeks — на сколько недель вперёд смотреть. Для еженедельной серии это
+// AVAILABILITY_WEEKS: время закрепляется за учеником надолго, и занятое через
+// неделю время предлагать нельзя. Для РАЗОВОЙ записи (пробное занятие) weeks = 1:
+// занятие всего одно, и свободный на этой неделе слот обязан быть доступен, даже
+// если со следующих недель в нём стоят чужие занятия.
+export function buildWeek(
+  busy: BusyEvent[],
+  now = new Date(),
+  weeks = AVAILABILITY_WEEKS
+): DaySlots[] {
   const days: DaySlots[] = [];
 
   for (const weekday of WEEK_ORDER) {
@@ -122,7 +136,7 @@ export function buildWeek(busy: BusyEvent[], now = new Date()): DaySlots[] {
       const first = nextOccurrence(weekday, hr, mn, now);
 
       let isBusy = false;
-      for (let w = 0; w < AVAILABILITY_WEEKS; w++) {
+      for (let w = 0; w < Math.max(1, weeks); w++) {
         const s = new Date(first.getTime() + w * 7 * 86400000);
         const e = new Date(s.getTime() + SLOT_MINUTES * 60000);
         if (overlaps(s, e, busy)) {

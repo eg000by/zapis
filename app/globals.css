@@ -555,6 +555,13 @@ select:focus {
   color: var(--muted);
   font-size: 13px;
 }
+/* Время записи — главная строка в «Ваших записях»: имени и предмета там больше
+   нет, и без выделения строка выглядела бы подписью без заголовка. */
+.my-when.when-main {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
 .badge {
   align-self: flex-start;
   margin-top: 2px;

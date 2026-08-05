@@ -273,9 +273,13 @@ export default function BookingClient({
     }
   }, [rescheduling, pickingNew]);
 
+  // Пробное занятие разовое: сетку просим с учётом одной недели, иначе свободный
+  // час выглядел бы занятым из-за чужой серии со следующих недель.
+  const slotsUrl = trial ? "/api/slots?trial=1" : "/api/slots";
+
   function loadSlots() {
     setDays(null);
-    fetch("/api/slots")
+    fetch(slotsUrl)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setLoadError(d.error);
@@ -309,7 +313,7 @@ export default function BookingClient({
   // которые только что заняли. Возвращает оставшиеся выбранные слоты.
   async function refreshSlots(prune = false): Promise<string[]> {
     try {
-      const d = await fetch("/api/slots").then((r) => r.json());
+      const d = await fetch(slotsUrl).then((r) => r.json());
       if (d.error) return selected;
       const nd: Day[] = d.days || [];
       setDays(nd);
@@ -438,13 +442,13 @@ export default function BookingClient({
   // для повторяющейся серии спросим — одно занятие или всю серию.
   function startCancel(ev: MyEvent) {
     if (ev.moved) {
-      if (confirm(`Отменить перенесённое занятие «${ev.student} — ${ev.subject}»?`)) {
+      if (confirm(`Отменить перенесённое занятие ${fmtMsk(ev.start, ev.lessons)}?`)) {
         doCancel(ev, "once");
       }
       return;
     }
     if (!ev.recurring) {
-      if (confirm(`Отменить запись «${ev.student} — ${ev.subject}»?`)) doCancel(ev, "all");
+      if (confirm(`Отменить запись ${fmtMsk(ev.start, ev.lessons)}?`)) doCancel(ev, "all");
       return;
     }
     setRsEvent(ev);
@@ -557,9 +561,8 @@ export default function BookingClient({
     rsChoosing && rsEvent ? (
       <div className="reschedule-bar column" ref={rsPanelRef}>
         <span>
-          {rsKind === "cancel" ? "Отменяем" : "Переносим"}: <b>{rsEvent.student} — {rsEvent.subject}</b>
-          {" · "}
-          {fmtSlotMsk(rsEvent.start, rsEvent.lessons)}
+          {rsKind === "cancel" ? "Отменяем" : "Переносим"}:{" "}
+          <b>{fmtSlotMsk(rsEvent.start, rsEvent.lessons)}</b>
         </span>
 
         {rsMode === null && (
@@ -577,7 +580,7 @@ export default function BookingClient({
               <button
                 className="mini danger"
                 onClick={() => {
-                  if (confirm(`Отменить всю серию «${rsEvent.student} — ${rsEvent.subject}»?`)) {
+                  if (confirm(`Отменить все занятия ${fmtSlotMsk(rsEvent.start, rsEvent.lessons)}?`)) {
                     doCancel(rsEvent, "all");
                   }
                 }}
@@ -724,18 +727,19 @@ export default function BookingClient({
           {my.map((ev) => (
             <div key={ev.id} className="my-item">
               <div className="my-row">
+                {/* Имя и предмет не показываем: ученик открыл СВОЙ кабинет по личной
+                    ссылке и знает их без нас. Главное в строке — время записи. */}
                 <div className="my-info">
-                  <b>{ev.student} — {ev.subject}</b>
                   {ev.moved ? (
                     <>
-                      <span className="my-when">
-                        {ev.origStart ? `${fmtMsk(ev.origStart, ev.lessons)} → ` : ""}
-                        {fmtMsk(ev.start, ev.lessons)}
-                      </span>
+                      <span className="my-when when-main">{fmtMsk(ev.start, ev.lessons)}</span>
+                      {ev.origStart && (
+                        <span className="my-when">было: {fmtMsk(ev.origStart, ev.lessons)}</span>
+                      )}
                       <span className="badge move">🔄 перенос</span>
                     </>
                   ) : (
-                    <span className="my-when">
+                    <span className="my-when when-main">
                       {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
                       {ev.recurring ? " · еженедельно" : ""}
                     </span>

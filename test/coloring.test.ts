@@ -88,6 +88,18 @@ describe("recolorStudent — балансовая покраска", () => {
     });
   });
 
+  // Пробное занятие бесплатное: прошедшее пробное не долг и красным быть не должно.
+  // Цвет ему поставит перевод в полноценные (markPastLessonsFree → Sage).
+  it("пробного ученика не красит вовсе", async () => {
+    vi.mocked(getStudent).mockResolvedValue({ ...STUDENT, trial: true } as any);
+    vi.mocked(listContactOccurrences).mockResolvedValue([
+      occ("2026-07-08T15:10:00.000Z"), // прошло, не оплачено — при обычном ученике был бы 11
+    ] as any);
+
+    await recolorStudent("stu-1");
+    expect(setEventColor).not.toHaveBeenCalled();
+  });
+
   it("блок «всё-или-ничего»: не хватает на весь блок — блок не оплачен", async () => {
     vi.mocked(sumPaidKopecks).mockResolvedValue(150000); // 1 час
     vi.mocked(listContactOccurrences).mockResolvedValue([

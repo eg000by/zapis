@@ -317,6 +317,34 @@ describe("пробная ссылка — одно занятие", () => {
     expect(r.status).toBe(409);
   });
 
+  // Слот свободен на этой неделе, но со следующих недель в нём чужая серия.
+  // Регулярной записи он не годится (время закрепляется надолго), а пробное
+  // занятие одно — и оно должно видеть слот свободным. Раньше сетка была общей,
+  // и записаться было некуда.
+  it("сетка для пробного не смотрит в следующие недели", async () => {
+    seedEvent({
+      summary: "Чужая серия",
+      start: { dateTime: TUE2_9 },
+      end: { dateTime: "2026-07-21T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;COUNT=26"],
+    });
+    const mod = await import("@/app/api/slots/route");
+    const slotAt = async (url: string) => {
+      const d = await (await mod.GET(new Request(url))).json();
+      return d.days
+        .find((x: any) => x.weekday === "Вт")
+        .slots.find((s: any) => s.time === "09:00");
+    };
+
+    expect((await slotAt("http://test/api/slots")).busy).toBe(true);
+    const once = await slotAt("http://test/api/slots?trial=1");
+    expect(once.busy).toBe(false);
+    expect(once.start).toBe(TUE_9);
+
+    // И записаться по нему действительно можно — сетка не обманывает.
+    expect((await post("book", { token: TRIAL(), start: TUE_9 })).status).toBe(200);
+  });
+
   it("после отмены пробного можно записаться заново", async () => {
     await post("book", { token: TRIAL(), start: TUE_9 });
     const id = allStored()[0].id;

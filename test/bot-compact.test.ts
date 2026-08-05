@@ -123,7 +123,10 @@ describe("clampMessage — предел Telegram в 4096 символов", () =
 });
 
 describe("showPayments — неоплаченные целиком, оплаченные свёрнуты", () => {
-  it("мало счетов — показываются все, отдельной страницы нет", async () => {
+  it("мало счетов — показываются все, но история доступна с первого оплаченного", async () => {
+    // Удалять оплаченные счета можно только из истории, поэтому кнопка нужна сразу:
+    // раньше она появлялась после четвёртого, и ошибочно отмеченный оплаченным счёт
+    // до тех пор было не убрать.
     vi.mocked(listStudentPayments).mockResolvedValue([
       pay(1, "unpaid"),
       pay(2, "paid"),
@@ -134,7 +137,15 @@ describe("showPayments — неоплаченные целиком, оплаче
     const { text, rows } = sent();
     expect(text).toContain("Автосчёт №1");
     expect(text).toContain("Автосчёт №3");
-    expect(JSON.stringify(rows)).not.toContain("phist:");
+    expect(text).not.toContain("… и ещё"); // всё уместилось — про скрытое не врём
+    expect(JSON.stringify(rows)).toContain("phist:stu-1:0");
+  });
+
+  it("оплаченных нет — истории нет", async () => {
+    vi.mocked(listStudentPayments).mockResolvedValue([pay(1, "unpaid")] as never);
+
+    await showPayments(1, null, "stu-1");
+    expect(JSON.stringify(sent().rows)).not.toContain("phist:");
   });
 
   it("много оплаченных — сводка и отдельная история вместо простыни", async () => {

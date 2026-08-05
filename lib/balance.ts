@@ -98,7 +98,12 @@ export async function computeStudentBalance(
   preloaded?: Student | null
 ): Promise<StudentBalance | null> {
   const s = preloaded !== undefined ? preloaded : await getStudent(studentId);
-  if (!s || s.rateKopecks <= 0) return null;
+  // Пробное занятие бесплатное, поэтому у пробного ученика баланса нет вообще —
+  // даже если ставка уже проставлена (её спрашивают при заведении ученика в боте
+  // ещё до выбора «пробное / регулярное»). Иначе кабинет показывал бы счёт на
+  // занятие, за которое платить не надо. Биллинг включается переводом в
+  // полноценные (promoteStudentToFull), где прошедшее пробное помечается бесплатным.
+  if (!s || s.trial || s.rateKopecks <= 0) return null;
   // Пакетные оплаты (месяц ОГЭ/ЕГЭ) кредитуют фиксированные часы, а не деньги÷ставку.
   const packageLessons = detectExamTariff(s.subject)?.packageLessons ?? 0;
   const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(

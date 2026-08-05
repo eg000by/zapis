@@ -180,6 +180,27 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     expect(createPayment).not.toHaveBeenCalled();
   });
 
+  // Пробное занятие бесплатное — в кабинете такого ученика счёта быть не может.
+  // На проде счета всё же появлялись: ставку в боте спрашивают до выбора
+  // «пробное / регулярное», и она включала биллинг.
+  it("пробному ученику счетов не выставляет, а старые автосчета снимает", async () => {
+    mockBalance();
+    vi.mocked(outstandingPayments).mockResolvedValue([
+      { id: "d1", kind: "debt", amountKopecks: 300000, payLink: "" },
+      { id: "a1", kind: "advance", amountKopecks: 150000, payLink: "" },
+      { id: "pk", kind: "package:4", amountKopecks: 600000, payLink: "" },
+      { id: "m1", kind: "manual", amountKopecks: 100000, payLink: "" },
+    ] as any);
+
+    const trial = { id: "stu-1", trial: true, rateKopecks: 150000 } as any;
+    expect(await ensureAutoInvoices("stu-1", "Тест", trial)).toBeNull();
+
+    expect(createPayment).not.toHaveBeenCalled();
+    expect(updatePayment).not.toHaveBeenCalled();
+    // Ручной счёт выставил преподаватель осознанно — его не трогаем.
+    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["d1", "a1", "pk"]);
+  });
+
   it("создаёт счёт на долг с человекочитаемой заметкой", async () => {
     mockBalance();
     await ensureAutoInvoices("stu-1", "Тест");

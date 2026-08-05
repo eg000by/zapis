@@ -395,14 +395,14 @@ export async function showPayments(
     }
 
     // Оплаченные — короткой сводкой; полный список и кнопки удаления живут
-    // на отдельной странице, иначе клавиатура растёт без конца.
+    // на отдельной странице, иначе клавиатура растёт без конца. Кнопка истории
+    // нужна с ПЕРВОГО оплаченного счёта: удалять их можно только оттуда, и без
+    // кнопки ошибочно отмеченный оплаченным счёт становилось не убрать.
     if (paid.length) {
       lines.push(`\n<b>Оплачено раньше (${paid.length}):</b>`);
       for (const p of paid.slice(0, PAID_PREVIEW)) lines.push(payLine(p));
-      if (paid.length > PAID_PREVIEW) {
-        lines.push(`… и ещё ${paid.length - PAID_PREVIEW}`);
-        rows.push([{ text: `🗂 История оплат (${paid.length})`, data: `phist:${s.id}:0` }]);
-      }
+      if (paid.length > PAID_PREVIEW) lines.push(`… и ещё ${paid.length - PAID_PREVIEW}`);
+      rows.push([{ text: `🗂 История оплат (${paid.length})`, data: `phist:${s.id}:0` }]);
     }
   }
 

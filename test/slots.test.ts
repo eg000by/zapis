@@ -103,6 +103,29 @@ describe("buildWeek — обезличенная неделя с окнами п
     expect(byWd["Пн"].slots[0].time).toBe("15:00");
     expect(byWd["Пн"].slots.at(-1)!.time).toBe("19:40");
   });
+
+  // Слот занят СО СЛЕДУЮЩЕЙ недели (чужая серия), а ближайшее наступление свободно.
+  // Для еженедельной записи такой слот предлагать нельзя — время закрепляется
+  // надолго. Для разовой (пробное занятие) он обязан быть доступен: занятие одно.
+  it("занятость следующих недель закрывает слот только для еженедельной записи", () => {
+    const busy = [
+      // Вт 21 июля, 09:00 МСК — через неделю после ближайшего наступления.
+      { start: new Date("2026-07-21T06:00:00.000Z"), end: new Date("2026-07-21T07:00:00.000Z") },
+    ];
+    const slotOf = (days: ReturnType<typeof buildWeek>) =>
+      days.find((d) => d.weekday === "Вт")!.slots.find((s) => s.time === "09:00")!;
+
+    expect(slotOf(buildWeek(busy, NOW)).busy).toBe(true);
+    const once = slotOf(buildWeek(busy, NOW, 1));
+    expect(once.busy).toBe(false);
+    expect(once.start).toBe(TUE); // именно ближайший вторник, а не следующий
+
+    // Занятость самого ближайшего наступления закрывает слот в обоих режимах.
+    const near = [
+      { start: new Date("2026-07-14T06:00:00.000Z"), end: new Date("2026-07-14T07:00:00.000Z") },
+    ];
+    expect(slotOf(buildWeek(near, NOW, 1)).busy).toBe(true);
+  });
 });
 
 describe("weeklyOccurrences", () => {

@@ -32,8 +32,10 @@ test("кабинет: записи вместо сетки, все плашки 
 
   // Запись: еженедельно, подтверждена, с кнопками управления.
   // (.my-row есть и в «К оплате» — берём строку именно записи.)
-  const row = page.locator(".my-row", { hasText: "Тестовый Егор — Питон" });
+  const row = page.locator(".my-card .my-row").first();
   await expect(row).toContainText("еженедельно");
+  // Имя и предмет ученику не показываем: он открыл свой кабинет по личной ссылке.
+  await expect(row).not.toContainText("Тестовый Егор — Питон");
   await expect(row).toContainText("✅ подтверждено");
   await expect(row.getByRole("button", { name: "Перенести" })).toBeVisible();
 });
