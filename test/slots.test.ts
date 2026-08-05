@@ -6,6 +6,7 @@ import {
   formatMskRange,
   shiftIntoWeekOf,
   validateSlot,
+  weekWindowBounds,
   weeklyOccurrences,
 } from "@/lib/slots";
 
@@ -116,7 +117,7 @@ describe("buildWeek — обезличенная неделя с окнами п
       days.find((d) => d.weekday === "Вт")!.slots.find((s) => s.time === "09:00")!;
 
     expect(slotOf(buildWeek(busy, NOW)).busy).toBe(true);
-    const once = slotOf(buildWeek(busy, NOW, 1));
+    const once = slotOf(buildWeek(busy, NOW, { weeks: 1 }));
     expect(once.busy).toBe(false);
     expect(once.start).toBe(TUE); // именно ближайший вторник, а не следующий
 
@@ -124,7 +125,43 @@ describe("buildWeek — обезличенная неделя с окнами п
     const near = [
       { start: new Date("2026-07-14T06:00:00.000Z"), end: new Date("2026-07-14T07:00:00.000Z") },
     ];
-    expect(slotOf(buildWeek(near, NOW, 1)).busy).toBe(true);
+    expect(slotOf(buildWeek(near, NOW, { weeks: 1 })).busy).toBe(true);
+  });
+
+  // Разовый перенос двигает ОДНО занятие: сетка строится на его неделю, и занятость
+  // проверяется только на ту дату. Раньше сетка была общей, и слот, свободный в
+  // нужную неделю, выглядел занятым из-за соседних недель — перенести было некуда.
+  describe("разовый перенос (occIso)", () => {
+    const OCC = "2026-07-28T06:00:00.000Z"; // переносим занятие Вт 28 июля
+    const slotOf = (days: ReturnType<typeof buildWeek>, wd: string, time: string) =>
+      days.find((d) => d.weekday === wd)!.slots.find((s) => s.time === time)!;
+
+    it("слоты стоят на датах недели переносимого занятия", () => {
+      const days = buildWeek([], NOW, { occIso: OCC });
+      expect(slotOf(days, "Вт", "09:00").start).toBe(OCC);
+      // Среда той же недели — 29 июля, 15:00 МСК (окно Ср 15–21).
+      expect(slotOf(days, "Ср", "15:00").start).toBe("2026-07-29T12:00:00.000Z");
+    });
+
+    it("занятость соседних недель слот не закрывает, своей — закрывает", () => {
+      const other = [
+        // Тот же час, но за неделю до и через неделю после целевой даты.
+        { start: new Date("2026-07-21T06:00:00.000Z"), end: new Date("2026-07-21T07:00:00.000Z") },
+        { start: new Date("2026-08-04T06:00:00.000Z"), end: new Date("2026-08-04T07:00:00.000Z") },
+      ];
+      expect(slotOf(buildWeek(other, NOW, { occIso: OCC }), "Вт", "09:00").busy).toBe(false);
+
+      const own = [{ start: new Date(OCC), end: new Date("2026-07-28T07:00:00.000Z") }];
+      expect(slotOf(buildWeek(own, NOW, { occIso: OCC }), "Вт", "09:00").busy).toBe(true);
+    });
+
+    it("окно запроса к календарю дотягивается до недели занятия", () => {
+      const { timeMin, timeMax } = weekWindowBounds(NOW, { occIso: OCC });
+      expect(timeMin).toBe(NOW);
+      // Иначе занятость целевой недели не попала бы в ответ Google и все слоты
+      // этой недели выглядели бы свободными.
+      expect(timeMax.getTime()).toBeGreaterThan(new Date(OCC).getTime() + 7 * 86400000);
+    });
   });
 });
 

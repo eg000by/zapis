@@ -69,17 +69,37 @@ export function windowBounds(now = new Date()): { timeMin: Date; timeMax: Date }
   return { timeMin, timeMax };
 }
 
+// Для чего строится сетка. От этого зависит, на сколько наступлений вперёд
+// проверяется занятость слота, — и это ровно то же правило, по которому запись
+// потом проверяется на сервере.
+export interface WeekOptions {
+  // Сколько недель подряд слот должен быть свободен. Еженедельная серия занимает
+  // время надолго (AVAILABILITY_WEEKS), разовая запись — только один раз (1).
+  weeks?: number;
+  // Разовый перенос: ISO занятия, которое двигают. Слоты сдвигаются в его неделю,
+  // а занятость проверяется только на эту дату (weeks игнорируется).
+  occIso?: string;
+}
+
 // Окно занятости для обезличенной недели: нужно покрыть ближайшее наступление
-// каждого слота (до 7 дней вперёд) и ещё weeks−1 повторений. Для разовой записи
-// (пробное занятие) weeks = 1: заглядывать в следующие недели незачем.
+// каждого слота (до 7 дней вперёд) и ещё weeks−1 повторений. Для разового
+// переноса окно тянется до недели переносимого занятия — иначе занятость на той
+// неделе просто не попала бы в ответ календаря и все слоты казались бы свободными.
 export function weekWindowBounds(
   now = new Date(),
-  weeks = AVAILABILITY_WEEKS
+  opts: WeekOptions = {}
 ): { timeMin: Date; timeMax: Date } {
-  const { y, m, d } = mskNowParts(now);
   const timeMin = now;
+  if (opts.occIso) {
+    const occ = new Date(opts.occIso).getTime();
+    // +8 суток: слоты сдвигаются в неделю занятия, а те, что в ней уже прошли, —
+    // ещё неделей позже (см. shiftIntoWeekOf).
+    return { timeMin, timeMax: new Date(Math.max(occ, now.getTime()) + 8 * 86400000) };
+  }
+  const { y, m, d } = mskNowParts(now);
+  const weeks = Math.max(1, opts.weeks ?? AVAILABILITY_WEEKS);
   // +7 дней на ближайшее наступление + недели повторений + сутки запаса.
-  const timeMax = mskWallToInstant(y, m, d + 7 + Math.max(1, weeks) * 7 + 1, 0);
+  const timeMax = mskWallToInstant(y, m, d + 7 + weeks * 7 + 1, 0);
   return { timeMin, timeMax };
 }
 
@@ -95,21 +115,23 @@ function nextOccurrence(weekday: number, hh: number, mm: number, now: Date): Dat
 }
 
 // Строит «обезличенную» неделю: доступные дни (из WORK_HOURS) со своей сеткой слотов —
-// у каждого дня своё рабочее окно. start слота — ISO ближайшего будущего наступления
-// (для записи серия начнётся с него). Слот занят, если хотя бы одно из ближайших
-// `weeks` наступлений занято.
+// у каждого дня своё рабочее окно. start слота — ISO момента, на который запись
+// реально уйдёт, а busy считается ровно по тем наступлениям, которые она займёт:
 //
-// weeks — на сколько недель вперёд смотреть. Для еженедельной серии это
-// AVAILABILITY_WEEKS: время закрепляется за учеником надолго, и занятое через
-// неделю время предлагать нельзя. Для РАЗОВОЙ записи (пробное занятие) weeks = 1:
-// занятие всего одно, и свободный на этой неделе слот обязан быть доступен, даже
-// если со следующих недель в нём стоят чужие занятия.
+//   еженедельная серия  — ближайшее наступление + AVAILABILITY_WEEKS−1 повторений
+//                         (время закрепляется надолго, занятое через неделю не годится);
+//   разовая запись      — только ближайшее наступление (пробное занятие одно);
+//   разовый перенос     — только та дата, в неделю которой сдвинут слот.
+//
+// Правило «одно занятие — одна проверка» и есть суть: раньше сетка была общей и
+// требовала свободных четырёх недель подряд даже там, где занимается один час.
 export function buildWeek(
   busy: BusyEvent[],
   now = new Date(),
-  weeks = AVAILABILITY_WEEKS
+  opts: WeekOptions = {}
 ): DaySlots[] {
   const days: DaySlots[] = [];
+  const weeks = opts.occIso ? 1 : Math.max(1, opts.weeks ?? AVAILABILITY_WEEKS);
 
   for (const weekday of WEEK_ORDER) {
     const win = dayWindow(weekday);
@@ -134,10 +156,16 @@ export function buildWeek(
       const hr = Math.floor(min / 60);
       const mn = min % 60;
       const first = nextOccurrence(weekday, hr, mn, now);
+      // Разовый перенос: сетка показывает неделю переносимого занятия, а не
+      // ближайшую. Сдвиг делает сервер, чтобы дата в чипе дня, проверка занятости
+      // и время, которое уйдёт в запись, были одним и тем же моментом.
+      const start = opts.occIso
+        ? new Date(shiftIntoWeekOf(first.toISOString(), opts.occIso, now))
+        : first;
 
       let isBusy = false;
-      for (let w = 0; w < Math.max(1, weeks); w++) {
-        const s = new Date(first.getTime() + w * 7 * 86400000);
+      for (let w = 0; w < weeks; w++) {
+        const s = new Date(start.getTime() + w * 7 * 86400000);
         const e = new Date(s.getTime() + SLOT_MINUTES * 60000);
         if (overlaps(s, e, busy)) {
           isBusy = true;
@@ -146,7 +174,7 @@ export function buildWeek(
       }
 
       slots.push({
-        start: first.toISOString(),
+        start: start.toISOString(),
         time: `${String(hr).padStart(2, "0")}:${String(mn).padStart(2, "0")}`,
         busy: isBusy,
       });

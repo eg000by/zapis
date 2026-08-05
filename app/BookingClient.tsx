@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { groupConsecutive } from "@/lib/blocks";
 import { SLOT_MINUTES, SLOT_STEP_MINUTES } from "@/lib/config";
-import { shiftIntoWeekOf } from "@/lib/slots";
 import ContactFooter from "./ContactFooter";
 
 interface Slot {
@@ -273,9 +272,21 @@ export default function BookingClient({
     }
   }, [rescheduling, pickingNew]);
 
-  // Пробное занятие разовое: сетку просим с учётом одной недели, иначе свободный
-  // час выглядел бы занятым из-за чужой серии со следующих недель.
-  const slotsUrl = trial ? "/api/slots?trial=1" : "/api/slots";
+  // Какую сетку просить у сервера. Занятие, которое занимает время лишь однажды
+  // (пробное; разовый перенос одного занятия серии), не должно упираться в чужие
+  // занятия следующих недель — иначе свободный час выглядит занятым.
+  // Для разового переноса сервер ещё и сдвигает слоты в неделю переносимого
+  // занятия, поэтому в чипах дней стоят настоящие даты, а start слота — то самое
+  // время, которое уйдёт в запрос переноса.
+  const gridOcc = rsKind === "move" && rsMode === "once" && rsOcc ? rsOcc : null;
+  // Ручная перезагрузка сетки — через счётчик, а не прямым вызовом (см. эффект ниже).
+  const [slotsNonce, setSlotsNonce] = useState(0);
+  const reloadSlots = () => setSlotsNonce((n) => n + 1);
+  const slotsUrl = gridOcc
+    ? `/api/slots?occ=${encodeURIComponent(gridOcc)}`
+    : trial
+      ? "/api/slots?trial=1"
+      : "/api/slots";
 
   function loadSlots() {
     setDays(null);
@@ -330,10 +341,18 @@ export default function BookingClient({
   }
 
   useEffect(() => {
-    loadSlots();
     loadMy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Сетка перезагружается ровно из одного места: при первом открытии, при смене
+  // недели разового переноса и по reloadSlots() после успешных записи/отмены/
+  // переноса. Иначе два запроса (смена gridOcc и ручной вызов) гонялись бы за
+  // право показать свой результат — и на экране могла остаться чужая неделя.
+  useEffect(() => {
+    loadSlots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridOcc, slotsNonce]);
 
   function toggleSlot(start: string) {
     // Пробное занятие одно — выбор одиночный (новый клик заменяет прежний слот).
@@ -406,8 +425,9 @@ export default function BookingClient({
     if (!rsEvent) return;
     setBusyAction(true);
     setNotice(null);
-    // Для разового переноса слот сетки сдвигаем в неделю переносимого занятия.
-    const target = rsMode === "once" && rsOcc ? shiftIntoWeekOf(start, rsOcc) : start;
+    // Слот сетки уже стоит на нужной дате: для разового переноса сервер построил
+    // её на неделю переносимого занятия (см. gridOcc), и досдвигать нечего.
+    const target = start;
     try {
       const res = await fetch("/api/reschedule", {
         method: "POST",
@@ -428,7 +448,7 @@ export default function BookingClient({
       } else {
         resetRs();
         setNotice(`Перенесено на ${data.when}. Ждём подтверждения преподавателя.`);
-        loadSlots();
+        reloadSlots();
         loadMy();
       }
     } catch {
@@ -474,7 +494,7 @@ export default function BookingClient({
       else {
         resetRs();
         setNotice(mode === "once" ? "Занятие отменено." : "Запись отменена.");
-        loadSlots();
+        reloadSlots();
         loadMy();
       }
     } catch {
@@ -500,7 +520,7 @@ export default function BookingClient({
       if (!res.ok) setNotice(data.error || "Не удалось вернуть занятие.");
       else {
         setNotice(`Занятие возвращено на ${data.when}.`);
-        loadSlots();
+        reloadSlots();
         loadMy();
       }
     } catch {
@@ -546,7 +566,7 @@ export default function BookingClient({
       setSelected([]);
       setPickingNew(false);
       setSubmitting(false);
-      loadSlots();
+      reloadSlots();
       loadMy();
     } catch {
       setFormError("Ошибка сети. Попробуйте ещё раз.");

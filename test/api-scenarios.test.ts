@@ -441,6 +441,43 @@ describe("/api/reschedule — одно занятие серии", () => {
     expect(recolorStudent).toHaveBeenCalledWith("stu-1");
   });
 
+  // Двигаем ОДНО занятие, поэтому и проверять надо одну дату. Раньше сетка для
+  // переноса была общей — требовала свободных четырёх недель подряд, и слот,
+  // свободный ровно в нужную неделю, показывался занятым.
+  it("сетка переноса смотрит только на неделю переносимого занятия", async () => {
+    const id = await bookConfirmed();
+    // Чужая серия по четвергам, но НЕ на той неделе, куда переносим (23 июля).
+    seedEvent({
+      summary: "Чужое занятие",
+      start: { dateTime: "2026-07-30T06:00:00.000Z" },
+      end: { dateTime: "2026-07-30T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;COUNT=26"],
+    });
+
+    const mod = await import("@/app/api/slots/route");
+    const thu = async (url: string) => {
+      const d = await (await mod.GET(new Request(url))).json();
+      return d.days.find((x: any) => x.weekday === "Чт").slots.find((s: any) => s.time === "09:00");
+    };
+
+    // Обычная сетка (еженедельная серия) четверг закрывает — время занято через неделю.
+    expect((await thu("http://test/api/slots")).busy).toBe(true);
+    // Сетка разового переноса занятия 21 июля: слот стоит на 23 июля и свободен.
+    const once = await thu(`http://test/api/slots?occ=${encodeURIComponent(TUE2_9)}`);
+    expect(once.start).toBe(THU2_9);
+    expect(once.busy).toBe(false);
+
+    // И перенос по этому слоту действительно проходит — сетка не обманывает.
+    const r = await post("reschedule", {
+      token: TOKEN(),
+      eventId: id,
+      mode: "once",
+      occStart: TUE2_9,
+      start: once.start,
+    });
+    expect(r.status).toBe(200);
+  });
+
   it("нельзя лечь поверх занятия своей же серии → 409", async () => {
     const id = await bookConfirmed();
     const r = await post("reschedule", {

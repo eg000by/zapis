@@ -286,6 +286,14 @@ test("панель переноса раскрывается под своей �
 
 test("перенос серии: выбор «одно занятие / каждую неделю», затем даты", async ({ page }) => {
   await mockApi(page, { my: MY_FULL });
+  const slotUrls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/slots")) slotUrls.push(r.url());
+  });
+  const posted: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/reschedule")) posted.push(r.postData() || "");
+  });
   await page.goto(tokenUrl());
 
   await page.getByRole("button", { name: "Перенести" }).click();
@@ -296,10 +304,21 @@ test("перенос серии: выбор «одно занятие / кажд
   // Даты приходят из /api/occurrences (замокан): два ближайших вторника.
   await expect(page.locator(".choice-row .mini")).toHaveCount(3); // 2 даты + «Закрыть»
 
-  // Выбор даты открывает сетку для нового времени.
-  await page.locator(".choice-row .mini").first().click();
+  // Выбор даты открывает сетку для нового времени. Берём ВТОРУЮ дату (21 июля) —
+  // на ней видно, что неделю подставляет сервер, а не клиент.
+  await page.locator(".choice-row .mini").nth(1).click();
   await expect(page.getByText("Выберите новое время ниже для переноса.")).toBeVisible();
   await expect(page.locator(".slots-grid")).toBeVisible();
+
+  // Сетка перезапрошена под неделю выбранного занятия: двигаем один час — и
+  // занятость проверяется только на его дату, а не на месяц вперёд.
+  await expect.poll(() => slotUrls.at(-1)).toContain("occ=2026-07-21T07%3A00%3A00.000Z");
+
+  // Слот сетки уходит в перенос как есть: сдвиг в нужную неделю уже сделан на
+  // сервере (замоканная сетка отдаёт свои даты — их и ждём). Раньше клиент двигал
+  // время сам, и оно расходилось с тем, по чему проверялась занятость.
+  await page.locator(".slot:not(.busy)").first().click();
+  await expect.poll(() => posted.at(-1)).toContain('"start":"2026-07-14T07:00:00.000Z"');
 });
 
 test("«＋ Записаться на другое время» открывает сетку у ученика с записями", async ({ page }) => {
