@@ -174,11 +174,10 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
   if (data.startsWith("arch:")) {
-    const nowArchived = await toggleStudentArchive(chatId, messageId, data.slice(5));
-    await answerCallback(
-      cq.id,
-      nowArchived == null ? "" : nowArchived ? "В архиве 🗄" : "Снова активен ♻️"
-    );
+    // Текст ответа собирает сам toggleStudentArchive: архивация ещё и снимает
+    // будущие занятия с календаря, и число снятых важно видеть сразу.
+    const note = await toggleStudentArchive(chatId, messageId, data.slice(5));
+    await answerCallback(cq.id, note ?? "");
     return ok();
   }
   // Мастер добавления нового ученика.

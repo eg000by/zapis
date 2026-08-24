@@ -5,7 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { students, type Student } from "./schema";
 import { detectExamTariff } from "./config";
-import { applyMeetLinkToEvents } from "./google";
+import { applyMeetLinkToEvents, deleteFutureEventsForContact } from "./google";
 
 // Заводит или обновляет ученика по contactKey (HMAC имени+предмета+tg, lib/link.ts).
 // contactKey стабилен для связки имя/предмет/tg, поэтому повторная бронь того же
@@ -127,6 +127,35 @@ export async function promoteStudentToFull(
   const rate = explicit || fallback;
   await updateStudent(id, { trial: false, ...(rate > 0 ? { rateKopecks: rate } : {}) });
   return { ...s, trial: false, rateKopecks: rate > 0 ? rate : s.rateKopecks };
+}
+
+// Архив/возврат из архива. Общая операция для /admin и бота — иначе поверхности
+// разъезжаются: в боте кнопка снимала бы занятия, а в админке нет.
+//
+// Архив означает «ученик больше не занимается»: его будущие занятия снимаются с
+// календаря. Иначе они продолжают держать чужое время в сетке записи, красятся по
+// оплате и порождают уведомления «скоро занятие» — ровно то, чего архив и должен
+// избежать. Прошедшие занятия остаются как история (их не трогаем).
+//
+// Возврат из архива занятия НЕ восстанавливает: удалённое событие календаря вернуть
+// нечем, ученик записывается заново по своей ссылке.
+//
+// Недоступность календаря не отменяет саму архивацию — учётная запись важнее уборки,
+// поэтому сообщаем об этом флагом, а не исключением.
+export async function setStudentArchived(
+  id: string,
+  archived: boolean
+): Promise<{ removed: number; calendarFailed: boolean }> {
+  const s = await getStudent(id);
+  if (!s) return { removed: 0, calendarFailed: false };
+  await updateStudent(id, { active: !archived });
+  if (!archived) return { removed: 0, calendarFailed: false };
+  try {
+    return { removed: await deleteFutureEventsForContact(s.contactKey), calendarFailed: false };
+  } catch (e) {
+    console.error("setStudentArchived: не удалось убрать будущие занятия", id, e);
+    return { removed: 0, calendarFailed: true };
+  }
 }
 
 // Закрепляет ссылку на Телемост за учеником и обновляет её в описании уже созданных

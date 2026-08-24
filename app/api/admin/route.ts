@@ -3,6 +3,7 @@ import {
   deleteStudent,
   getStudent,
   promoteStudentToFull,
+  setStudentArchived,
   setStudentMeetLink,
   updateStudent,
 } from "@/lib/students";
@@ -49,7 +50,9 @@ export async function POST(req: Request) {
       await updateStudent(studentId, { rateKopecks: rub * 100 });
       await recolorSafe(() => recolorStudent(studentId)); // ставка меняет число оплаченных
     } else if (action === "student.active") {
-      await updateStudent(studentId, { active: String(form.get("active")) === "1" });
+      // Тот же сервис, что и кнопка архива в боте: уход в архив снимает будущие
+      // занятия с календаря (паритет поверхностей, см. lib/students.ts).
+      await setStudentArchived(studentId, String(form.get("active")) !== "1");
     } else if (action === "student.meetlink") {
       // Сохраняем ссылку и обновляем её в описании уже созданных событий календаря
       // (общая операция с ботом — lib/students.ts).

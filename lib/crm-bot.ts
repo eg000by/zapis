@@ -13,6 +13,7 @@ import {
   getStudent,
   listStudents,
   promoteStudentToFull,
+  setStudentArchived,
   setStudentMeetLink,
   updateStudent,
   upsertStudent,
@@ -597,20 +598,28 @@ export async function promptDeleteStudent(
 
 // Переключает архив/активность ученика и перерисовывает карточку. Возвращает
 // новое состояние (true = теперь в архиве) или null, если ученик не найден.
+// Возвращает текст для всплывающего ответа на кнопку: архивация ещё и снимает
+// будущие занятия с календаря, и об этом нужно сказать прямо — иначе непонятно,
+// освободилось ли время в сетке записи.
 export async function toggleStudentArchive(
   chatId: number | string,
   messageId: number | null,
   studentId: string
-): Promise<boolean | null> {
+): Promise<string | null> {
   const s = await getStudent(studentId);
   if (!s) {
     await emit(chatId, messageId, "Ученик не найден.");
     return null;
   }
-  const nowArchived = s.active; // был активен → уходит в архив
-  await updateStudent(studentId, { active: !s.active });
+  const archived = s.active; // был активен → уходит в архив
+  const { removed, calendarFailed } = await setStudentArchived(studentId, archived);
   await showStudentCard(chatId, messageId, studentId);
-  return nowArchived;
+
+  if (!archived) return "Снова активен ♻️";
+  if (calendarFailed) return "В архиве 🗄 · календарь недоступен, занятия остались";
+  return removed > 0
+    ? `В архиве 🗄 · будущих занятий снято: ${removed}`
+    : "В архиве 🗄 · будущих занятий не было";
 }
 
 // Удаляет ученика из БД (каскад) и его будущие непроведённые занятия из календаря.
