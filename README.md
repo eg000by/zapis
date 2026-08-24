@@ -14,6 +14,9 @@ and real money.
 - **Booking grid** — an anonymized week (Mon–Sun) of 60-minute slots with 10-minute
   breaks and **per-weekday working hours**; a personal signed link per student
   (`/z/<code>`); recurring weekly series, multi-hour blocks, one-off trial lessons.
+  A date picker jumps the grid to any calendar week three months out, and each
+  booking kind is checked for exactly what it occupies: a weekly series needs the
+  hour free four weeks running, a trial or a single-lesson reschedule only once.
 - **Teacher approves everything in Telegram** — every request/reschedule arrives as a
   message with inline ✅/❌ buttons. Declining a reschedule safely returns the series to
   its previous time (with a stale-revision guard against outdated notifications).
@@ -164,6 +167,9 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
 - **Сетка записи** — обезличенная неделя (Пн–Вс) из часовых слотов с перерывами и
   **рабочими окнами по каждому дню недели**; персональная подписанная ссылка
   (`/z/<code>`); еженедельные серии, блоки из нескольких часов, разовые пробные.
+  Календарь «другая дата» переводит сетку на любую неделю на три месяца вперёд, а
+  занятость проверяется ровно по тому, что запись займёт: еженедельной серии нужен
+  свободный час четыре недели подряд, пробному и разовому переносу — один раз.
 - **Все решения — в Telegram** — каждая заявка и перенос приходят сообщением с
   inline-кнопками ✅/❌. Отклонение переноса безопасно возвращает серию на прежнее
   время (rev-guard отсекает устаревшие уведомления).

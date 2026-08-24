@@ -76,9 +76,14 @@ export interface WeekOptions {
   // Сколько недель подряд слот должен быть свободен. Еженедельная серия занимает
   // время надолго (AVAILABILITY_WEEKS), разовая запись — только один раз (1).
   weeks?: number;
-  // Разовый перенос: ISO занятия, которое двигают. Слоты сдвигаются в его неделю,
-  // а занятость проверяется только на эту дату (weeks игнорируется).
+  // Разовый перенос: ISO занятия, которое двигают. Слоты сдвигаются к его дате
+  // (ближайшее наступление в пределах ±полнедели), weeks при этом равен 1.
   occIso?: string;
+  // «Другая дата»: ISO любой даты — сетка показывает КАЛЕНДАРНУЮ неделю (Пн–Вс),
+  // в которую эта дата попадает, а не ближайшую. Именно календарную, а не «±3 дня
+  // вокруг даты» (как occIso): ученик видит недельную сетку и должен получить
+  // ровно ту неделю, что выбрал, — иначе воскресенье уезжало бы в прошлую.
+  fromIso?: string;
 }
 
 // Окно занятости для обезличенной недели: нужно покрыть ближайшее наступление
@@ -90,17 +95,31 @@ export function weekWindowBounds(
   opts: WeekOptions = {}
 ): { timeMin: Date; timeMax: Date } {
   const timeMin = now;
-  if (opts.occIso) {
-    const occ = new Date(opts.occIso).getTime();
-    // +8 суток: слоты сдвигаются в неделю занятия, а те, что в ней уже прошли, —
-    // ещё неделей позже (см. shiftIntoWeekOf).
-    return { timeMin, timeMax: new Date(Math.max(occ, now.getTime()) + 8 * 86400000) };
+  const weeks = Math.max(1, opts.weeks ?? AVAILABILITY_WEEKS);
+  // Сетку сдвинули на другую неделю — занятость нужна вокруг НЕЁ, иначе ответ
+  // календаря её просто не покрывает и все слоты выглядят свободными.
+  const anchor = opts.fromIso || opts.occIso;
+  if (anchor) {
+    const from = Math.max(new Date(anchor).getTime(), now.getTime());
+    // +7 суток на саму неделю и по 7 на каждое следующее проверяемое повторение.
+    return { timeMin, timeMax: new Date(from + (weeks * 7 + 1) * 86400000) };
   }
   const { y, m, d } = mskNowParts(now);
-  const weeks = Math.max(1, opts.weeks ?? AVAILABILITY_WEEKS);
   // +7 дней на ближайшее наступление + недели повторений + сутки запаса.
   const timeMax = mskWallToInstant(y, m, d + 7 + weeks * 7 + 1, 0);
   return { timeMin, timeMax };
+}
+
+// Понедельник 00:00 МСК той недели, в которую попадает момент.
+function mskMondayOf(d: Date): { y: number; m: number; day: number } {
+  const shifted = new Date(d.getTime() + MSK_OFFSET_MINUTES * 60000);
+  const wd = shifted.getUTCDay(); // 0 = вс
+  const back = (wd + 6) % 7; // сколько дней назад до понедельника
+  return {
+    y: shifted.getUTCFullYear(),
+    m: shifted.getUTCMonth(),
+    day: shifted.getUTCDate() - back,
+  };
 }
 
 // Ближайшее будущее наступление слота (день недели + время hh:mm) в МСК.
@@ -125,6 +144,10 @@ function nextOccurrence(weekday: number, hh: number, mm: number, now: Date): Dat
 //
 // Правило «одно занятие — одна проверка» и есть суть: раньше сетка была общей и
 // требовала свободных четырёх недель подряд даже там, где занимается один час.
+//
+// opts.fromIso сдвигает всю сетку на календарную неделю выбранной даты («записаться
+// не с ближайшей недели, а с любой другой»). Слоты, которые в этой неделе уже
+// прошли, не показываем вовсе — записаться в прошлое всё равно нельзя.
 export function buildWeek(
   busy: BusyEvent[],
   now = new Date(),
@@ -132,6 +155,8 @@ export function buildWeek(
 ): DaySlots[] {
   const days: DaySlots[] = [];
   const weeks = opts.occIso ? 1 : Math.max(1, opts.weeks ?? AVAILABILITY_WEEKS);
+  // Понедельник выбранной недели — точка отсчёта для fromIso.
+  const monday = opts.fromIso ? mskMondayOf(new Date(opts.fromIso)) : null;
 
   for (const weekday of WEEK_ORDER) {
     const win = dayWindow(weekday);
@@ -155,13 +180,20 @@ export function buildWeek(
     for (let min = startMin; min + SLOT_MINUTES <= endMin; min += SLOT_STEP_MINUTES) {
       const hr = Math.floor(min / 60);
       const mn = min % 60;
-      const first = nextOccurrence(weekday, hr, mn, now);
-      // Разовый перенос: сетка показывает неделю переносимого занятия, а не
-      // ближайшую. Сдвиг делает сервер, чтобы дата в чипе дня, проверка занятости
-      // и время, которое уйдёт в запись, были одним и тем же моментом.
-      const start = opts.occIso
-        ? new Date(shiftIntoWeekOf(first.toISOString(), opts.occIso, now))
-        : first;
+      // Сдвиг на другую неделю делает сервер, чтобы дата в чипе дня, проверка
+      // занятости и время, которое уйдёт в запись, были одним и тем же моментом.
+      let start: Date;
+      if (monday) {
+        // Выбранная календарная неделя: понедельник + номер дня недели.
+        start = mskWallToInstant(monday.y, monday.m, monday.day + WEEK_ORDER.indexOf(weekday), hr, mn);
+        if (start.getTime() <= now.getTime()) continue; // этот час уже прошёл
+      } else {
+        const first = nextOccurrence(weekday, hr, mn, now);
+        // Разовый перенос — неделя переносимого занятия вместо ближайшей.
+        start = opts.occIso
+          ? new Date(shiftIntoWeekOf(first.toISOString(), opts.occIso, now))
+          : first;
+      }
 
       let isBusy = false;
       for (let w = 0; w < weeks; w++) {

@@ -178,7 +178,79 @@ body {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 6px;
-  padding: 18px 0 6px;
+  padding: 6px 0 6px;
+}
+
+/* Строка над чипами дней: какая неделя показана и вход в календарь. */
+.week-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 16px 2px 0;
+}
+.week-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.week-label b {
+  color: var(--text);
+}
+.week-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Календарь «другая дата» */
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.cal-wd {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  padding-bottom: 2px;
+}
+.cal-day {
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cal-day:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.cal-day:disabled {
+  background: var(--busy-bg);
+  color: var(--busy-text);
+  cursor: default;
+}
+/* Сегодня — только рамкой: это ориентир, а не выбор. */
+.cal-day.today:not(:disabled) {
+  border-color: var(--accent);
+}
+.cal-day.picked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 .day-chip {

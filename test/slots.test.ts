@@ -163,6 +163,61 @@ describe("buildWeek — обезличенная неделя с окнами п
       expect(timeMax.getTime()).toBeGreaterThan(new Date(OCC).getTime() + 7 * 86400000);
     });
   });
+
+  // «Другая дата»: сетка переезжает на выбранную КАЛЕНДАРНУЮ неделю целиком.
+  // Это не то же самое, что occIso (там — наступления рядом с датой): ученик
+  // видит недельную сетку Пн–Вс и должен получить ровно ту неделю, что выбрал.
+  describe("выбранная неделя (fromIso)", () => {
+    // Полдень среды 26 августа 2026 — этим моментом клиент обозначает выбранную дату.
+    const FROM = "2026-08-26T09:00:00.000Z";
+    const dayOf = (days: ReturnType<typeof buildWeek>, wd: string) =>
+      days.find((d) => d.weekday === wd)!;
+
+    it("вся неделя Пн–Вс выбранной даты, а не «плюс-минус полнедели»", () => {
+      const days = buildWeek([], NOW, { fromIso: FROM });
+      // Пн 24 августа … Вс 30 августа: воскресенье именно ПОСЛЕ среды.
+      expect(dayOf(days, "Пн").slots[0].start).toBe("2026-08-24T12:00:00.000Z"); // 15:00 МСК
+      expect(dayOf(days, "Ср").slots[0].start).toBe("2026-08-26T12:00:00.000Z");
+      expect(dayOf(days, "Сб").slots[0].start).toBe("2026-08-29T06:00:00.000Z"); // 09:00 МСК
+      // Воскресенье — выходной, слотов нет, но день в сетке остаётся.
+      expect(dayOf(days, "Вс").closed).toBe(true);
+    });
+
+    it("занятость проверяется от выбранной недели вперёд", () => {
+      const busy = [
+        // Вт 25 августа, 09:00 МСК — первое наступление выбранной недели.
+        { start: new Date("2026-08-25T06:00:00.000Z"), end: new Date("2026-08-25T07:00:00.000Z") },
+      ];
+      const slot = (opts: Parameters<typeof buildWeek>[2]) =>
+        dayOf(buildWeek(busy, NOW, opts), "Вт").slots.find((s) => s.time === "09:00")!;
+
+      expect(slot({ fromIso: FROM }).busy).toBe(true);
+      // Та же занятость не касается ближайшей недели: это разные даты.
+      expect(slot({}).busy).toBe(false);
+    });
+
+    it("часы, которые в выбранной неделе уже прошли, не показываются", () => {
+      // «Сейчас» — четверг 16 июля, 12:00 МСК; выбрана его же неделя (Пн 13 — Вс 19).
+      // Клиент такую неделю в from не отправляет (для текущей показывается обычная
+      // сетка), но сервер обязан отвечать честно и на неё.
+      const now = new Date("2026-07-16T09:00:00.000Z");
+      const days = buildWeek([], now, { fromIso: "2026-07-16T09:00:00.000Z" });
+      const all = days.flatMap((d) => d.slots);
+
+      expect(all.every((s) => new Date(s.start).getTime() > now.getTime())).toBe(true);
+      // Понедельник, вторник и среда этой недели уже прошли — их в сетке нет.
+      for (const wd of ["Пн", "Вт", "Ср"]) expect(dayOf(days, wd).slots).toHaveLength(0);
+      // Четверг: 09:00–11:20 прошли, с 12:30 записаться ещё можно.
+      expect(dayOf(days, "Чт").slots[0].time).toBe("12:30");
+      // Суббота 18-го — целиком впереди.
+      expect(dayOf(days, "Сб").slots[0].start).toBe("2026-07-18T06:00:00.000Z");
+    });
+
+    it("окно запроса к календарю покрывает выбранную неделю и повторения", () => {
+      const { timeMax } = weekWindowBounds(NOW, { fromIso: FROM, weeks: 4 });
+      expect(timeMax.getTime()).toBeGreaterThan(new Date(FROM).getTime() + 4 * 7 * 86400000);
+    });
+  });
 });
 
 describe("weeklyOccurrences", () => {

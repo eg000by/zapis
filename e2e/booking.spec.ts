@@ -88,6 +88,44 @@ test("мобилка: все 7 дней недели видны и помеща�
   expect(overflow).toBe(0);
 });
 
+// «Другая дата»: сетка по умолчанию показывает ближайшие дни, а календарь
+// позволяет уехать на любую неделю в пределах горизонта — не усложняя саму сетку.
+test("календарь: выбор даты переводит сетку на её неделю", async ({ page }) => {
+  await mockApi(page, { slots: SLOTS_WEEK });
+  const slotUrls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/slots")) slotUrls.push(r.url());
+  });
+  await page.goto(tokenUrl());
+  await expect(page.locator(".slots-grid")).toBeVisible();
+  // По умолчанию — ближайшие дни, без параметров недели.
+  await expect(page.locator(".week-label")).toContainText("Ближайшие дни");
+  expect(slotUrls.at(-1)).not.toContain("from=");
+
+  await page.getByRole("button", { name: "📅 Другая дата" }).click();
+  await expect(page.locator(".cal-grid")).toBeVisible();
+  // Прошедшие даты и выходные выбрать нельзя.
+  expect(await page.locator(".cal-day:disabled").count()).toBeGreaterThan(0);
+
+  // Листаем на следующий месяц и берём первый доступный день — так тест не зависит
+  // от того, какое сегодня число.
+  await page.getByRole("button", { name: "Следующий месяц" }).click();
+  const day = page.locator(".cal-day:not([disabled])").first();
+  const picked = (await day.textContent())!.trim();
+  await day.click();
+
+  // Календарь закрылся, сетка перезапрошена на неделю выбранной даты.
+  await expect(page.locator(".cal-grid")).toHaveCount(0);
+  await expect.poll(() => slotUrls.at(-1)).toContain("from=");
+  await expect(page.locator(".week-label")).toContainText("Неделя");
+  await expect(page.locator(".week-label")).toContainText(picked);
+
+  // И обратно к ближайшей неделе — одной кнопкой.
+  await page.getByRole("button", { name: "← Ближайшие" }).click();
+  await expect(page.locator(".week-label")).toContainText("Ближайшие дни");
+  await expect.poll(() => slotUrls.at(-1)).not.toContain("from=");
+});
+
 test("бронь: слот → «Записаться» → подтверждение → успех", async ({ page }) => {
   await mockApi(page);
   await page.goto(tokenUrl());

@@ -345,6 +345,18 @@ describe("пробная ссылка — одно занятие", () => {
     expect((await post("book", { token: TRIAL(), start: TUE_9 })).status).toBe(200);
   });
 
+  // «Другая дата»: пробное можно поставить не на ближайшую неделю, а на выбранную.
+  it("сетка по выбранной дате показывает её неделю, и запись по ней проходит", async () => {
+    const mod = await import("@/app/api/slots/route");
+    const url = `http://test/api/slots?trial=1&from=${encodeURIComponent(TUE3_9)}`;
+    const d = await (await mod.GET(new Request(url))).json();
+    const tue = d.days.find((x: any) => x.weekday === "Вт").slots.find((s: any) => s.time === "09:00");
+
+    expect(tue.start).toBe(TUE3_9); // вторник 28 июля, а не ближайший 14-й
+    expect(tue.busy).toBe(false);
+    expect((await post("book", { token: TRIAL(), start: tue.start })).status).toBe(200);
+  });
+
   it("после отмены пробного можно записаться заново", async () => {
     await post("book", { token: TRIAL(), start: TUE_9 });
     const id = allStored()[0].id;

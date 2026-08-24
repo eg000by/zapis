@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { groupConsecutive } from "@/lib/blocks";
-import { SLOT_MINUTES, SLOT_STEP_MINUTES } from "@/lib/config";
+import {
+  CALENDAR_MONTHS,
+  MSK_OFFSET_MINUTES,
+  SLOT_MINUTES,
+  SLOT_STEP_MINUTES,
+  dayWindow,
+} from "@/lib/config";
 import ContactFooter from "./ContactFooter";
 
 interface Slot {
@@ -168,6 +174,64 @@ function chipDateMsk(iso: string): string {
   }).format(new Date(iso));
 }
 
+// ── Календарь «другая дата» ───────────────────────────────────────────────────
+// Всё считаем в «стеночных» полях МСК: сервис живёт в одном часовом поясе, и
+// сравнивать даты по локальному времени браузера нельзя — ученик может сидеть
+// во Владивостоке, где «сегодня» наступает на 7 часов раньше.
+const MONTHS_NOM = [
+  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+];
+const MONTHS_GEN = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+const WD_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+interface MskDate {
+  y: number;
+  m: number; // 0-11
+  d: number;
+  wd: number; // 0 = понедельник
+}
+
+// «Стеночная» дата МСК для момента.
+function mskDateOf(t: Date): MskDate {
+  const s = new Date(t.getTime() + MSK_OFFSET_MINUTES * 60000);
+  return {
+    y: s.getUTCFullYear(),
+    m: s.getUTCMonth(),
+    d: s.getUTCDate(),
+    wd: (s.getUTCDay() + 6) % 7,
+  };
+}
+
+// Момент 12:00 МСК указанного дня — им и обозначаем выбранную дату: полдень не
+// съезжает на соседние сутки ни при каких пересчётах.
+function mskNoonIso(y: number, m: number, d: number): string {
+  return new Date(Date.UTC(y, m, d, 12) - MSK_OFFSET_MINUTES * 60000).toISOString();
+}
+
+// Порядковый номер дня (для сравнения дат без времени).
+const dayNo = (x: { y: number; m: number; d: number }) => Date.UTC(x.y, x.m, x.d) / 86400000;
+
+// Понедельник недели, в которую попадает дата.
+const mondayNo = (x: MskDate) => dayNo(x) - x.wd;
+
+// «24–30 августа» / «31 августа – 6 сентября» — календарная неделя выбранной даты.
+// Считается от самой даты, а не от сетки: сетка по умолчанию — это ближайшие семь
+// дней по дням недели, и они могут лежать в двух разных календарных неделях.
+function weekRangeLabel(iso: string): string {
+  const mon0 = mondayNo(mskDateOf(new Date(iso)));
+  const mon = new Date(mon0 * 86400000);
+  const sun = new Date((mon0 + 6) * 86400000);
+  const d1 = mon.getUTCDate();
+  const d2 = sun.getUTCDate();
+  const m1 = MONTHS_GEN[mon.getUTCMonth()];
+  const m2 = MONTHS_GEN[sun.getUTCMonth()];
+  return m1 === m2 ? `${d1}–${d2} ${m1}` : `${d1} ${m1} – ${d2} ${m2}`;
+}
+
 export default function BookingClient({
   token,
   greetName,
@@ -282,11 +346,18 @@ export default function BookingClient({
   // Ручная перезагрузка сетки — через счётчик, а не прямым вызовом (см. эффект ниже).
   const [slotsNonce, setSlotsNonce] = useState(0);
   const reloadSlots = () => setSlotsNonce((n) => n + 1);
-  const slotsUrl = gridOcc
-    ? `/api/slots?occ=${encodeURIComponent(gridOcc)}`
-    : trial
-      ? "/api/slots?trial=1"
-      : "/api/slots";
+  // Выбранная в календаре дата: сетка показывает её календарную неделю. null —
+  // ближайшая неделя (обычный режим). Перекрывает и неделю разового переноса:
+  // если ученик открыл календарь во время переноса, он хочет именно другую неделю.
+  const [weekFrom, setWeekFrom] = useState<string | null>(null);
+  const [calOpen, setCalOpen] = useState(false);
+  const slotsUrl = (() => {
+    const q: string[] = [];
+    if (trial) q.push("trial=1");
+    if (gridOcc) q.push(`occ=${encodeURIComponent(gridOcc)}`);
+    if (weekFrom) q.push(`from=${encodeURIComponent(weekFrom)}`);
+    return q.length ? `/api/slots?${q.join("&")}` : "/api/slots";
+  })();
 
   function loadSlots() {
     setDays(null);
@@ -352,7 +423,61 @@ export default function BookingClient({
   useEffect(() => {
     loadSlots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridOcc, slotsNonce]);
+  }, [gridOcc, weekFrom, slotsNonce]);
+
+  // ── Календарь «другая дата» ────────────────────────────────────────────────
+  // Месяц, открытый в календаре: 0 — текущий, дальше листается до CALENDAR_MONTHS.
+  const [calMonth, setCalMonth] = useState(0);
+
+  const calCells = useMemo(() => {
+    const today = mskDateOf(new Date());
+    const y = new Date(Date.UTC(today.y, today.m + calMonth, 1)).getUTCFullYear();
+    const m = new Date(Date.UTC(today.y, today.m + calMonth, 1)).getUTCMonth();
+    const lead = (new Date(Date.UTC(y, m, 1)).getUTCDay() + 6) % 7; // пустые клетки до 1-го
+    const total = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const pickedNo = weekFrom ? dayNo(mskDateOf(new Date(weekFrom))) : null;
+
+    const cells: {
+      key: string;
+      d: number | null;
+      y: number;
+      m: number;
+      disabled: boolean;
+      isToday: boolean;
+      picked: boolean;
+    }[] = [];
+    for (let i = 0; i < lead; i++) {
+      cells.push({ key: `x${i}`, d: null, y, m, disabled: true, isToday: false, picked: false });
+    }
+    for (let d = 1; d <= total; d++) {
+      const no = dayNo({ y, m, d });
+      // dayWindow работает в номерах JS (0 = воскресенье), сетка календаря — с
+      // понедельника, поэтому день недели берём в «сыром» виде.
+      const closed = !dayWindow(new Date(Date.UTC(y, m, d)).getUTCDay());
+      cells.push({
+        key: `${m}-${d}`,
+        d,
+        y,
+        m,
+        disabled: no < dayNo(today) || closed,
+        isToday: no === dayNo(today),
+        picked: pickedNo === no,
+      });
+    }
+    return { y, m, cells };
+  }, [calMonth, weekFrom]);
+
+  // Выбор даты в календаре: сетка переезжает на её календарную неделю, а активным
+  // становится сам выбранный день. Дату текущей недели в weekFrom не пишем —
+  // обычная сетка и так показывает ближайшие дни (и корректно прячет прошедшие).
+  function pickDate(y: number, m: number, d: number) {
+    const iso = mskNoonIso(y, m, d);
+    const picked = mskDateOf(new Date(iso));
+    const today = mskDateOf(new Date());
+    setWeekFrom(mondayNo(picked) === mondayNo(today) ? null : iso);
+    setActiveDay(picked.wd);
+    setCalOpen(false);
+  }
 
   function toggleSlot(start: string) {
     // Пробное занятие одно — выбор одиночный (новый клик заменяет прежний слот).
@@ -566,6 +691,9 @@ export default function BookingClient({
       setSelected([]);
       setPickingNew(false);
       setSubmitting(false);
+      // Запись создана — следующий заход начинаем с ближайшей недели, а не с той,
+      // куда ученик уходил календарём.
+      setWeekFrom(null);
       reloadSlots();
       loadMy();
     } catch {
@@ -1038,6 +1166,30 @@ export default function BookingClient({
 
       {showGrid && !loadError && days !== null && days.length > 0 && (
         <>
+          {/* Какая неделя в сетке + вход в календарь. Одна строка на всю
+              «гибкость выбора»: сами чипы дней остаются прежними. */}
+          <div className="week-bar">
+            <span className="week-label">
+              {weekFrom ? <>Неделя <b>{weekRangeLabel(weekFrom)}</b></> : "Ближайшие дни"}
+            </span>
+            <span className="week-actions">
+              {weekFrom && (
+                <button className="mini" onClick={() => setWeekFrom(null)}>
+                  ← Ближайшие
+                </button>
+              )}
+              <button
+                className="mini"
+                onClick={() => {
+                  setCalMonth(0);
+                  setCalOpen(true);
+                }}
+              >
+                📅 Другая дата
+              </button>
+            </span>
+          </div>
+
           <div className="day-nav" ref={gridRef}>
             {days.map((d, i) => (
               <button
@@ -1122,6 +1274,66 @@ export default function BookingClient({
           <button className="picker-btn" onClick={() => { setSheetOpen(true); setFormError(null); }}>
             Записаться →
           </button>
+        </div>
+      )}
+
+      {/* Календарь: выбор даты на CALENDAR_MONTHS месяцев вперёд. Открывается по
+          кнопке и не занимает места на экране, пока не нужен. */}
+      {calOpen && (
+        <div className="overlay" onClick={() => setCalOpen(false)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="cal-head">
+              <button
+                className="mini"
+                disabled={calMonth === 0}
+                onClick={() => setCalMonth((c) => Math.max(0, c - 1))}
+                aria-label="Предыдущий месяц"
+              >
+                ‹
+              </button>
+              <b>
+                {MONTHS_NOM[calCells.m]} {calCells.y}
+              </b>
+              <button
+                className="mini"
+                disabled={calMonth >= CALENDAR_MONTHS - 1}
+                onClick={() => setCalMonth((c) => Math.min(CALENDAR_MONTHS - 1, c + 1))}
+                aria-label="Следующий месяц"
+              >
+                ›
+              </button>
+            </div>
+
+            <div className="cal-grid">
+              {WD_SHORT.map((w) => (
+                <span key={w} className="cal-wd">
+                  {w}
+                </span>
+              ))}
+              {calCells.cells.map((c) =>
+                c.d === null ? (
+                  <span key={c.key} />
+                ) : (
+                  <button
+                    key={c.key}
+                    className={`cal-day${c.picked ? " picked" : ""}${c.isToday ? " today" : ""}`}
+                    disabled={c.disabled}
+                    onClick={() => pickDate(c.y, c.m, c.d!)}
+                  >
+                    {c.d}
+                  </button>
+                )
+              )}
+            </div>
+
+            <p className="sheet-note">
+              Выберите день — сетка покажет его неделю. Выходные и прошедшие даты
+              недоступны; занятость каждого часа видна уже в сетке.
+            </p>
+            <button className="btn btn-ghost" onClick={() => setCalOpen(false)}>
+              Закрыть
+            </button>
+          </div>
         </div>
       )}
 
