@@ -70,6 +70,60 @@ export async function findOrCreateOccurrenceLesson(input: {
   return recordLesson({ ...input, status: "done" });
 }
 
+// ── Посещаемость групповых занятий ───────────────────────────────────────────
+// Занятие группы одно на всех, а пришли не все: цвет события тут не поможет (он
+// один на четверых), поэтому пропуск отмечается строкой занятия у КОНКРЕТНОГО
+// ученика — status "missed". Такое занятие не тарифицируется только у него.
+export const MISSED_STATUS = "missed";
+
+// Ставит/снимает пропуск ученика по конкретному повтору. Строку занятия ищем по
+// ученику и точному началу — так же, как заметка к повтору (findOrCreateOccurrenceLesson).
+export async function setAttendance(input: {
+  studentId: string;
+  calendarEventId: string;
+  occurrenceStart: Date;
+  subject?: string | null;
+  present: boolean;
+}): Promise<void> {
+  const [existing] = await db()
+    .select()
+    .from(lessons)
+    .where(
+      and(
+        eq(lessons.studentId, input.studentId),
+        eq(lessons.occurrenceStart, input.occurrenceStart)
+      )
+    )
+    .limit(1);
+  const status = input.present ? "done" : MISSED_STATUS;
+  if (existing) {
+    // Заметку и прочее не трогаем — меняем только статус.
+    if (existing.status !== status) {
+      await db().update(lessons).set({ status }).where(eq(lessons.id, existing.id));
+    }
+    return;
+  }
+  await recordLesson({
+    studentId: input.studentId,
+    calendarEventId: input.calendarEventId,
+    occurrenceStart: input.occurrenceStart,
+    subject: input.subject ?? null,
+    status,
+  });
+}
+
+// Моменты занятий, которые ученик пропустил (ISO начала). Балансовый проход
+// исключает их из тарификации — как серый цвет у индивидуального занятия.
+export async function missedStarts(studentId: string): Promise<Set<string>> {
+  const rows = await db()
+    .select({ occurrenceStart: lessons.occurrenceStart })
+    .from(lessons)
+    .where(and(eq(lessons.studentId, studentId), eq(lessons.status, MISSED_STATUS)));
+  const out = new Set<string>();
+  for (const r of rows) if (r.occurrenceStart) out.add(new Date(r.occurrenceStart).toISOString());
+  return out;
+}
+
 // Синхронизация статуса занятия с решением по заявке в календаре
 // (подтверждение/отклонение из Telegram, отмена). По calendar_event_id.
 export async function setLessonStatusByEvent(

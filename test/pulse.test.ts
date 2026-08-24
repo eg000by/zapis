@@ -171,5 +171,14 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     const res = await call();
     expect(await res.json()).toMatchObject({ sent: 1, billed: 2 });
     expect(vi.mocked(ensureAutoInvoices).mock.calls.map((c) => c[0])).toEqual(["s1", "s2"]);
+
+    // У группы спрашиваем «кто был», а не «как прошло»: пришли не все — и один цвет
+    // события об этом сказать не может.
+    const [text, kb] = vi.mocked(sendOwner).mock.calls[0] as [string, any];
+    expect(text).toContain("Кто был?");
+    const buttons = kb.inline_keyboard.flat().map((b: any) => b.text);
+    expect(buttons).toContain("✅ Егор");
+    expect(buttons).toContain("✅ Дима");
+    expect(buttons).toContain("💾 Готово");
   });
 });

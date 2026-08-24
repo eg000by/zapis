@@ -19,6 +19,7 @@ import {
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
+import { applyAttendance, toggleAttendance } from "@/lib/attendance";
 import {
   confirmDeleteGroup,
   joinGroup,
@@ -190,6 +191,27 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  // ── Посещаемость группы ──────────────────────────────────────────────────
+  // Состояние экрана лежит в самих кнопках сообщения (в callback_data id занятия
+  // и ученика вместе не помещаются), поэтому обработчикам нужна его клавиатура.
+  if (data.startsWith("att:")) {
+    const note = await toggleAttendance(
+      chatId,
+      messageId ?? 0,
+      cq.message?.reply_markup,
+      Number(data.slice(4))
+    );
+    await answerCallback(cq.id, note);
+    return ok();
+  }
+  if (data.startsWith("attok:")) {
+    await answerCallback(
+      cq.id,
+      await applyAttendance(chatId, messageId ?? 0, data.slice(6), cq.message?.reply_markup)
+    );
+    return ok();
+  }
+
   // ── Группы ───────────────────────────────────────────────────────────────
   if (data === "grps") {
     await showGroupsList(chatId, messageId);

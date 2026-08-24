@@ -26,7 +26,9 @@ and real money.
   booking grid at all (the slot belongs to four people) — instead it shows the roster,
   the payment card and a single "can't make it" button that pings the teacher without
   touching the calendar. Group lessons are deliberately left uncoloured: one colour
-  cannot tell the truth about four different balances.
+  cannot tell the truth about four different balances. After the lesson the bot asks
+  *who showed up* instead of "how did it go" — attendance is per student, so a missed
+  lesson drops out of that student's billing while the shared event stays untouched.
 - **Full CRM in the same bot** — students list, per-student card, invoices, notes,
   archive; the `/admin` web page exposes the same service layer (feature parity by design).
 - **Money** — hourly rate per student; a pure "balance walk" allocates paid hours over
@@ -77,7 +79,7 @@ Key decisions:
 
 ## Testing
 
-296 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+306 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
@@ -186,7 +188,9 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
   кабинете нет сетки записи вовсе (время общее на четверых) — вместо неё состав
   группы, оплата и одна кнопка «не смогу прийти», которая предупреждает преподавателя
   и ничего не двигает. Групповые занятия намеренно не красятся: один цвет не может
-  быть правдой сразу для четырёх балансов.
+  быть правдой сразу для четырёх балансов. После занятия бот спрашивает не «как
+  прошло», а «кто был»: пропуск персональный — занятие выпадает из тарификации
+  только у того, кого не было, а общее событие остаётся нетронутым.
 - **CRM в том же боте** — список учеников, карточка, счета, заметки, архив; веб-админка
   `/admin` работает поверх того же сервисного слоя (паритет поверхностей).
 - **Деньги** — ставка ₽/час; «балансовый проход» раскладывает оплаченные часы по
@@ -210,7 +214,7 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
 
 ## Тесты
 
-296 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
+306 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,

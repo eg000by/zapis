@@ -10,6 +10,7 @@ import { escapeHtml, inlineKeyboard, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
 import { ensureAutoInvoices } from "./autobill";
 import { activeMembers } from "./groups";
+import { attendanceKeyboard } from "./attendance";
 
 // Конец блока из N часов: (N-1) полных шагов сетки + само занятие.
 function blockEndMs(start: Date, hours: number): number {
@@ -34,8 +35,26 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
       // Групповое занятие касается всех участников: счёт после занятия должен
       // появиться у каждого, а не потеряться из-за пустого studentId. У обычного
       // занятия ученик уже известен из события — лишний запрос в БД не делаем.
-      if (o.groupId) for (const m of await activeMembers(o.groupId)) toBill.set(m.id, m.name);
+      const members = o.groupId ? await activeMembers(o.groupId) : [];
+      if (o.groupId) for (const m of members) toBill.set(m.id, m.name);
       else if (o.studentId) toBill.set(o.studentId, o.student || "");
+
+      // У группы спрашиваем не «как прошло», а «кто был»: пришли не все — и цвет
+      // одного события про это сказать не может. По умолчанию отмечены все: обычный
+      // случай — полный состав, и тогда достаточно нажать «Готово».
+      if (o.groupId && members.length) {
+        await sendOwner(
+          `🏁 <b>Занятие группы завершилось</b>\n\n👥 ${escapeHtml(o.student || "")} · ${escapeHtml(
+            o.subject
+          )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n` +
+            `Кто был? Нажмите на того, кого не было, — и «Готово».`,
+          inlineKeyboard(attendanceKeyboard(members, o.instanceId))
+        );
+        await recordPing(o.instanceId);
+        sent++;
+        continue;
+      }
+
       await sendOwner(
         `🏁 <b>Занятие завершилось</b>\n\n🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(
           o.subject

@@ -11,6 +11,7 @@ import { getStudent } from "./students";
 import { getGroup } from "./groups";
 import type { Student } from "./schema";
 import { paidHoursBreakdown } from "./payments";
+import { missedStarts } from "./lessons";
 import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // Занятия, исключённые из тарификации: пропуск (серый) и бесплатное (пробное).
@@ -122,8 +123,13 @@ export async function computeStudentBalance(
     packageLessons
   );
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
+  //
+  // У группы занятие одно на всех, и цвет события про пропуск одного участника
+  // сказать не может — поэтому пропуски там персональные: строка занятия со
+  // статусом missed (посещаемость отмечается в боте после занятия).
+  const missed = group ? await missedStarts(s.id) : new Set<string>();
   const occ = (await listContactOccurrences(group ? group.contactKey : s.contactKey)).filter(
-    (o) => !isUntariffed(o.colorId)
+    (o) => !isUntariffed(o.colorId) && !missed.has(o.start.toISOString())
   );
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
   // Остаток на балансе = все полученные деньги (включая пакетные) минус стоимость

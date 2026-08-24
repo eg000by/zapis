@@ -8,6 +8,7 @@ import { listContactOccurrences, setEventColor } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { getGroup } from "@/lib/groups";
 import { sumPaidKopecks } from "@/lib/payments";
+import { missedStarts } from "@/lib/lessons";
 
 vi.mock("@/lib/google", () => ({
   CALENDAR_ID: "cal",
@@ -19,6 +20,8 @@ vi.mock("@/lib/google", () => ({
   applyMeetLinkToEvents: vi.fn(async () => 0),
 }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn() }));
+// Посещаемость участника группы (пропуски) — своя ветка, проверяется ниже отдельно.
+vi.mock("@/lib/lessons", () => ({ missedStarts: vi.fn(async () => new Set<string>()) }));
 vi.mock("@/lib/groups", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/groups")>();
   return { ...actual, getGroup: vi.fn(), activeMembers: vi.fn(async () => []) };
@@ -78,6 +81,7 @@ beforeEach(() => {
   vi.mocked(getGroup).mockResolvedValue(GROUP as never);
   vi.mocked(sumPaidKopecks).mockResolvedValue(0);
   vi.mocked(listContactOccurrences).mockResolvedValue([]);
+  vi.mocked(missedStarts).mockResolvedValue(new Set());
 });
 
 describe("баланс участника группы", () => {
@@ -110,6 +114,25 @@ describe("баланс участника группы", () => {
     vi.mocked(getGroup).mockResolvedValue({ ...GROUP, rateKopecks: 0 } as never);
     vi.mocked(listContactOccurrences).mockResolvedValue([occ(PAST)] as never);
     expect(await computeStudentBalance("stu-1")).toBeNull();
+  });
+});
+
+describe("посещаемость", () => {
+  it("пропущенное участником занятие не тарифицируется ЕМУ одному", async () => {
+    // Занятие в календаре одно на всех и остаётся нетронутым: пропуск персональный.
+    vi.mocked(listContactOccurrences).mockResolvedValue([occ(PAST), occ(FUT)] as never);
+    vi.mocked(missedStarts).mockResolvedValue(new Set([PAST]));
+
+    const b = (await computeStudentBalance("stu-1"))!;
+    expect(b.debtHours).toBe(0); // прошедшее занятие пропущено — долга нет
+    expect(b.items.map((i) => i.start.toISOString())).toEqual([FUT]);
+  });
+
+  it("пропуски спрашиваются только по участникам группы", async () => {
+    vi.mocked(getStudent).mockResolvedValue({ ...MEMBER, groupId: null } as never);
+    await computeStudentBalance("stu-1");
+    // У индивидуального занятия пропуск отмечается серым цветом события.
+    expect(missedStarts).not.toHaveBeenCalled();
   });
 });
 

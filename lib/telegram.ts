@@ -83,6 +83,21 @@ export async function editMessageText(
   });
 }
 
+// Меняет только клавиатуру сообщения. Нужна там, где состояние живёт в самих
+// кнопках (отметка посещаемости группы): переписывать текст ради галочки нельзя —
+// он собран с HTML-разметкой, и в callback его исходник уже не восстановить.
+export async function editMessageReplyMarkup(
+  chatId: number | string,
+  messageId: number,
+  replyMarkup: unknown
+): Promise<void> {
+  await api("editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: replyMarkup,
+  });
+}
+
 // Telegram не обрезает длинные сообщения, а отвечает ошибкой — экран просто не
 // открывается, и кнопка выглядит сломанной (api() ошибку только логирует). Режем
 // сами, по границе строк: строка целиком либо не входит вовсе, поэтому HTML-теги
