@@ -9,6 +9,8 @@
 // уже начавшееся занятие в окно не входит.
 import { listDayOccurrences } from "./google";
 import { getStudent } from "./students";
+import { activeMembers, getGroup } from "./groups";
+import type { Student } from "./schema";
 import { listStudentLessons } from "./lessons";
 import { pingSent, recordPing } from "./pings";
 import { notifyStudent } from "./notify";
@@ -79,13 +81,21 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
   let sent = 0;
   for (const o of occ) {
     try {
-      if (!o.studentId) continue;
+      if (!o.studentId && !o.groupId) continue;
       if (o.colorId === MISSED_COLOR_ID) continue; // помечено пропуском заранее
       const key = `soon:${o.instanceId}`;
       if (await pingSent(key)) continue;
 
-      const student = await getStudent(o.studentId).catch(() => null);
-      const meet = student?.meetLink || "";
+      // Групповое занятие касается всех участников: преподавателю пишем один раз,
+      // ученикам — каждому. Ссылка на занятие у группы своя, общая.
+      const group = o.groupId ? await getGroup(o.groupId).catch(() => null) : null;
+      const student = group ? null : await getStudent(o.studentId).catch(() => null);
+      const members: Student[] = group
+        ? await activeMembers(group.id).catch(() => [])
+        : student
+          ? [student]
+          : [];
+      const meet = group ? group.meetLink : student?.meetLink || "";
 
       // Сколько осталось — НЕ пишем: прогон крона может опоздать или прийти раньше,
       // и «через 45 минут» окажется враньём. Время начала верно всегда.
@@ -97,14 +107,15 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
           `🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(o.subject)}\n` +
           `🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n` +
           `${meetLine}\n\n` +
-          `${await previousLessonLine(o.studentId, now)}`
+          `${o.groupId ? `👥 Участников: ${members.length}` : await previousLessonLine(o.studentId, now)}`
       );
 
-      // Ученику — то же напоминание и та же ссылка (если подключил уведомления).
-      if (student?.tgChatId) {
-        const contact = teacherTgUrl();
+      // Ученикам — то же напоминание и та же ссылка (кому подключены уведомления).
+      const contact = teacherTgUrl();
+      for (const m of members) {
+        if (!m.tgChatId) continue;
         await notifyStudent(
-          student,
+          m,
           `⏰ <b>Скоро занятие</b>\n\n` +
             `Начало в ${hmMsk(o.start)} (МСК).\n` +
             (meet ? `🎥 Подключиться: ${meet}\n` : "") +

@@ -42,6 +42,8 @@ import {
   summarizeOutstanding,
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
+import { applyGroupInput } from "./group-bot";
+import { getGroup } from "./groups";
 import { ensureAutoInvoices } from "./autobill";
 import { clearState, getState, setState } from "./botstate";
 import { contactKey } from "./link";
@@ -109,8 +111,9 @@ export async function showStudentsList(
   }
 
   const rows: TgButton[][] = [
-    [{ text: "➕ Новый ученик", data: "newstu" }, { text: "📊 Доходы", data: "stats" }],
-    [{ text: "🗓 Загрузка", data: "load" }, { text: "🧾 Долги", data: "debts" }],
+    [{ text: "➕ Новый ученик", data: "newstu" }, { text: "👥 Группы", data: "grps" }],
+    [{ text: "📊 Доходы", data: "stats" }, { text: "🗓 Загрузка", data: "load" }],
+    [{ text: "🧾 Долги", data: "debts" }],
   ];
   for (const s of active) rows.push([{ text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` }]);
   if (inArchive.length) rows.push([{ text: `🗄 Архив (${inArchive.length})`, data: "stusarch" }]);
@@ -130,6 +133,9 @@ export async function showStudentCard(
     await emit(chatId, messageId, "Ученик не найден.");
     return;
   }
+  // Участник группы занимается по её расписанию и цене — это первое, что должно
+  // быть видно в карточке (иначе непонятно, почему личная ставка не при делах).
+  const group = s.groupId ? await getGroup(s.groupId).catch(() => null) : null;
   const outstanding = await outstandingPayments(s.id);
   // Долгом считаем только счета за проведённые занятия: счёт «вперёд» и пакетный
   // оффер — предоплата, ученик по ним ничего не задолжал.
@@ -138,6 +144,9 @@ export async function showStudentCard(
   const lines = [
     `🧑‍🎓 <b>${escapeHtml(s.name)}</b>${s.trial ? " · 🎯 пробный" : ""}${s.active ? "" : " · 🚫 архив"}`,
     `📚 ${escapeHtml(s.subject)}${s.tg ? ` · ${escapeHtml(s.tg)}` : ""}`,
+    ...(group
+      ? [`👥 Группа: <b>${escapeHtml(group.name)}</b> · ${rub(group.rateKopecks)} ₽ за занятие`]
+      : []),
     `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
   ];
   if (out.advanceKopecks > 0) lines.push(`⏭ Выставлено вперёд: ${rub(out.advanceKopecks)} ₽`);
@@ -1013,6 +1022,11 @@ export async function applyPendingInput(chatId: number | string, text: string): 
   const st = await getState(String(chatId));
   if (!st) return false;
   const value = text.trim();
+
+  // Ввод по группам живёт в своём модуле (lib/group-bot.ts) — здесь только развилка.
+  if (st.action.startsWith("grp.") && (await applyGroupInput(chatId, st.action, st.targetId, value))) {
+    return true;
+  }
 
   if (st.action === "stu.new.name") {
     if (!value) {

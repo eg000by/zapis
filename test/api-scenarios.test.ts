@@ -744,6 +744,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       nextLesson: null,
       lessonPriceKopecks: 0,
       tgNotify: null,
+      group: null,
     });
   });
 

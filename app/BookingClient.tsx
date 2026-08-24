@@ -43,6 +43,14 @@ interface MyPayment {
   kind: string; // manual | debt | advance
 }
 
+// Группа: расписание общее, деньги у каждого свои. Список участников — только имена.
+interface GroupInfo {
+  name: string;
+  subject: string;
+  members: string[];
+  limit: number;
+}
+
 // Оплаченный счёт — история оплат в кабинете.
 interface PaidRow {
   id: string;
@@ -269,6 +277,11 @@ export default function BookingClient({
   const [meetLink, setMeetLink] = useState<string>("");
   // Подключение уведомлений в Telegram: deep-link на бота + подключено ли уже.
   const [tgNotify, setTgNotify] = useState<{ url: string; connected: boolean } | null>(null);
+  // Группа, если ученик занимается в группе. Тогда кабинет — «панель»: расписание
+  // общее на всех, поэтому ни сетки записи, ни переносов, ни отмен здесь нет.
+  const [group, setGroup] = useState<GroupInfo | null>(null);
+  // По каким занятиям уже нажали «Не смогу прийти» (ISO начала) — кнопка одноразовая.
+  const [skipped, setSkipped] = useState<string[]>([]);
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
@@ -303,7 +316,9 @@ export default function BookingClient({
   // загрузка) сетку не показываем — иначе у ученика с записями мелькает «25-й кадр»
   // с расписанием, которое тут же сменяется его кабинетом.
   const myLoading = my === null;
-  const showGrid = (!myLoading && !hasBookings) || rescheduling || pickingNew;
+  // Участник группы сетку не видит никогда: время общее на четверых, и один ученик
+  // не может ни выбрать его, ни подвинуть. Его кабинет — расписание, ссылка и оплата.
+  const showGrid = !group && ((!myLoading && !hasBookings) || rescheduling || pickingNew);
 
   // Деньги — одним блоком: сколько платить сейчас и из чего это состоит.
   // Долгом считаем счета за уже проведённые занятия и ручные (kind ≠ advance),
@@ -386,6 +401,7 @@ export default function BookingClient({
         setLessonPrice(d.lessonPriceKopecks || 0);
         setMeetLink(d.meetLink || "");
         setTgNotify(d.tgNotify || null);
+        setGroup(d.group || null);
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
@@ -629,6 +645,32 @@ export default function BookingClient({
     }
   }
 
+  // «Не смогу прийти» (группа): предупреждает преподавателя и ничего не двигает.
+  async function reportAbsence(ev: MyEvent) {
+    if (!confirm(`Предупредить преподавателя, что вас не будет ${fmtMsk(ev.start, ev.lessons)}?`)) {
+      return;
+    }
+    setBusyAction(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/absence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, start: ev.start }),
+      });
+      const data = await res.json();
+      if (!res.ok) setNotice(data.error || "Не удалось отправить. Напишите преподавателю.");
+      else {
+        setSkipped((cur) => [...cur, ev.start]);
+        setNotice("Преподаватель предупреждён. Занятие остаётся в расписании группы.");
+      }
+    } catch {
+      setNotice("Ошибка сети. Попробуйте ещё раз.");
+    } finally {
+      setBusyAction(false);
+    }
+  }
+
   // Вернуть разово перенесённое занятие на его исходное (до переноса) время.
   async function returnEvent(ev: MyEvent) {
     const where = ev.origStart ? ` (${fmtMsk(ev.origStart, ev.lessons)})` : "";
@@ -816,6 +858,10 @@ export default function BookingClient({
               {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"}{" "}
               по предмету «<b>{subject}</b>».
             </>
+          ) : group ? (
+            <>
+              Занятия в группе «<b>{group.name}</b>» — {group.subject}.
+            </>
           ) : (
             <>
               Ваши занятия и оплата по предмету «<b>{subject}</b>».
@@ -896,38 +942,54 @@ export default function BookingClient({
                     {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
                   </span>
                 </div>
-                <div className="my-actions">
-                  <button
-                    className="mini"
-                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                    onClick={() => startReschedule(ev)}
-                  >
-                    Перенести
-                  </button>
-                  {ev.moved && (
+                {/* В группе занятие общее: перенести или отменить его может только
+                    преподаватель. Ученику оставляем единственное действие — сказать,
+                    что не придёт; календарь при этом не меняется. */}
+                {group ? (
+                  <div className="my-actions">
+                    <button
+                      className="mini"
+                      disabled={busyAction || skipped.includes(ev.start)}
+                      onClick={() => reportAbsence(ev)}
+                    >
+                      {skipped.includes(ev.start) ? "Предупредили ✓" : "Не смогу прийти"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="my-actions">
                     <button
                       className="mini"
                       disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                      onClick={() => returnEvent(ev)}
+                      onClick={() => startReschedule(ev)}
                     >
-                      Вернуть
+                      Перенести
                     </button>
-                  )}
-                  <button
-                    className="mini danger"
-                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                    onClick={() => startCancel(ev)}
-                  >
-                    Отменить
-                  </button>
-                </div>
+                    {ev.moved && (
+                      <button
+                        className="mini"
+                        disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                        onClick={() => returnEvent(ev)}
+                      >
+                        Вернуть
+                      </button>
+                    )}
+                    <button
+                      className="mini danger"
+                      disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                      onClick={() => startCancel(ev)}
+                    >
+                      Отменить
+                    </button>
+                  </div>
+                )}
               </div>
               {/* Выбор «одно занятие / вся серия» — сразу под своей записью. */}
               {rsEvent?.id === ev.id && rsPanel}
             </div>
           ))}
-          {/* Пробное занятие одно — вторую запись не предлагаем. */}
-          {!rsEvent && !pickingNew && !trial && (
+          {/* Пробное занятие одно — вторую запись не предлагаем. В группе записи
+              нет вовсе: время ставит преподаватель. */}
+          {!rsEvent && !pickingNew && !trial && !group && (
             <button
               className="mini"
               style={{ marginTop: 12 }}
@@ -946,6 +1008,32 @@ export default function BookingClient({
       {/* Деньги — ОДИН блок: сумма к оплате, из чего она состоит, срок и способ.
           Раньше здесь были две карточки («Баланс» и «К оплате») с разными числами,
           и было непонятно, какое из них платить. */}
+      {/* Состав группы — только имена: чужие оплаты и контакты не показываем.
+          Свободные места видно сразу, чтобы вопрос «можно позвать друга?» решался
+          без переписки. */}
+      {group && !myLoading && (
+        <div className="card group-card">
+          <div className="day-title">Ваша группа</div>
+          <div className="group-members">
+            {group.members.map((m) => (
+              <span key={m} className="group-chip">
+                🧑‍🎓 {m}
+              </span>
+            ))}
+            {group.members.length < group.limit && (
+              <span className="group-chip free">
+                ＋ {group.limit - group.members.length}{" "}
+                {group.limit - group.members.length === 1 ? "место свободно" : "места свободно"}
+              </span>
+            )}
+          </div>
+          <p className="hint" style={{ margin: "10px 2px 0" }}>
+            Время занятий общее для группы. Перенести или отменить может только
+            преподаватель — если не сможете прийти, предупредите его кнопкой у занятия.
+          </p>
+        </div>
+      )}
+
       {showPayCard && (
         <div className="card my-card pay-card">
           {dueTotal > 0 ? (

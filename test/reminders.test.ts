@@ -17,6 +17,7 @@ import { pingSent, recordPing } from "@/lib/pings";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
+vi.mock("@/lib/groups", () => ({ activeMembers: vi.fn(async () => []) }));
 vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
 vi.mock("@/lib/pings", () => ({
   pingSent: vi.fn(async () => false),
@@ -147,6 +148,31 @@ describe("sendLessonReminders", () => {
 
     expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
     expect(notifyStudent).not.toHaveBeenCalled();
+  });
+
+  // Групповое занятие — одно событие без studentId: напоминание должно прийти
+  // каждому участнику лично, а не потеряться.
+  it("групповое занятие разворачивается в участников", async () => {
+    const now = msk("2026-07-15T10:01:00");
+    const { activeMembers } = await import("@/lib/groups");
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ(msk("2026-07-15T18:30:00"), { studentId: "", groupId: "grp-1", student: "ОГЭ, суббота" }),
+    ] as never);
+    vi.mocked(activeMembers).mockResolvedValue([
+      { id: "s1", name: "Егор" },
+      { id: "s2", name: "Дима" },
+    ] as never);
+    vi.mocked(getStudent).mockImplementation(
+      async (id: string) => ({ ...STUDENT, id, tgChatId: `chat-${id}` }) as never
+    );
+
+    expect(await sendLessonReminders(now)).toEqual({ reminders: 2 });
+    expect(notifyStudent).toHaveBeenCalledTimes(2);
+    // Дедупликация — по каждому участнику отдельно.
+    expect(vi.mocked(recordPing).mock.calls.map((c) => c[0])).toEqual([
+      expect.stringContaining("rem:s1:"),
+      expect.stringContaining("rem:s2:"),
+    ]);
   });
 
   it("уже начавшееся и помеченное пропуском занятие не напоминаем", async () => {

@@ -100,3 +100,12 @@ export function contactKey(info: Contact): string {
     .digest();
   return b64urlEncode(h).slice(0, 16);
 }
+
+// Ключ группы для событий календаря. Считается от её id, а не от имени с предметом:
+// группу переименовывают («ОГЭ, суббота» → «ОГЭ, утро»), и ключ, завязанный на имя,
+// оторвал бы её от уже созданных занятий. Префикс g: разводит пространства ключей —
+// ключ группы никогда не совпадёт с ключом ученика.
+export function groupKey(groupId: string): string {
+  const h = crypto.createHmac("sha256", secret()).update(`g:${groupId}`).digest();
+  return b64urlEncode(h).slice(0, 16);
+}

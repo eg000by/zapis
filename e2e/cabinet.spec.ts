@@ -1,7 +1,7 @@
 // Личный кабинет ученика с записями: плашки, счета, способ оплаты, отсутствие
 // «25-го кадра» (сетка не мелькает, пока грузится /api/my).
 import { expect, test } from "@playwright/test";
-import { MY_EGE, MY_FULL, mockApi, tokenUrl } from "./helpers";
+import { MY_EGE, MY_FULL, MY_GROUP, mockApi, tokenUrl } from "./helpers";
 
 test("кабинет: записи вместо сетки, все плашки на месте", async ({ page }) => {
   await mockApi(page, { my: MY_FULL });
@@ -327,4 +327,40 @@ test("«＋ Записаться на другое время» открывае
   await expect(page.locator(".slots-grid")).toHaveCount(0);
   await page.getByRole("button", { name: "＋ Записаться на другое время" }).click();
   await expect(page.locator(".slots-grid")).toBeVisible();
+});
+
+// Кабинет участника группы — «панель», а не страница записи: время общее на всех,
+// и один ученик не может ни выбрать его, ни подвинуть.
+test("группа: состав, оплата и «Не смогу прийти» вместо переноса", async ({ page }) => {
+  await mockApi(page, { my: MY_GROUP });
+  await page.goto(tokenUrl());
+
+  await expect(page.locator(".hero p")).toContainText("Занятия в группе «ОГЭ, суббота»");
+  // Сетки записи нет вовсе — ни сразу, ни кнопкой «записаться ещё».
+  await expect(page.locator(".slots-grid")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "＋ Записаться на другое время" })).toHaveCount(0);
+
+  // Состав — только имена, плюс свободные места.
+  const group = page.locator(".group-card");
+  await expect(group).toContainText("Дима");
+  await expect(group).toContainText("Злата");
+  await expect(group).toContainText("1 место свободно");
+
+  // Управлять общим занятием ученик не может.
+  const row = page.locator(".my-card .my-row").first();
+  await expect(row.getByRole("button", { name: "Перенести" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Отменить" })).toHaveCount(0);
+
+  // Единственное действие — предупредить преподавателя; календарь не меняется.
+  const posted: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/absence")) posted.push(r.postData() || "");
+  });
+  page.on("dialog", (d) => d.accept());
+  await row.getByRole("button", { name: "Не смогу прийти" }).click();
+  await expect.poll(() => posted.at(-1)).toContain('"start":"2026-07-18T13:00:00.000Z"');
+  await expect(row.getByRole("button", { name: "Предупредили ✓" })).toBeDisabled();
+
+  // Деньги остаются персональными — по цене группы.
+  await expect(page.locator(".pay-card")).toContainText("750 ₽");
 });

@@ -20,6 +20,13 @@ and real money.
 - **Teacher approves everything in Telegram** — every request/reschedule arrives as a
   message with inline ✅/❌ buttons. Declining a reschedule safely returns the series to
   its previous time (with a stale-revision guard against outdated notifications).
+- **Group lessons** — up to four students share one calendar event, but money and
+  cabinets stay personal: the group carries its own price per student, its own meeting
+  link and its own schedule, which only the teacher sets. A member's cabinet has no
+  booking grid at all (the slot belongs to four people) — instead it shows the roster,
+  the payment card and a single "can't make it" button that pings the teacher without
+  touching the calendar. Group lessons are deliberately left uncoloured: one colour
+  cannot tell the truth about four different balances.
 - **Full CRM in the same bot** — students list, per-student card, invoices, notes,
   archive; the `/admin` web page exposes the same service layer (feature parity by design).
 - **Money** — hourly rate per student; a pure "balance walk" allocates paid hours over
@@ -70,12 +77,12 @@ Key decisions:
 
 ## Testing
 
-266 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+296 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
 → cancellation end to end, plus the balance model, auto-invoicing, payment webhook and
-cron digests. On top of that, 27 hermetic Playwright e2e tests drive the real
+cron digests. On top of that, 29 hermetic Playwright e2e tests drive the real
 booking UI in a browser with every `/api/*` call intercepted.
 
 Two of those suites exist because the bugs that reached production lived *between*
@@ -173,6 +180,13 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
 - **Все решения — в Telegram** — каждая заявка и перенос приходят сообщением с
   inline-кнопками ✅/❌. Отклонение переноса безопасно возвращает серию на прежнее
   время (rev-guard отсекает устаревшие уведомления).
+- **Групповые занятия** — до четырёх учеников на одном событии календаря, но деньги
+  и кабинет у каждого свои: у группы своя цена за занятие с человека, своя ссылка на
+  Телемост и своё расписание, которое ставит только преподаватель. У участника в
+  кабинете нет сетки записи вовсе (время общее на четверых) — вместо неё состав
+  группы, оплата и одна кнопка «не смогу прийти», которая предупреждает преподавателя
+  и ничего не двигает. Групповые занятия намеренно не красятся: один цвет не может
+  быть правдой сразу для четырёх балансов.
 - **CRM в том же боте** — список учеников, карточка, счета, заметки, архив; веб-админка
   `/admin` работает поверх того же сервисного слоя (паритет поверхностей).
 - **Деньги** — ставка ₽/час; «балансовый проход» раскладывает оплаченные часы по
@@ -196,11 +210,11 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
 
 ## Тесты
 
-266 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
+296 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,
-платёжный вебхук и кроны. Плюс 27 герметичных браузерных e2e на Playwright —
+платёжный вебхук и кроны. Плюс 29 герметичных браузерных e2e на Playwright —
 реальный UI записи с перехватом всех вызовов `/api/*`.
 
 ## Стек

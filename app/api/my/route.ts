@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
 import { listContactEvents, nextOccurrenceForContact } from "@/lib/google";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
+import { getGroup, listGroupMembers, GROUP_LIMIT } from "@/lib/groups";
 import {
   findPackageInvoice,
   isPackageKind,
@@ -24,6 +25,8 @@ const NO_BILLING = {
   paidHistory: [],
   lessonPriceKopecks: 0,
   tgNotify: null,
+  group: null,
+  scheduleKey: "",
 } as {
   meetLink: string;
   // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
@@ -59,6 +62,11 @@ const NO_BILLING = {
   // Подключение уведомлений в Telegram: deep-link на бота и текущее состояние.
   // null — предлагать нечего (ученик в архиве, бот не настроен).
   tgNotify: { url: string; connected: boolean } | null;
+  // Группа, если ученик занимается в группе: расписание общее, поэтому кабинет
+  // становится «панелью» — без сетки записи, переносов и отмен.
+  group: { name: string; subject: string; members: string[]; limit: number } | null;
+  // По какому ключу календаря показывать расписание: ученика или его группы.
+  scheduleKey: string;
 };
 
 export const dynamic = "force-dynamic";
@@ -72,7 +80,25 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: decoded.reason }, { status: 403 });
   }
   try {
-    const key = contactKey(decoded.info);
+    const personalKey = contactKey(decoded.info);
+
+    // Ученика читаем ДО параллельных запросов: от него зависит, по какому ключу
+    // показывать расписание. У участника группы занятие одно на всех и лежит под
+    // ключом группы — личных занятий у него нет вовсе.
+    const student = await (decoded.info.studentId
+      ? getStudent(decoded.info.studentId)
+      : getStudentByContactKey(personalKey)
+    ).catch((e) => {
+      console.error("/api/my student lookup failed", e);
+      return null;
+    });
+    const group = student?.groupId
+      ? await getGroup(student.groupId).catch((e) => {
+          console.error("/api/my group lookup failed", e);
+          return null;
+        })
+      : null;
+    const key = group ? group.contactKey : personalKey;
 
     // Три независимых источника — параллельно (два запроса к календарю + БД);
     // nextLesson и биллинг — best-effort: их сбой не ломает список записей.
@@ -86,10 +112,6 @@ export async function GET(req: Request) {
       // Автосчета + счета к оплате + баланс.
       (async () => {
         try {
-          // Строка ученика нужна целиком (meetLink, имя) — по id из токена или по ключу.
-          const student = decoded.info.studentId
-            ? await getStudent(decoded.info.studentId)
-            : await getStudentByContactKey(key);
           const studentId = decoded.info.studentId || student?.id;
           if (!studentId) return NO_BILLING;
 
@@ -116,7 +138,9 @@ export async function GET(req: Request) {
           // спишется именно сумма счёта. Выгоду считаем от фактической ставки ученика
           // (она может быть задана индивидуально) — иначе «старая цена» не сходится со
           // счетами рядом; у обычного ученика скидки нет и выгода выйдет нулевой.
-          const tariff = detectExamTariff(student?.subject || "");
+          // У участника группы экзаменационного пакета нет: цена занятия там своя,
+          // и «скидка от индивидуального тарифа» была бы неправдой (см. autobill).
+          const tariff = group ? null : detectExamTariff(student?.subject || "");
           let packageOffer = null as (typeof NO_BILLING)["packageOffer"];
           const pkgInvoice = findPackageInvoice(rows);
           if (pkgInvoice) {
@@ -168,7 +192,20 @@ export async function GET(req: Request) {
 
           return {
             tgNotify,
-            meetLink: student?.meetLink || "",
+            // Ссылка на занятие у группы общая — она и показывается участникам.
+            meetLink: group ? group.meetLink : student?.meetLink || "",
+            scheduleKey: key,
+            group: group
+              ? {
+                  name: group.name,
+                  subject: group.subject,
+                  // Только имена: чужие оплаты и контакты участнику не показываем.
+                  members: (await listGroupMembers(group.id).catch(() => []))
+                    .filter((m) => m.active)
+                    .map((m) => m.name),
+                  limit: GROUP_LIMIT,
+                }
+              : null,
             payHint,
             packageOffer,
             paidHistory: history.map((p) => ({
@@ -182,7 +219,9 @@ export async function GET(req: Request) {
             lessonPriceKopecks:
               decoded.info.trial || student?.trial
                 ? 0
-                : student?.rateKopecks || tariff?.hourlyKopecks || 0,
+                : group
+                  ? group.rateKopecks
+                  : student?.rateKopecks || tariff?.hourlyKopecks || 0,
             // Пакетные счета показываем отдельной карточкой, из общего списка исключаем.
             payments: rows
               .filter((p) => !isPackageKind(p.kind))
@@ -228,6 +267,9 @@ export async function GET(req: Request) {
       paidHistory: hasConfirmed ? billing.paidHistory : [],
       tgNotify: hasConfirmed ? billing.tgNotify : null,
       nextLesson: hasConfirmed ? nextLesson : null,
+      // Группа — не «занятийные» данные: даже до первого подтверждённого занятия
+      // ученик должен видеть, что записан в группу, и что сетки записи здесь нет.
+      group: billing.group,
       // Цена занятия — не «занятийные» данные, а прайс: её ученик должен видеть
       // ДО записи, на экране подтверждения. Поэтому гейтом не закрывается.
       lessonPriceKopecks: billing.lessonPriceKopecks,

@@ -19,6 +19,23 @@ import {
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
+import {
+  confirmDeleteGroup,
+  joinGroup,
+  kickFromGroup,
+  promptDeleteGroup,
+  promptGroupMeet,
+  promptGroupRate,
+  promptNewGroup,
+  setGroupTime,
+  showAddMember,
+  showGroupCard,
+  showGroupDayPicker,
+  showGroupMembers,
+  showGroupTimePicker,
+  showGroupsList,
+  submitGroupSubject,
+} from "@/lib/group-bot";
 import { getStudent, getStudentByTgChatId, updateStudent } from "@/lib/students";
 import {
   applyPendingInput,
@@ -173,6 +190,84 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  // ── Группы ───────────────────────────────────────────────────────────────
+  if (data === "grps") {
+    await showGroupsList(chatId, messageId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "grpnew") {
+    await promptNewGroup(chatId);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpsub:")) {
+    await submitGroupSubject(chatId, Number(data.slice(7)) || 0);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpmem:")) {
+    await showGroupMembers(chatId, messageId, data.slice(7));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpadd:")) {
+    await showAddMember(chatId, messageId, data.slice(7));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpjoin:")) {
+    const [groupId, studentId] = data.slice(8).split(":");
+    await answerCallback(cq.id, await joinGroup(chatId, messageId, groupId, studentId));
+    return ok();
+  }
+  if (data.startsWith("grpkick:")) {
+    const [studentId, groupId] = data.slice(8).split(":");
+    await kickFromGroup(chatId, messageId, studentId, groupId);
+    await answerCallback(cq.id, "Убран из группы");
+    return ok();
+  }
+  if (data.startsWith("grptime:")) {
+    await showGroupDayPicker(chatId, messageId, data.slice(8));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpday:")) {
+    const rest = data.slice(7);
+    const sep = rest.lastIndexOf(":");
+    await showGroupTimePicker(chatId, messageId, rest.slice(0, sep), rest.slice(sep + 1));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpslot:")) {
+    await answerCallback(cq.id, await setGroupTime(chatId, messageId, Number(data.slice(8))));
+    return ok();
+  }
+  if (data.startsWith("grpmeet:")) {
+    await promptGroupMeet(chatId, data.slice(8));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grprate:")) {
+    await promptGroupRate(chatId, data.slice(8));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grpdelyes:")) {
+    await answerCallback(cq.id, await confirmDeleteGroup(chatId, messageId, data.slice(10)));
+    return ok();
+  }
+  if (data.startsWith("grpdel:")) {
+    await promptDeleteGroup(chatId, messageId, data.slice(7));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("grp:")) {
+    await showGroupCard(chatId, messageId, data.slice(4));
+    await answerCallback(cq.id);
+    return ok();
+  }
+
   if (data.startsWith("arch:")) {
     // Текст ответа собирает сам toggleStudentArchive: архивация ещё и снимает
     // будущие занятия с календаря, и число снятых важно видеть сразу.
@@ -353,6 +448,7 @@ async function handleCallback(cq: any): Promise<NextResponse> {
 const BOT_COMMANDS: { command: string; emoji: string; description: string }[] = [
   { command: "students", emoji: "👥", description: "Ученики, счета, заметки, ссылки" },
   { command: "new", emoji: "➕", description: "Новый ученик + ссылка на запись" },
+  { command: "groups", emoji: "👥", description: "Группы: состав, время, цена" },
   { command: "stats", emoji: "📊", description: "Доходы за месяц и всего" },
   { command: "load", emoji: "🗓", description: "Загрузка недели и свободные слоты" },
   { command: "debts", emoji: "🧾", description: "Кто и сколько должен" },
@@ -455,6 +551,10 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
   if (text.startsWith("/students")) {
     await showStudentsList(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/groups")) {
+    await showGroupsList(chatId, null);
     return ok();
   }
   if (text.startsWith("/stats")) {

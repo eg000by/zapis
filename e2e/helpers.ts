@@ -106,6 +106,50 @@ export const MY_EGE = {
 };
 
 // Кабинет ученика с подтверждённой еженедельной записью, балансом и счётом.
+// Кабинет участника группы: расписание общее, поэтому ни сетки записи, ни кнопок
+// переноса и отмены здесь быть не должно.
+export const MY_GROUP = {
+  events: [
+    {
+      id: "gev1",
+      student: "Тестовый Егор",
+      subject: "ОГЭ информатика",
+      status: "confirmed",
+      start: "2026-07-18T13:00:00.000Z",
+      recurring: true,
+      weeks: 26,
+      lessons: 1,
+      moved: false,
+      origStart: "",
+    },
+  ],
+  group: {
+    name: "ОГЭ, суббота",
+    subject: "ОГЭ информатика",
+    members: ["Тестовый Егор", "Дима", "Злата"],
+    limit: 4,
+  },
+  packageOffer: null,
+  payments: [
+    { id: "g1", amountKopecks: 75000, note: "Автосчёт: следующее занятие (1 ч)", payLink: "https://yookassa.test/pay", kind: "advance" },
+  ],
+  balance: {
+    debtKopecks: 0,
+    debtHours: 0,
+    aheadHours: 0,
+    paidUntil: null,
+    balanceKopecks: 0,
+    rateKopecks: 75000,
+    nextPaid: false,
+  },
+  payHint: "",
+  meetLink: "https://telemost.yandex.ru/j/group",
+  paidHistory: [],
+  nextLesson: "2026-07-18T13:00:00.000Z",
+  lessonPriceKopecks: 75000,
+  tgNotify: null,
+};
+
 export const MY_FULL = {
   events: [
     {

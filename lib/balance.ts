@@ -8,6 +8,7 @@
 // (без перескока через большой блок к меньшему).
 import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
+import { getGroup } from "./groups";
 import type { Student } from "./schema";
 import { paidHoursBreakdown } from "./payments";
 import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
@@ -103,16 +104,27 @@ export async function computeStudentBalance(
   // ещё до выбора «пробное / регулярное»). Иначе кабинет показывал бы счёт на
   // занятие, за которое платить не надо. Биллинг включается переводом в
   // полноценные (promoteStudentToFull), где прошедшее пробное помечается бесплатным.
-  if (!s || s.trial || s.rateKopecks <= 0) return null;
+  if (!s || s.trial) return null;
+
+  // Участник группы занимается по расписанию и цене ГРУППЫ: занятия лежат под её
+  // ключом, а личная ставка не участвует — иначе цену пришлось бы переписывать
+  // каждому при смене цены группы. Пакета со скидкой у группы нет: она и так дешевле
+  // индивидуальных занятий, и «скидка от индивидуальной ставки» была бы неправдой.
+  const group = s.groupId ? await getGroup(s.groupId) : null;
+  const rateKopecks = group ? group.rateKopecks : s.rateKopecks;
+  if (rateKopecks <= 0) return null;
+
   // Пакетные оплаты (месяц ОГЭ/ЕГЭ) кредитуют фиксированные часы, а не деньги÷ставку.
-  const packageLessons = detectExamTariff(s.subject)?.packageLessons ?? 0;
+  const packageLessons = group ? 0 : (detectExamTariff(s.subject)?.packageLessons ?? 0);
   const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(
     s.id,
-    s.rateKopecks,
+    rateKopecks,
     packageLessons
   );
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
-  const occ = (await listContactOccurrences(s.contactKey)).filter((o) => !isUntariffed(o.colorId));
+  const occ = (await listContactOccurrences(group ? group.contactKey : s.contactKey)).filter(
+    (o) => !isUntariffed(o.colorId)
+  );
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
   // Остаток на балансе = все полученные деньги (включая пакетные) минус стоимость
   // уже разложенных на занятия часов по ставке. Пакетные часы НЕ оцениваем по полной
@@ -120,8 +132,8 @@ export async function computeStudentBalance(
   return {
     ...summary,
     items,
-    rateKopecks: s.rateKopecks,
-    debtKopecks: summary.debtHours * s.rateKopecks,
-    balanceKopecks: moneyKopecks + packageKopecks - (paidHours - summary.leftoverHours) * s.rateKopecks,
+    rateKopecks,
+    debtKopecks: summary.debtHours * rateKopecks,
+    balanceKopecks: moneyKopecks + packageKopecks - (paidHours - summary.leftoverHours) * rateKopecks,
   };
 }

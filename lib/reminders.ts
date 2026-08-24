@@ -13,6 +13,7 @@
 // опоздавший крон не написал человеку среди ночи.
 import { listDayOccurrences, type DayOccurrence } from "./google";
 import { getStudent } from "./students";
+import { activeMembers } from "./groups";
 import { notifyStudent } from "./notify";
 import { pingSent, recordPing } from "./pings";
 import { MSK_OFFSET_MINUTES, MISSED_COLOR_ID } from "./config";
@@ -78,7 +79,6 @@ export async function sendLessonReminders(now: Date): Promise<{ reminders: numbe
   // (два занятия подряд в один вечер не должны давать два уведомления).
   const groups = new Map<string, { studentId: string; at: Date; items: DayOccurrence[] }>();
   for (const o of occ) {
-    if (!o.studentId) continue;
     if (o.colorId === MISSED_COLOR_ID) continue;
     if (o.start.getTime() <= now.getTime()) continue; // уже началось
 
@@ -86,10 +86,19 @@ export async function sendLessonReminders(now: Date): Promise<{ reminders: numbe
     if (at.getTime() > now.getTime()) continue; // время напомнить ещё не пришло
     if (now.getTime() - at.getTime() > LATE_CUTOFF_HOURS * 3600000) continue; // проспали — молчим
 
-    const key = `${o.studentId}:${at.toISOString()}`;
-    const g = groups.get(key) || { studentId: o.studentId, at, items: [] };
-    g.items.push(o);
-    groups.set(key, g);
+    // Групповое занятие разворачиваем в его участников: напоминание персональное,
+    // и каждый должен получить своё (у группы нет одного «ученика»).
+    const memberIds = o.groupId
+      ? (await activeMembers(o.groupId)).map((m) => m.id)
+      : o.studentId
+        ? [o.studentId]
+        : [];
+    for (const studentId of memberIds) {
+      const key = `${studentId}:${at.toISOString()}`;
+      const g = groups.get(key) || { studentId, at, items: [] };
+      g.items.push(o);
+      groups.set(key, g);
+    }
   }
 
   let reminders = 0;

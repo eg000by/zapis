@@ -9,6 +9,7 @@ import { pingSent, recordPing } from "./pings";
 import { escapeHtml, inlineKeyboard, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
 import { ensureAutoInvoices } from "./autobill";
+import { activeMembers } from "./groups";
 
 // Конец блока из N часов: (N-1) полных шагов сетки + само занятие.
 function blockEndMs(start: Date, hours: number): number {
@@ -30,7 +31,11 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
       if (o.colorId === MISSED_COLOR_ID) continue; // уже помечено пропуском
       if (await pingSent(o.instanceId)) continue;
 
-      if (o.studentId) toBill.set(o.studentId, o.student || "");
+      // Групповое занятие касается всех участников: счёт после занятия должен
+      // появиться у каждого, а не потеряться из-за пустого studentId. У обычного
+      // занятия ученик уже известен из события — лишний запрос в БД не делаем.
+      if (o.groupId) for (const m of await activeMembers(o.groupId)) toBill.set(m.id, m.name);
+      else if (o.studentId) toBill.set(o.studentId, o.student || "");
       await sendOwner(
         `🏁 <b>Занятие завершилось</b>\n\n🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(
           o.subject

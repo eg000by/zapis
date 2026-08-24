@@ -15,6 +15,7 @@ vi.mock("@/lib/pings", () => ({
   recordPing: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
+vi.mock("@/lib/groups", () => ({ activeMembers: vi.fn(async () => []) }));
 vi.mock("@/lib/telegram", () => ({
   sendOwner: vi.fn(async () => {}),
   escapeHtml: (s: string) => s,
@@ -152,5 +153,23 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     expect(res.status).toBe(503);
     expect(sendOwner).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
+  });
+
+  // Групповое занятие: счёт после него должен появиться у КАЖДОГО участника —
+  // у самого занятия studentId нет, и без разворота группы никто бы не получил счёта.
+  it("после группового занятия счета выставляются каждому участнику", async () => {
+    const { activeMembers } = await import("@/lib/groups");
+    const { ensureAutoInvoices } = await import("@/lib/autobill");
+    vi.mocked(activeMembers).mockResolvedValue([
+      { id: "s1", name: "Егор" },
+      { id: "s2", name: "Дима" },
+    ] as never);
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ("2026-07-12T07:00:00.000Z", { studentId: "", groupId: "grp-1", student: "ОГЭ, суббота" }),
+    ] as never);
+
+    const res = await call();
+    expect(await res.json()).toMatchObject({ sent: 1, billed: 2 });
+    expect(vi.mocked(ensureAutoInvoices).mock.calls.map((c) => c[0])).toEqual(["s1", "s2"]);
   });
 });

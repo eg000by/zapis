@@ -158,7 +158,9 @@ export async function ensureAutoInvoices(
   if (!balance) return null; // нет ставки — автосчета не считаются
 
   const now = new Date();
-  const examTariff = detectExamTariff(student?.subject || "");
+  // У группы пакета со скидкой нет: цена занятия там и так ниже индивидуальной,
+  // а «пакет ОГЭ» посчитался бы от индивидуального тарифа предмета.
+  const examTariff = student?.groupId ? null : detectExamTariff(student?.subject || "");
   const open = await outstandingPayments(studentId);
   // «Вперёд» — всегда одно ближайшее занятие: платить сразу за месяц ученик может
   // вторым вариантом (счёт-предложение ниже), но по умолчанию сумма к оплате

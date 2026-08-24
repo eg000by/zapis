@@ -64,6 +64,13 @@
       "when": 1783976174379,
       "tag": "0008_spotty_starhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787579738410,
+      "tag": "0009_chubby_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

@@ -181,6 +181,25 @@ body {
   padding: 6px 0 6px;
 }
 
+/* Состав группы в кабинете участника: имена без денег и контактов. */
+.group-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.group-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.group-chip.free {
+  background: var(--busy-bg);
+  color: var(--busy-text);
+}
+
 /* Строка над чипами дней: какая неделя показана и вход в календарь. */
 .week-bar {
   display: flex;

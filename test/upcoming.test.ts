@@ -12,6 +12,10 @@ import { sendOwner } from "@/lib/telegram";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
+vi.mock("@/lib/groups", () => ({
+  getGroup: vi.fn(async () => null),
+  activeMembers: vi.fn(async () => []),
+}));
 vi.mock("@/lib/lessons", () => ({ listStudentLessons: vi.fn(async () => []) }));
 vi.mock("@/lib/pings", () => ({
   pingSent: vi.fn(async () => false),
@@ -181,6 +185,36 @@ describe("sendUpcomingLessonAlerts", () => {
     const [, to] = vi.mocked(listDayOccurrences).mock.calls[0];
     expect(NOW.getTime() + 90 * 60000).toBeGreaterThan(to.getTime());
     expect(soon.getTime()).toBeLessThanOrEqual(to.getTime());
+  });
+
+  // Групповое занятие: преподавателю — одно сообщение, ученикам — каждому своё.
+  // Ссылка на занятие у группы общая, личных ссылок участников тут быть не должно.
+  it("групповое занятие: преподавателю один раз, каждому участнику — своё", async () => {
+    const { getGroup, activeMembers } = await import("@/lib/groups");
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ(SOON, { studentId: "", groupId: "grp-1", student: "ОГЭ, суббота" }),
+    ] as never);
+    vi.mocked(getGroup).mockResolvedValue({
+      id: "grp-1",
+      name: "ОГЭ, суббота",
+      meetLink: "https://telemost.yandex.ru/j/group",
+    } as never);
+    vi.mocked(activeMembers).mockResolvedValue([
+      { id: "s1", name: "Егор", tgChatId: "111" },
+      { id: "s2", name: "Дима", tgChatId: "222" },
+      { id: "s3", name: "Злата", tgChatId: "" }, // уведомления не подключил
+    ] as never);
+
+    expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
+
+    expect(sendOwner).toHaveBeenCalledOnce();
+    expect(ownerText()).toContain("Участников: 3");
+    expect(ownerText()).toContain("https://telemost.yandex.ru/j/group");
+    // Ученикам — только тем, кто подключил бота.
+    expect(notifyStudent).toHaveBeenCalledTimes(2);
+    expect(studentText()).toContain("https://telemost.yandex.ru/j/group");
+    // Личного ученика по такому занятию не ищем — его там нет.
+    expect(getStudent).not.toHaveBeenCalled();
   });
 
   it("окно запроса к календарю — ровно на UPCOMING_LEAD_MINUTES вперёд", async () => {

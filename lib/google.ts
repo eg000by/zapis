@@ -261,6 +261,9 @@ export interface DayOccurrence {
   student: string;
   subject: string;
   studentId: string;
+  // Занятие группы: студента у него нет, вместо этого id группы. Кого оно касается,
+  // разворачивает lib/groups.ts (lessonMembers).
+  groupId: string;
   contactKey: string;
 }
 
@@ -298,6 +301,7 @@ export async function listDayOccurrences(timeMin: Date, timeMax: Date): Promise<
       student: priv.student || priv.name || "",
       subject: priv.subject || "",
       studentId: priv.studentId || "",
+      groupId: priv.groupId || "",
       contactKey: priv.contactKey || "",
     });
   }

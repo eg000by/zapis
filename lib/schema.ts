@@ -24,6 +24,34 @@ export const students = pgTable("students", {
   // chat_id ученика в Telegram — для сервисных уведомлений. Заполняется, когда ученик
   // сам открывает бота по deep-link из кабинета (бот не может написать первым).
   tgChatId: text("tg_chat_id").notNull().default(""),
+  // Участие в группе. Ученик либо занимается индивидуально, либо в группе — не оба
+  // сразу: при вступлении будущие личные занятия снимаются с календаря. Пока groupId
+  // задан, расписание и цена берутся от группы, а личная ставка просто не участвует.
+  groupId: uuid("group_id").references(() => groups.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Группа учеников (до 4 человек): одно занятие в календаре на всех, но деньги и
+// кабинет у каждого участника свои. Отдельная сущность, а не «несколько учеников на
+// одно время»: иначе в календаре лежали бы N событий в один час — сетка записи
+// считала бы слот занятым N раз, «загрузка недели» показывала бы N часов вместо
+// одного, а уведомление «скоро занятие» приходило бы преподавателю N раз.
+//
+// contactKey — такой же ключ сопоставления с событиями календаря, как у ученика:
+// события группы лежат под ним, и вся календарная механика (повторы, переносы,
+// продление серии) работает без изменений.
+export const groups = pgTable("groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(), // «ОГЭ, суббота» — видно ученикам в кабинете
+  subject: text("subject").notNull(),
+  contactKey: text("contact_key").notNull().unique(),
+  // Цена ОДНОГО занятия для КАЖДОГО участника (в группе она ниже индивидуальной).
+  // Источник правды для расчёта: личная ставка участника при этом не трогается,
+  // чтобы её не пришлось переписывать всем при смене цены группы.
+  rateKopecks: integer("rate_kopecks").notNull().default(0),
+  meetLink: text("meet_link").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  note: text("note").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -101,3 +129,5 @@ export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
 export type BotState = typeof botState.$inferSelect;
 export type BookingLink = typeof bookingLinks.$inferSelect;
+export type Group = typeof groups.$inferSelect;
+export type NewGroup = typeof groups.$inferInsert;
