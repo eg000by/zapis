@@ -23,12 +23,16 @@ and real money.
 - **Group lessons** — up to four students share one calendar event, but money and
   cabinets stay personal: the group carries its own price per student, its own meeting
   link and its own schedule, which only the teacher sets. A member's cabinet has no
-  booking grid at all (the slot belongs to four people) — instead it shows the roster,
-  the payment card and a single "can't make it" button that pings the teacher without
-  touching the calendar. Group lessons are deliberately left uncoloured: one colour
-  cannot tell the truth about four different balances. After the lesson the bot asks
-  *who showed up* instead of "how did it go" — attendance is per student, so a missed
-  lesson drops out of that student's billing while the shared event stays untouched.
+  booking grid at all (the slot belongs to four people) — it turns into a panel: the
+  next lesson with its meeting link, the schedule spelled out as actual dates with
+  paid/unpaid per lesson, the payment card, the roster, and a "can't make it" button
+  on each date that pings the teacher without touching the calendar. Members are
+  enrolled from inside the group — the wizard asks for a name and nothing else, since
+  the subject and the price already belong to the group. Group lessons are deliberately
+  left uncoloured: one colour cannot tell the truth about four different balances.
+  After the lesson the bot asks *who showed up* instead of "how did it go" — attendance
+  is per student, so a missed lesson drops out of that student's billing while the
+  shared event stays untouched.
 - **Full CRM in the same bot** — students list, per-student card, invoices, notes,
   archive; the `/admin` web page exposes the same service layer (feature parity by design).
 - **Money** — hourly rate per student; a pure "balance walk" allocates paid hours over
@@ -79,7 +83,7 @@ Key decisions:
 
 ## Testing
 
-306 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+321 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
@@ -87,7 +91,7 @@ semantics — so scenario tests cover booking → confirmation → reschedule �
 cron digests. On top of that, 29 hermetic Playwright e2e tests drive the real
 booking UI in a browser with every `/api/*` call intercepted.
 
-Two of those suites exist because the bugs that reached production lived *between*
+Three of those suites exist because the bugs that reached production lived *between*
 correct functions, not inside them:
 
 - `test/balance-invariants.test.ts` — property-based (fast-check): hundreds of random
@@ -97,6 +101,11 @@ correct functions, not inside them:
 - `test/lifecycle.test.ts` — one continuous "month in a student's life" over the real
   calendar, balance, auto-invoicing and colouring, with time moving forward: booking →
   advance invoice → payment → lesson → debt → settlement.
+- `test/group-bot.test.ts` — platform limits are not suggestions. A button carrying two
+  uuids exceeded Telegram's 64-byte `callback_data` cap, and the API refuses the whole
+  message rather than truncating it: the screen simply never opened, and the only trace
+  was a line in the logs. The suite renders the group screens with real uuids and
+  asserts that every button fits.
 
 ```bash
 npm run test        # unit/scenario (Vitest)
@@ -184,13 +193,16 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
   время (rev-guard отсекает устаревшие уведомления).
 - **Групповые занятия** — до четырёх учеников на одном событии календаря, но деньги
   и кабинет у каждого свои: у группы своя цена за занятие с человека, своя ссылка на
-  Телемост и своё расписание, которое ставит только преподаватель. У участника в
-  кабинете нет сетки записи вовсе (время общее на четверых) — вместо неё состав
-  группы, оплата и одна кнопка «не смогу прийти», которая предупреждает преподавателя
-  и ничего не двигает. Групповые занятия намеренно не красятся: один цвет не может
-  быть правдой сразу для четырёх балансов. После занятия бот спрашивает не «как
-  прошло», а «кто был»: пропуск персональный — занятие выпадает из тарификации
-  только у того, кого не было, а общее событие остаётся нетронутым.
+  Телемост и своё расписание, которое ставит только преподаватель. Сетки записи у
+  участника нет вовсе (время общее на четверых) — кабинет становится панелью:
+  ближайшее занятие со ссылкой, расписание конкретными датами и пометкой «оплачено»
+  у каждой, оплата, состав группы и кнопка «не смогу прийти» у каждой даты — она
+  предупреждает преподавателя и ничего не двигает. Ученик заводится прямо из группы:
+  мастер спрашивает только имя, потому что предмет и цена — уже её. Групповые занятия
+  намеренно не красятся: один цвет не может быть правдой сразу для четырёх балансов.
+  После занятия бот спрашивает не «как прошло», а «кто был»: пропуск персональный —
+  занятие выпадает из тарификации только у того, кого не было, а общее событие
+  остаётся нетронутым.
 - **CRM в том же боте** — список учеников, карточка, счета, заметки, архив; веб-админка
   `/admin` работает поверх того же сервисного слоя (паритет поверхностей).
 - **Деньги** — ставка ₽/час; «балансовый проход» раскладывает оплаченные часы по
@@ -214,7 +226,7 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
 
 ## Тесты
 
-306 тестов Vitest гоняют **настоящие роуты и календарную логику** поверх in-memory фейка
+321 тест Vitest гоняет **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,
