@@ -2,6 +2,7 @@ import { decodeToken } from "@/lib/link";
 import { getTokenByCode } from "@/lib/shortlink";
 import { TEACHER_TG, teacherTgUrl } from "@/lib/config";
 import BookingClient from "../../BookingClient";
+import Icon from "@/app/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function ShortLinkPage({ params }: { params: { code: string
     return (
       <div className="wrap">
         <div className="center-note">
-          <span className="emoji">🔗</span>
+          <Icon name="link" className="ico-lg" />
           <p>
             Похоже, ссылка неверная или больше не действует.
             <br />

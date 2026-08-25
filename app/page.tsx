@@ -1,6 +1,7 @@
 import { decodeToken } from "@/lib/link";
 import { TEACHER_TG, teacherTgUrl } from "@/lib/config";
 import BookingClient from "./BookingClient";
+import Icon from "./Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default function Page({
     return (
       <div className="wrap">
         <div className="center-note">
-          <span className="emoji">{expired ? "⌛" : "🔗"}</span>
+          <Icon name={expired ? "hourglass" : "link"} className="ico-lg" />
           <p>
             {expired ? (
               <>

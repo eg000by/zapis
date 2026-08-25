@@ -102,7 +102,7 @@ test("календарь: выбор даты переводит сетку на
   await expect(page.locator(".week-label")).toContainText("Ближайшие дни");
   expect(slotUrls.at(-1)).not.toContain("from=");
 
-  await page.getByRole("button", { name: "📅 Другая дата" }).click();
+  await page.getByRole("button", { name: "Другая дата" }).click();
   await expect(page.locator(".cal-grid")).toBeVisible();
   // Прошедшие даты и выходные выбрать нельзя.
   expect(await page.locator(".cal-day:disabled").count()).toBeGreaterThan(0);

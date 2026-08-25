@@ -36,7 +36,7 @@ test("кабинет: записи вместо сетки, все плашки 
   await expect(row).toContainText("еженедельно");
   // Имя и предмет ученику не показываем: он открыл свой кабинет по личной ссылке.
   await expect(row).not.toContainText("Тестовый Егор — Питон");
-  await expect(row).toContainText("✅ подтверждено");
+  await expect(row).toContainText("подтверждено");
   await expect(row.getByRole("button", { name: "Перенести" })).toBeVisible();
 });
 
@@ -299,7 +299,7 @@ test("перенос серии: выбор «одно занятие / кажд
   await page.getByRole("button", { name: "Перенести" }).click();
   await expect(page.locator(".reschedule-bar")).toContainText("Переносим");
 
-  await page.getByRole("button", { name: "📅 Только одно занятие" }).click();
+  await page.getByRole("button", { name: "Только одно занятие" }).click();
   await expect(page.getByText("Какое занятие переносим?")).toBeVisible();
   // Даты приходят из /api/occurrences (замокан): два ближайших вторника.
   await expect(page.locator(".choice-row .mini")).toHaveCount(3); // 2 даты + «Закрыть»
@@ -321,11 +321,11 @@ test("перенос серии: выбор «одно занятие / кажд
   await expect.poll(() => posted.at(-1)).toContain('"start":"2026-07-14T07:00:00.000Z"');
 });
 
-test("«＋ Записаться на другое время» открывает сетку у ученика с записями", async ({ page }) => {
+test("«Записаться на другое время» открывает сетку у ученика с записями", async ({ page }) => {
   await mockApi(page, { my: MY_FULL });
   await page.goto(tokenUrl());
   await expect(page.locator(".slots-grid")).toHaveCount(0);
-  await page.getByRole("button", { name: "＋ Записаться на другое время" }).click();
+  await page.getByRole("button", { name: "Записаться на другое время" }).click();
   await expect(page.locator(".slots-grid")).toBeVisible();
 });
 
@@ -341,7 +341,7 @@ test("группа: состав, оплата и «Не смогу прийти
   await expect(head).toContainText("Групповые занятия · 3 участника");
   // Сетки записи нет вовсе — ни сразу, ни кнопкой «записаться ещё».
   await expect(page.locator(".slots-grid")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "＋ Записаться на другое время" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Записаться на другое время" })).toHaveCount(0);
 
   // Ближайшее занятие — карточкой: дата, повтор и ссылка на занятие.
   await expect(page.locator(".grp-when")).toContainText("18 июля");
@@ -377,7 +377,7 @@ test("группа: состав, оплата и «Не смогу прийти
   page.on("dialog", (d) => d.accept());
   await row.getByRole("button", { name: "Не смогу прийти" }).click();
   await expect.poll(() => posted.at(-1)).toContain('"start":"2026-07-25T13:00:00.000Z"');
-  await expect(row.getByRole("button", { name: "Предупредили ✓" })).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Предупредили" })).toBeDisabled();
   // Соседние даты остаются доступными — предупреждение относится к одной из них.
   await expect(rows.first().getByRole("button", { name: "Не смогу прийти" })).toBeEnabled();
 

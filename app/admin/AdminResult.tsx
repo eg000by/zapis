@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Icon from "@/app/Icon";
 
 export default function AdminResult({ link }: { link: string }) {
   const [copied, setCopied] = useState(false);
@@ -20,7 +21,13 @@ export default function AdminResult({ link }: { link: string }) {
       <label style={{ marginTop: 0 }}>Персональная ссылка</label>
       <input readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
       <button className="btn" onClick={copy}>
-        {copied ? "Скопировано ✓" : "Скопировать ссылку"}
+        {copied ? (
+          <>
+            <Icon name="check" /> Скопировано
+          </>
+        ) : (
+          "Скопировать ссылку"
+        )}
       </button>
       <p className="hint">Отправьте эту ссылку ученику. Имя, предмет и Telegram уже зашиты в неё — на сайте останется только выбрать время.</p>
     </div>

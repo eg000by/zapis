@@ -9,6 +9,7 @@ import { listStudentLessons } from "@/lib/lessons";
 import { listStudentPayments } from "@/lib/payments";
 import type { Lesson, Payment, Student } from "@/lib/schema";
 import AdminResult from "./AdminResult";
+import Icon from "@/app/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -22,16 +23,24 @@ function baseUrl(): string {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: "⏳ ждёт",
-  confirmed: "✅ подтверждено",
-  done: "✔️ проведено",
-  cancelled: "🚫 отменено",
+  pending: "ждёт",
+  confirmed: "подтверждено",
+  done: "проведено",
+  cancelled: "отменено",
 };
 
 const PAY_STATUS: Record<string, string> = {
-  unpaid: "🔴 не оплачено",
-  paid: "🟢 оплачено",
-  canceled: "⚪ отменён",
+  unpaid: "не оплачено",
+  paid: "оплачено",
+  canceled: "отменён",
+};
+
+// Статус оплаты — точкой в цвет, а не кружком-эмодзи: цвет читается мгновенно и
+// не спорит по весу с текстом строки.
+const PAY_DOT: Record<string, string> = {
+  unpaid: "red",
+  paid: "green",
+  canceled: "",
 };
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
@@ -59,7 +68,7 @@ export default async function AdminPage({
     return (
       <div className="wrap">
         <div className="center-note">
-          <span className="emoji">🔒</span>
+          <Icon name="lock" className="ico-lg" />
           <p>
             Доступ закрыт. Откройте страницу с правильным ключом: <code>/admin?key=…</code>
           </p>
@@ -110,7 +119,7 @@ export default async function AdminPage({
       return (
         <div className="wrap">
           <div className="center-note">
-            <span className="emoji">{dbError ? "⚠️" : "🤷"}</span>
+            <Icon name={dbError ? "alert" : "inbox"} className="ico-lg" />
             <p>{dbError ? "База недоступна (проверьте DATABASE_URL)." : "Ученик не найден."}</p>
             <p>
               <a href={link({})}>← К списку учеников</a>
@@ -143,7 +152,7 @@ export default async function AdminPage({
             <a href={link({})}>← Все ученики</a>
           </p>
           <h1>
-            {student.name} {student.trial ? "· 🎯 пробный" : ""} {student.active ? "" : "· 🚫 архив"}
+            {student.name} {student.trial ? "· пробный" : ""} {student.active ? "" : "· архив"}
           </h1>
           <p>
             {student.subject}
@@ -210,7 +219,9 @@ export default async function AdminPage({
 
         {student.trial && (
           <div className="card" style={{ marginTop: 16 }}>
-            <label style={{ marginTop: 0 }}>🎯 Пробный ученик</label>
+            <label style={{ marginTop: 0 }}>
+              <Icon name="target" /> Пробный ученик
+            </label>
             <p className="hint" style={{ marginTop: 0 }}>
               Продолжаете заниматься? Переведите в полноценные — снимется ограничение
               «одно занятие», ссылка станет еженедельной, а прошедшее пробное занятие
@@ -230,7 +241,7 @@ export default async function AdminPage({
                 placeholder="напр. 1500"
               />
               <button className="btn" type="submit">
-                🎓 Сделать полноценным
+                <Icon name="user" /> Сделать полноценным
               </button>
             </form>
           </div>
@@ -273,7 +284,8 @@ export default async function AdminPage({
                   style={{ borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: 12 }}
                 >
                   <div style={{ fontWeight: 600 }}>
-                    {rub(p.amountKopecks)} ₽ · {PAY_STATUS[p.status] || p.status}
+                    {rub(p.amountKopecks)} ₽ · <span className={`dot ${PAY_DOT[p.status] || ""}`.trim()} />
+                    {PAY_STATUS[p.status] || p.status}
                   </div>
                   {p.note && <div className="hint" style={{ marginTop: 2 }}>{p.note}</div>}
                   {p.payLink && (
@@ -518,7 +530,9 @@ export default async function AdminPage({
 
       {stats && (
         <div className="card" style={{ marginTop: 16 }}>
-          <label style={{ marginTop: 0 }}>📊 Доходы</label>
+          <label style={{ marginTop: 0 }}>
+            <Icon name="chart" /> Доходы
+          </label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 16, margin: "6px 0 10px" }}>
             <div>
               <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.thisMonthKopecks)} ₽</div>
@@ -595,7 +609,9 @@ export default async function AdminPage({
           открывать карточку каждого ученика. */}
       {debtors.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
-          <label style={{ marginTop: 0 }}>🧾 Долги</label>
+          <label style={{ marginTop: 0 }}>
+            <Icon name="receipt" /> Долги
+          </label>
           <p className="hint" style={{ marginTop: 0 }}>
             Всего {rub(debtors.reduce((s, d) => s + d.debtKopecks, 0))} ₽ по{" "}
             {debtors.length} ученикам. Считаются только счета за проведённые занятия и
@@ -624,7 +640,7 @@ export default async function AdminPage({
                 >
                   <span>
                     <b>{d.name}</b> · {d.subject}
-                    {d.active ? "" : " · 🗄 архив"}
+                    {d.active ? "" : " · архив"}
                   </span>
                   <span style={{ whiteSpace: "nowrap", color: "var(--danger, #dc2626)" }}>
                     {rub(d.debtKopecks)} ₽{days != null ? ` · ${days} дн.` : ""}

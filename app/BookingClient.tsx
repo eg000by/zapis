@@ -10,6 +10,7 @@ import {
   dayWindow,
 } from "@/lib/config";
 import ContactFooter from "./ContactFooter";
+import Icon from "./Icon";
 
 interface Slot {
   start: string;
@@ -792,7 +793,7 @@ export default function BookingClient({
                 loadOccurrences(rsEvent);
               }}
             >
-              📅 Только одно занятие
+              <Icon name="calendar" /> Только одно занятие
             </button>
             {rsKind === "cancel" ? (
               <button
@@ -803,11 +804,11 @@ export default function BookingClient({
                   }
                 }}
               >
-                🗑 Всю серию
+                <Icon name="trash" /> Всю серию
               </button>
             ) : (
               <button className="mini" onClick={() => { setRsMode("all"); setRsOcc(null); }}>
-                🔁 Каждую неделю
+                <Icon name="repeat" /> Каждую неделю
               </button>
             )}
             <button className="mini" onClick={cancelReschedule}>
@@ -856,7 +857,7 @@ export default function BookingClient({
     return (
       <div className="wrap">
         <div className="success">
-          <div className="emoji">🎉</div>
+          <Icon name="checkCircle" className="ico-lg" />
           <h2>Заявка отправлена!</h2>
           <p style={{ whiteSpace: "pre-line" }}>
             Вы выбрали:{"\n"}
@@ -888,11 +889,18 @@ export default function BookingClient({
                 : "предоплата за будущие занятия"}
           </div>
           <div className={`pay-due${dueDebt > 0 ? " overdue" : ""}`}>
-            {dueDebt > 0
-              ? "⚠️ Занятия уже проведены — оплатите, пожалуйста, сегодня"
-              : nextLesson
-                ? `📅 Оплатить до ${fmtDateMsk(nextLesson)} — начала следующего занятия`
-                : "📅 Оплатить до следующего занятия"}
+            {dueDebt > 0 ? (
+              <>
+                <Icon name="alert" /> Занятия уже проведены — оплатите, пожалуйста, сегодня
+              </>
+            ) : (
+              <>
+                <Icon name="calendar" />{" "}
+                {nextLesson
+                  ? `Оплатить до ${fmtDateMsk(nextLesson)} — начала следующего занятия`
+                  : "Оплатить до следующего занятия"}
+              </>
+            )}
           </div>
 
           {/* Экзаменационному ученику показываем ДВА способа оплатить один и тот же
@@ -998,13 +1006,18 @@ export default function BookingClient({
               ))}
             </div>
           )}
-          {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
+          {payHint && (
+            <p className="hint" style={{ marginTop: 12 }}>
+              <Icon name="card" /> {payHint}
+            </p>
+          )}
         </>
       ) : (
         <>
           <div className="day-title">Оплата</div>
           <div className="pay-ok">
-            ✅ {balance?.nextPaid ? "Ближайшее занятие оплачено" : "Всё оплачено"}
+            <Icon name="check" />{" "}
+            {balance?.nextPaid ? "Ближайшее занятие оплачено" : "Всё оплачено"}
           </div>
           <div className="pay-split">
             {balance && balance.aheadHours > 0 && balance.paidUntil
@@ -1044,7 +1057,11 @@ export default function BookingClient({
               ) : null}
             </div>
           )}
-          {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
+          {payHint && (
+            <p className="hint" style={{ marginTop: 12 }}>
+              <Icon name="card" /> {payHint}
+            </p>
+          )}
         </>
       )}
 
@@ -1079,7 +1096,7 @@ export default function BookingClient({
     <div className="grp-grid">
       <div className="grp-col">
         <div className="card grp-head">
-          <h1>Здравствуйте, {greetName}! 👋</h1>
+          <h1>Здравствуйте, {greetName}!</h1>
           <p>
             Группа «<b>{group.name}</b>» — {group.subject}
           </p>
@@ -1090,15 +1107,19 @@ export default function BookingClient({
 
         {hasConfirmedLessons && nextLesson && (
           <div className="card">
-            <div className="grp-label">🕒 Ближайшее занятие</div>
+            <div className="grp-label">
+              <Icon name="clock" /> Ближайшее занятие
+            </div>
             <div className="grp-when">
               {fmtMsk(nextLesson, grpLessons)}
-              {balance?.nextPaid && <span className="badge ok">✅ оплачено</span>}
+              {balance?.nextPaid && <span className="badge ok">
+                  <Icon name="check" /> оплачено
+                </span>}
             </div>
             {grpEvery && <div className="grp-sub">Дальше — {grpEvery}</div>}
             {meetLink && (
               <a className="grp-join" href={meetLink} target="_blank" rel="noreferrer">
-                🎥 Подключиться к занятию (Яндекс Телемост) ↗
+                <Icon name="video" /> Подключиться к занятию (Яндекс Телемост) ↗
               </a>
             )}
           </div>
@@ -1125,7 +1146,13 @@ export default function BookingClient({
                         {/* Ставка не задана — про оплату молчим, а не пишем «не оплачено». */}
                         {balance && (
                           <span className={`badge ${paid ? "ok" : "due"}`}>
-                            {paid ? "✅ оплачено" : "не оплачено"}
+                            {paid ? (
+                              <>
+                                <Icon name="check" /> оплачено
+                              </>
+                            ) : (
+                              "не оплачено"
+                            )}
                           </span>
                         )}
                       </div>
@@ -1135,7 +1162,13 @@ export default function BookingClient({
                           disabled={busyAction || told}
                           onClick={() => reportAbsence(iso, grpLessons)}
                         >
-                          {told ? "Предупредили ✓" : "Не смогу прийти"}
+                          {told ? (
+                            <>
+                              <Icon name="check" /> Предупредили
+                            </>
+                          ) : (
+                            "Не смогу прийти"
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1162,12 +1195,12 @@ export default function BookingClient({
           <div className="group-members">
             {group.members.map((m) => (
               <span key={m} className="group-chip">
-                🧑‍🎓 {m}
+                <Icon name="user" /> {m}
               </span>
             ))}
             {group.members.length < group.limit && (
               <span className="group-chip free">
-                ＋ {group.limit - group.members.length}{" "}
+                <Icon name="plus" /> {group.limit - group.members.length}{" "}
                 {group.limit - group.members.length === 1 ? "место свободно" : "места свободно"}
               </span>
             )}
@@ -1180,10 +1213,14 @@ export default function BookingClient({
         {hasConfirmedLessons &&
           tgNotify &&
           (tgNotify.connected ? (
-            <div className="card grp-tg on">✅ Уведомления в Telegram подключены</div>
+            <div className="card grp-tg on">
+              <Icon name="check" /> Уведомления в Telegram подключены
+            </div>
           ) : (
             <a className="card grp-tg" href={tgNotify.url} target="_blank" rel="noreferrer">
-              <b>🔔 Подключить уведомления в Telegram →</b>
+              <b>
+                <Icon name="bell" /> Подключить уведомления в Telegram →
+              </b>
               <small>
                 Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
                 ссылку на Телемост.
@@ -1199,7 +1236,7 @@ export default function BookingClient({
       {/* У участника группы приветствие живёт в его карточке-шапке (см. groupCabinet). */}
       {!group && (
         <div className="hero">
-          <h1>Здравствуйте, {greetName}! 👋</h1>
+          <h1>Здравствуйте, {greetName}!</h1>
           {/* Подзаголовок меняется по режиму экрана: пока выбираем время — приглашение
               к записи; когда записи уже есть и показан кабинет — что здесь лежит. */}
           <p>
@@ -1216,7 +1253,9 @@ export default function BookingClient({
               </>
             )}
           </p>
-          {showGrid && <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>}
+          {showGrid && <span className="tz-badge">
+              <Icon name="clock" /> Время указано по Москве (МСК)
+            </span>}
         </div>
       )}
 
@@ -1231,16 +1270,18 @@ export default function BookingClient({
 
       {!group && hasConfirmedLessons && nextLesson && (
         <div className="next-lesson">
-          📌 Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
+          <Icon name="clock" /> Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
           {/* Оплата вперёд должна быть видна там, где ученик смотрит на само занятие,
               а не только в блоке денег. */}
-          {balance?.nextPaid && <span className="badge ok">✅ оплачено</span>}
+          {balance?.nextPaid && <span className="badge ok">
+                  <Icon name="check" /> оплачено
+                </span>}
         </div>
       )}
 
       {!group && hasConfirmedLessons && meetLink && (
         <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
-          🎥 Подключиться к занятию (Яндекс Телемост) ↗
+          <Icon name="video" /> Подключиться к занятию (Яндекс Телемост) ↗
         </a>
       )}
 
@@ -1249,11 +1290,13 @@ export default function BookingClient({
           показываем: нажимать больше нечего. */}
       {!group && hasConfirmedLessons && tgNotify && (
         tgNotify.connected ? (
-          <div className="next-lesson tg-on">✅ Уведомления в Telegram подключены</div>
+          <div className="next-lesson tg-on">
+            <Icon name="check" /> Уведомления в Telegram подключены
+          </div>
         ) : (
           <a className="next-lesson tg-link" href={tgNotify.url} target="_blank" rel="noreferrer">
             <span>
-              🔔 <b>Подключить уведомления в Telegram →</b>
+              <Icon name="bell" /> <b>Подключить уведомления в Telegram →</b>
               <small>
                 Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
                 ссылку на Телемост.
@@ -1279,7 +1322,9 @@ export default function BookingClient({
                       {ev.origStart && (
                         <span className="my-when">было: {fmtMsk(ev.origStart, ev.lessons)}</span>
                       )}
-                      <span className="badge move">🔄 перенос</span>
+                      <span className="badge move">
+                        <Icon name="repeat" /> перенос
+                      </span>
                     </>
                   ) : (
                     <span className="my-when when-main">
@@ -1288,7 +1333,15 @@ export default function BookingClient({
                     </span>
                   )}
                   <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
-                    {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
+                    {ev.status === "confirmed" ? (
+                      <>
+                        <Icon name="check" /> подтверждено
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="hourglass" /> ждёт подтверждения
+                      </>
+                    )}
                   </span>
                 </div>
                 <div className="my-actions">
@@ -1333,7 +1386,7 @@ export default function BookingClient({
                 setNotice("Выберите время для новой записи ниже.");
               }}
             >
-              ＋ Записаться на другое время
+              <Icon name="plus" /> Записаться на другое время
             </button>
           )}
         </div>
@@ -1361,7 +1414,7 @@ export default function BookingClient({
 
       {loadError && showGrid && (
         <div className="center-note">
-          <span className="emoji">😕</span>
+          <Icon name="alert" className="ico-lg" />
           <p>{loadError}</p>
         </div>
       )}
@@ -1370,7 +1423,7 @@ export default function BookingClient({
 
       {showGrid && !loadError && days !== null && days.length === 0 && (
         <div className="center-note">
-          <span className="emoji">📭</span>
+          <Icon name="inbox" className="ico-lg" />
           <p>Свободных слотов на ближайшее время нет. Загляните чуть позже.</p>
         </div>
       )}
@@ -1396,7 +1449,7 @@ export default function BookingClient({
                   setCalOpen(true);
                 }}
               >
-                📅 Другая дата
+                <Icon name="calendar" /> Другая дата
               </button>
             </span>
           </div>
@@ -1423,7 +1476,7 @@ export default function BookingClient({
             </div>
             {days[activeDay].closed ? (
               <p className="hint" style={{ margin: "4px 2px" }}>
-                🌙 Выходной — в этот день занятий нет. Выберите другой день недели.
+                <Icon name="moon" /> Выходной — в этот день занятий нет. Выберите другой день недели.
               </p>
             ) : (
               <>

@@ -520,8 +520,49 @@ select:focus {
   text-align: center;
   padding: 40px 20px;
 }
-.success .emoji {
-  font-size: 56px;
+/* ── Иконки интерфейса ──────────────────────────────────────────────────────
+   Штриховые SVG вместо эмодзи: один вес линии и цвет по currentColor, поэтому
+   иконка не спорит с текстом рядом. Размер в em — растёт вместе со строкой. */
+.ico {
+  width: 1.05em;
+  height: 1.05em;
+  flex: 0 0 auto;
+  vertical-align: -0.16em;
+}
+/* Крупная иконка вместо большого эмодзи на пустых экранах (успех, ошибка, пусто) */
+.ico-lg {
+  display: block;
+  margin: 0 auto 12px;
+  width: 44px;
+  height: 44px;
+  stroke-width: 1.4;
+  color: var(--muted);
+}
+.success .ico-lg {
+  color: var(--success);
+}
+/* Иконка в бледной строке-подсказке не должна быть темнее самого текста */
+.hint .ico,
+.pay-split .ico,
+.grp-label .ico,
+.grp-sub .ico {
+  opacity: 0.75;
+}
+/* Цветная точка статуса в админке — вместо кружков-эмодзи 🔴🟢⚪ */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: 0.06em;
+  background: var(--muted);
+}
+.dot.red {
+  background: var(--danger);
+}
+.dot.green {
+  background: var(--success);
 }
 .success h2 {
   margin: 14px 0 8px;
@@ -550,11 +591,6 @@ select:focus {
   text-align: center;
   padding: 60px 20px;
   color: var(--muted);
-}
-.center-note .emoji {
-  font-size: 48px;
-  display: block;
-  margin-bottom: 12px;
 }
 
 .spinner {
