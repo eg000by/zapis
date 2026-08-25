@@ -1081,181 +1081,283 @@ export default function BookingClient({
     </div>
   ) : null;
 
-  // Кабинет участника группы. Не сетка записи, а панель: когда занятие, куда
-  // подключиться, сколько платить и кто ещё в группе. Раскладка — карточками: на
-  // широком экране в две колонки, на телефоне в одну.
-  const grpLessons = my?.[0]?.lessons ?? 1;
-  // «Дальше — каждую субботу»: у группы занятие еженедельное, и повтор понятнее
-  // словами, чем списком одинаковых дат.
-  const grpEvery =
-    nextLesson && my?.some((e) => e.recurring)
+  // ── Кабинет: панель из карточек ────────────────────────────────────────────
+  // Одна раскладка и для группы, и для индивидуальных занятий: слева «когда» (кто я,
+  // ближайшее занятие, расписание), справа «сколько» (деньги, состав, уведомления).
+  // На широком экране это две колонки — кабинет виден целиком, без прокрутки; на
+  // телефоне колонки складываются в одну, и порядок остаётся прежним: сперва занятия.
+  const lessonsPerOcc = my?.[0]?.lessons ?? 1;
+  // «Дальше — каждый вторник»: только когда еженедельная серия одна. При двух сериях
+  // день недели ближайшего занятия соврал бы про остальные.
+  const everyWeekday =
+    nextLesson && my?.filter((e) => e.recurring).length === 1
       ? EVERY_WEEKDAY[mskDateOf(new Date(nextLesson)).wd]
       : "";
+  // Панель показывается всем, у кого уже есть занятия (участнику группы — всегда:
+  // сетки у него не бывает). Сетка при переносе и новой записи раскрывается ПОД ней:
+  // в две колонки кабинет вдвое короче, и до сетки ближе, чем через простыню карточек.
+  const panelMode = !myLoading && (!!group || hasBookings);
 
-  const groupCabinet = group ? (
-    <div className="grp-grid">
-      <div className="grp-col">
-        <div className="card grp-head">
-          <h1>Здравствуйте, {greetName}!</h1>
-          <p>
+  const headCard = (
+    <div className="card panel-head">
+      <h1>Здравствуйте, {greetName}!</h1>
+      <p>
+        {group ? (
+          <>
             Группа «<b>{group.name}</b>» — {group.subject}
-          </p>
-          <span className="grp-badge">
-            Групповые занятия · {group.members.length} {membersWord(group.members.length)}
-          </span>
-        </div>
-
-        {hasConfirmedLessons && nextLesson && (
-          <div className="card">
-            <div className="grp-label">
-              <Icon name="clock" /> Ближайшее занятие
-            </div>
-            <div className="grp-when">
-              {fmtMsk(nextLesson, grpLessons)}
-              {balance?.nextPaid && <span className="badge ok">
-                  <Icon name="check" /> оплачено
-                </span>}
-            </div>
-            {grpEvery && <div className="grp-sub">Дальше — {grpEvery}</div>}
-            {meetLink && (
-              <a className="grp-join" href={meetLink} target="_blank" rel="noreferrer">
-                <Icon name="video" /> Подключиться к занятию (Яндекс Телемост) ↗
-              </a>
-            )}
-          </div>
+          </>
+        ) : (
+          <>
+            Занятия по предмету «<b>{subject}</b>»
+          </>
         )}
+      </p>
+      {/* Метка режима нужна там, где он неочевиден: занятия в группе идут по её
+          расписанию и цене. Индивидуальному ученику подписывать «индивидуальные
+          занятия» незачем — он и так один, а цена видна в блоке оплаты. */}
+      {group && (
+        <span className="panel-badge">
+          Групповые занятия · {group.members.length} {membersWord(group.members.length)}
+        </span>
+      )}
+    </div>
+  );
 
-        {/* Расписание — датами, а не «еженедельно»: занятие у группы одно на всех и
-            лежит одной серией, но ученику нужны конкретные числа и оплата по каждому. */}
-        <div className="card my-card">
-          <div className="day-title">Расписание</div>
-          {upcoming.length === 0 ? (
-            <p className="hint" style={{ margin: 0 }}>
-              Занятия пока не назначены. Время ставит преподаватель — оно появится здесь.
-            </p>
-          ) : (
-            <>
-              {upcoming.map((iso) => {
-                const paid = !!balance?.paidUntil && new Date(iso) <= new Date(balance.paidUntil);
-                const told = skipped.includes(iso);
-                return (
-                  <div key={iso} className="my-item">
-                    <div className="my-row">
-                      <div className="my-info">
-                        <span className="my-when when-main">{fmtMsk(iso, grpLessons)}</span>
-                        {/* Ставка не задана — про оплату молчим, а не пишем «не оплачено». */}
-                        {balance && (
-                          <span className={`badge ${paid ? "ok" : "due"}`}>
-                            {paid ? (
-                              <>
-                                <Icon name="check" /> оплачено
-                              </>
-                            ) : (
-                              "не оплачено"
-                            )}
-                          </span>
-                        )}
-                      </div>
-                      <div className="my-actions">
-                        <button
-                          className="mini"
-                          disabled={busyAction || told}
-                          onClick={() => reportAbsence(iso, grpLessons)}
-                        >
-                          {told ? (
-                            <>
-                              <Icon name="check" /> Предупредили
-                            </>
-                          ) : (
-                            "Не смогу прийти"
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <p className="hint" style={{ margin: "12px 2px 0" }}>
-                Время занятий общее для группы: перенести или отменить его может только
-                преподаватель. Не сможете прийти — предупредите кнопкой у своей даты.
-              </p>
-            </>
+  // Ближайшее занятие: когда, оплачено ли, как часто повторяется и куда подключаться.
+  const nextCard =
+    hasConfirmedLessons && nextLesson ? (
+      <div className="card">
+        <div className="panel-label">
+          <Icon name="clock" /> Ближайшее занятие
+        </div>
+        <div className="panel-when">
+          {fmtMsk(nextLesson, lessonsPerOcc)}
+          {/* Оплата вперёд видна на самом занятии, а не только в блоке денег. */}
+          {balance?.nextPaid && (
+            <span className="badge ok">
+              <Icon name="check" /> оплачено
+            </span>
           )}
         </div>
+        {everyWeekday && <div className="panel-sub">Дальше — {everyWeekday}</div>}
+        {meetLink && (
+          <a className="panel-join" href={meetLink} target="_blank" rel="noreferrer">
+            <Icon name="video" /> Подключиться к занятию (Яндекс Телемост) ↗
+          </a>
+        )}
       </div>
+    ) : null;
 
-      <div className="grp-col">
-        {payCard}
-
-        {/* Состав группы — только имена: чужие оплаты и контакты не показываем.
-            Свободные места видно сразу, чтобы вопрос «можно позвать друга?» решался
-            без переписки. */}
-        <div className="card group-card">
-          <div className="day-title">Ваша группа</div>
-          <div className="group-members">
-            {group.members.map((m) => (
-              <span key={m} className="group-chip">
-                <Icon name="user" /> {m}
-              </span>
-            ))}
-            {group.members.length < group.limit && (
-              <span className="group-chip free">
-                <Icon name="plus" /> {group.limit - group.members.length}{" "}
-                {group.limit - group.members.length === 1 ? "место свободно" : "места свободно"}
-              </span>
-            )}
-          </div>
-          <p className="hint" style={{ margin: "10px 2px 0" }}>
-            Только имена: чужие оплаты и контакты не показываем.
+  // Расписание группы — датами: занятие у группы одно на всех и лежит одной серией,
+  // но ученику нужны конкретные числа и оплата по каждому.
+  const groupScheduleCard = (
+    <div className="card my-card">
+      <div className="day-title">Расписание</div>
+      {upcoming.length === 0 ? (
+        <p className="hint" style={{ margin: 0 }}>
+          Занятия пока не назначены. Время ставит преподаватель — оно появится здесь.
+        </p>
+      ) : (
+        <>
+          {upcoming.map((iso) => {
+            const paid = !!balance?.paidUntil && new Date(iso) <= new Date(balance.paidUntil);
+            const told = skipped.includes(iso);
+            return (
+              <div key={iso} className="my-item">
+                <div className="my-row">
+                  <div className="my-info">
+                    <span className="my-when when-main">{fmtMsk(iso, lessonsPerOcc)}</span>
+                    {/* Ставка не задана — про оплату молчим, а не пишем «не оплачено». */}
+                    {balance && (
+                      <span className={`badge ${paid ? "ok" : "due"}`}>
+                        {paid ? (
+                          <>
+                            <Icon name="check" /> оплачено
+                          </>
+                        ) : (
+                          "не оплачено"
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  <div className="my-actions">
+                    <button
+                      className="mini"
+                      disabled={busyAction || told}
+                      onClick={() => reportAbsence(iso, lessonsPerOcc)}
+                    >
+                      {told ? (
+                        <>
+                          <Icon name="check" /> Предупредили
+                        </>
+                      ) : (
+                        "Не смогу прийти"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <p className="hint" style={{ margin: "12px 2px 0" }}>
+            Время занятий общее для группы: перенести или отменить его может только
+            преподаватель. Не сможете прийти — предупредите кнопкой у своей даты.
           </p>
-        </div>
+        </>
+      )}
+    </div>
+  );
 
-        {hasConfirmedLessons &&
-          tgNotify &&
-          (tgNotify.connected ? (
-            <div className="card grp-tg on">
-              <Icon name="check" /> Уведомления в Telegram подключены
+  // Записи индивидуального ученика: своё время он двигает и отменяет сам.
+  const myCard =
+    my && my.length > 0 ? (
+      <div className="card my-card">
+        <div className="day-title">Ваши записи</div>
+        {my.map((ev) => (
+          <div key={ev.id} className="my-item">
+            <div className="my-row">
+              {/* Имя и предмет не показываем: ученик открыл СВОЙ кабинет по личной
+                  ссылке и знает их без нас. Главное в строке — время записи. */}
+              <div className="my-info">
+                {ev.moved ? (
+                  <>
+                    <span className="my-when when-main">{fmtMsk(ev.start, ev.lessons)}</span>
+                    {ev.origStart && (
+                      <span className="my-when">было: {fmtMsk(ev.origStart, ev.lessons)}</span>
+                    )}
+                    <span className="badge move">
+                      <Icon name="repeat" /> перенос
+                    </span>
+                  </>
+                ) : (
+                  <span className="my-when when-main">
+                    {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
+                    {ev.recurring ? " · еженедельно" : ""}
+                  </span>
+                )}
+                <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
+                  {ev.status === "confirmed" ? (
+                    <>
+                      <Icon name="check" /> подтверждено
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="hourglass" /> ждёт подтверждения
+                    </>
+                  )}
+                </span>
+              </div>
+              <div className="my-actions">
+                <button
+                  className="mini"
+                  disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                  onClick={() => startReschedule(ev)}
+                >
+                  Перенести
+                </button>
+                {ev.moved && (
+                  <button
+                    className="mini"
+                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                    onClick={() => returnEvent(ev)}
+                  >
+                    Вернуть
+                  </button>
+                )}
+                <button
+                  className="mini danger"
+                  disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                  onClick={() => startCancel(ev)}
+                >
+                  Отменить
+                </button>
+              </div>
             </div>
-          ) : (
-            <a className="card grp-tg" href={tgNotify.url} target="_blank" rel="noreferrer">
-              <b>
-                <Icon name="bell" /> Подключить уведомления в Telegram →
-              </b>
-              <small>
-                Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
-                ссылку на Телемост.
-              </small>
-            </a>
-          ))}
+            {/* Выбор «одно занятие / вся серия» — сразу под своей записью. */}
+            {rsEvent?.id === ev.id && rsPanel}
+          </div>
+        ))}
+        {/* Пробное занятие одно — вторую запись не предлагаем. */}
+        {!rsEvent && !pickingNew && !trial && (
+          <button
+            className="mini"
+            style={{ marginTop: 12 }}
+            disabled={busyAction}
+            onClick={() => {
+              setPickingNew(true);
+              setNotice("Выберите время для новой записи ниже.");
+            }}
+          >
+            <Icon name="plus" /> Записаться на другое время
+          </button>
+        )}
       </div>
+    ) : null;
+
+  // Состав группы — только имена: чужие оплаты и контакты не показываем. Свободные
+  // места видно сразу, чтобы вопрос «можно позвать друга?» решался без переписки.
+  const membersCard = group ? (
+    <div className="card group-card">
+      <div className="day-title">Ваша группа</div>
+      <div className="group-members">
+        {group.members.map((m) => (
+          <span key={m} className="group-chip">
+            <Icon name="user" /> {m}
+          </span>
+        ))}
+        {group.members.length < group.limit && (
+          <span className="group-chip free">
+            <Icon name="plus" /> {group.limit - group.members.length}{" "}
+            {group.limit - group.members.length === 1 ? "место свободно" : "места свободно"}
+          </span>
+        )}
+      </div>
+      <p className="hint" style={{ margin: "10px 2px 0" }}>
+        Только имена: чужие оплаты и контакты не показываем.
+      </p>
     </div>
   ) : null;
 
+  // Уведомления в Telegram. Бот не может написать первым — ученик подключается сам по
+  // deep-link, и /start привязывает его чат. Подключённому кнопку не показываем.
+  const tgCard =
+    hasConfirmedLessons && tgNotify ? (
+      tgNotify.connected ? (
+        <div className="card panel-tg on">
+          <Icon name="check" /> Уведомления в Telegram подключены
+        </div>
+      ) : (
+        <a className="card panel-tg" href={tgNotify.url} target="_blank" rel="noreferrer">
+          <b>
+            <Icon name="bell" /> Подключить уведомления в Telegram →
+          </b>
+          <small>
+            Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
+            ссылку на Телемост.
+          </small>
+        </a>
+      )
+    ) : null;
+
+  const listCard = group ? groupScheduleCard : myCard;
+
   return (
-    <div className={`wrap${group ? " wrap-wide" : ""}`}>
-      {/* У участника группы приветствие живёт в его карточке-шапке (см. groupCabinet). */}
-      {!group && (
+    <div className={`wrap${panelMode ? " wrap-wide" : ""}`}>
+      {/* В режиме панели приветствие живёт в карточке-шапке; над сеткой оно нужнее
+          обычной строкой — там оно объясняет, что вообще делать на странице. */}
+      {!panelMode && (
         <div className="hero">
           <h1>Здравствуйте, {greetName}!</h1>
-          {/* Подзаголовок меняется по режиму экрана: пока выбираем время — приглашение
-              к записи; когда записи уже есть и показан кабинет — что здесь лежит. */}
           <p>
             {myLoading ? (
               "Загружаем ваши записи…"
-            ) : showGrid ? (
+            ) : (
               <>
                 {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"}{" "}
                 по предмету «<b>{subject}</b>».
               </>
-            ) : (
-              <>
-                Ваши занятия и оплата по предмету «<b>{subject}</b>».
-              </>
             )}
           </p>
-          {showGrid && <span className="tz-badge">
-              <Icon name="clock" /> Время указано по Москве (МСК)
-            </span>}
         </div>
       )}
 
@@ -1268,137 +1370,29 @@ export default function BookingClient({
       {/* Пока не знаем, есть ли записи, — спиннер вместо сетки (без «25-го кадра»). */}
       {myLoading && <div className="spinner" />}
 
-      {!group && hasConfirmedLessons && nextLesson && (
-        <div className="next-lesson">
-          <Icon name="clock" /> Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
-          {/* Оплата вперёд должна быть видна там, где ученик смотрит на само занятие,
-              а не только в блоке денег. */}
-          {balance?.nextPaid && <span className="badge ok">
-                  <Icon name="check" /> оплачено
-                </span>}
-        </div>
-      )}
-
-      {!group && hasConfirmedLessons && meetLink && (
-        <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
-          <Icon name="video" /> Подключиться к занятию (Яндекс Телемост) ↗
-        </a>
-      )}
-
-      {/* Уведомления в Telegram. Бот не может написать первым — ученик подключается
-          сам по deep-link, и /start привязывает его чат. Подключённому кнопку не
-          показываем: нажимать больше нечего. */}
-      {!group && hasConfirmedLessons && tgNotify && (
-        tgNotify.connected ? (
-          <div className="next-lesson tg-on">
-            <Icon name="check" /> Уведомления в Telegram подключены
+      {panelMode ? (
+        <div className="panel-grid">
+          <div className="panel-col">
+            {headCard}
+            {nextCard}
+            {listCard}
           </div>
-        ) : (
-          <a className="next-lesson tg-link" href={tgNotify.url} target="_blank" rel="noreferrer">
-            <span>
-              <Icon name="bell" /> <b>Подключить уведомления в Telegram →</b>
-              <small>
-                Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
-                ссылку на Телемост.
-              </small>
-            </span>
-          </a>
-        )
-      )}
-
-      {/* Записи — выше денег: расписание для ученика главнее счёта. */}
-      {!group && my && my.length > 0 && (
-        <div className="card my-card">
-          <div className="day-title">Ваши записи</div>
-          {my.map((ev) => (
-            <div key={ev.id} className="my-item">
-              <div className="my-row">
-                {/* Имя и предмет не показываем: ученик открыл СВОЙ кабинет по личной
-                    ссылке и знает их без нас. Главное в строке — время записи. */}
-                <div className="my-info">
-                  {ev.moved ? (
-                    <>
-                      <span className="my-when when-main">{fmtMsk(ev.start, ev.lessons)}</span>
-                      {ev.origStart && (
-                        <span className="my-when">было: {fmtMsk(ev.origStart, ev.lessons)}</span>
-                      )}
-                      <span className="badge move">
-                        <Icon name="repeat" /> перенос
-                      </span>
-                    </>
-                  ) : (
-                    <span className="my-when when-main">
-                      {ev.recurring ? fmtSlotMsk(ev.start, ev.lessons) : fmtMsk(ev.start, ev.lessons)}
-                      {ev.recurring ? " · еженедельно" : ""}
-                    </span>
-                  )}
-                  <span className={`badge ${ev.status === "confirmed" ? "ok" : "wait"}`}>
-                    {ev.status === "confirmed" ? (
-                      <>
-                        <Icon name="check" /> подтверждено
-                      </>
-                    ) : (
-                      <>
-                        <Icon name="hourglass" /> ждёт подтверждения
-                      </>
-                    )}
-                  </span>
-                </div>
-                <div className="my-actions">
-                  <button
-                    className="mini"
-                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                    onClick={() => startReschedule(ev)}
-                  >
-                    Перенести
-                  </button>
-                  {ev.moved && (
-                    <button
-                      className="mini"
-                      disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                      onClick={() => returnEvent(ev)}
-                    >
-                      Вернуть
-                    </button>
-                  )}
-                  <button
-                    className="mini danger"
-                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                    onClick={() => startCancel(ev)}
-                  >
-                    Отменить
-                  </button>
-                </div>
-              </div>
-              {/* Выбор «одно занятие / вся серия» — сразу под своей записью. */}
-              {rsEvent?.id === ev.id && rsPanel}
-            </div>
-          ))}
-          {/* Пробное занятие одно — вторую запись не предлагаем. В группе записи
-              нет вовсе: время ставит преподаватель. */}
-          {!rsEvent && !pickingNew && !trial && !group && (
-            <button
-              className="mini"
-              style={{ marginTop: 12 }}
-              disabled={busyAction}
-              onClick={() => {
-                setPickingNew(true);
-                setNotice("Выберите время для новой записи ниже.");
-              }}
-            >
-              <Icon name="plus" /> Записаться на другое время
-            </button>
-          )}
+          <div className="panel-col">
+            {payCard}
+            {membersCard}
+            {tgCard}
+          </div>
         </div>
+      ) : (
+        // Открыта сетка: карточки идут одной колонкой над ней, чтобы выбор времени
+        // оставался последним и главным действием на экране.
+        <>
+          {nextCard}
+          {listCard}
+          {payCard}
+          {tgCard}
+        </>
       )}
-
-      {/* Деньги — ОДИН блок: сумма к оплате, из чего она состоит, срок и способ.
-          Раньше здесь были две карточки («Баланс» и «К оплате») с разными числами,
-          и было непонятно, какое из них платить. У участника группы этот же блок
-          лежит внутри groupCabinet, во второй колонке. */}
-      {!group && payCard}
-
-      {groupCabinet}
 
       {/* Активный перенос: сетка ниже выбирает новое время. */}
       {rescheduling && (
@@ -1430,6 +1424,12 @@ export default function BookingClient({
 
       {showGrid && !loadError && days !== null && days.length > 0 && (
         <>
+          {/* Время в сетке — московское; плашка стоит над самой сеткой, потому что
+              объясняет именно её. */}
+          <span className="tz-badge">
+            <Icon name="clock" /> Время указано по Москве (МСК)
+          </span>
+
           {/* Какая неделя в сетке + вход в календарь. Одна строка на всю
               «гибкость выбора»: сами чипы дней остаются прежними. */}
           <div className="week-bar">

@@ -544,8 +544,8 @@ select:focus {
 /* Иконка в бледной строке-подсказке не должна быть темнее самого текста */
 .hint .ico,
 .pay-split .ico,
-.grp-label .ico,
-.grp-sub .ico {
+.panel-label .ico,
+.panel-sub .ico {
   opacity: 0.75;
 }
 /* Цветная точка статуса в админке — вместо кружков-эмодзи 🔴🟢⚪ */
@@ -1046,46 +1046,46 @@ a.meet-link:hover {
   flex: 0 0 auto;
 }
 
-/* ── Кабинет участника группы ───────────────────────────────────────────────
-   Не сетка записи, а панель: когда занятие, куда подключиться, сколько платить и
-   кто ещё в группе. Раскладка карточками — две колонки на широком экране, одна на
-   телефоне (auto-fit сам сложит). Внутри колонок отступ даёт grid-gap, поэтому
-   собственный margin у карточек здесь снимаем. */
+/* ── Кабинет: панель из карточек ────────────────────────────────────────────
+   Одна раскладка для группы и для индивидуальных занятий: слева «когда», справа
+   «сколько». Две колонки на широком экране, одна на телефоне (auto-fit сам сложит).
+   Внутри колонок отступ даёт grid-gap, поэтому собственный margin у карточек здесь
+   снимаем. */
 .wrap-wide {
   max-width: 900px;
 }
-.grp-grid {
+.panel-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 14px;
   align-items: start;
 }
-.grp-col {
+.panel-col {
   display: grid;
   gap: 14px;
   align-content: start;
 }
-.grp-col > .card,
-.grp-col > .card:first-child {
+.panel-col > .card,
+.panel-col > .card:first-child {
   margin-top: 0;
 }
 
-/* Шапка: приветствие, группа и метка режима — вместо общего .hero */
-.grp-head h1 {
+/* Шапка: приветствие, предмет (или группа) и метка режима — вместо общего .hero */
+.panel-head h1 {
   font-size: 22px;
   line-height: 1.2;
   margin: 0 0 4px;
   letter-spacing: -0.02em;
 }
-.grp-head p {
+.panel-head p {
   margin: 0 0 12px;
   color: var(--muted);
   font-size: 14px;
 }
-.grp-head b {
+.panel-head b {
   color: var(--text);
 }
-.grp-badge {
+.panel-badge {
   display: inline-block;
   background: var(--accent-soft);
   color: var(--accent);
@@ -1096,12 +1096,12 @@ a.meet-link:hover {
 }
 
 /* Ближайшее занятие: подпись — время — как часто — ссылка на Телемост */
-.grp-label {
+.panel-label {
   font-size: 13px;
   color: var(--muted);
   margin-bottom: 6px;
 }
-.grp-when {
+.panel-when {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1109,12 +1109,12 @@ a.meet-link:hover {
   font-size: 17px;
   font-weight: 600;
 }
-.grp-sub {
+.panel-sub {
   margin-top: 4px;
   font-size: 13.5px;
   color: var(--muted);
 }
-a.grp-join {
+a.panel-join {
   display: inline-block;
   margin-top: 12px;
   color: var(--accent);
@@ -1122,26 +1122,26 @@ a.grp-join {
   font-weight: 600;
   text-decoration: none;
 }
-a.grp-join:hover {
+a.panel-join:hover {
   filter: brightness(0.9);
 }
 
 /* Уведомления в Telegram — карточкой, в одном ряду с остальными */
-a.grp-tg {
+a.panel-tg {
   display: block;
   text-decoration: none;
   color: var(--text);
 }
-.grp-tg b {
+.panel-tg b {
   font-size: 15px;
 }
-.grp-tg small {
+.panel-tg small {
   display: block;
   margin-top: 4px;
   color: var(--muted);
   font-size: 13px;
 }
-.grp-tg.on {
+.panel-tg.on {
   color: var(--success);
   font-weight: 600;
 }

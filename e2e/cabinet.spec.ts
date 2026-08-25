@@ -10,16 +10,19 @@ test("кабинет: записи вместо сетки, все плашки 
   // Сетки нет — есть кабинет, и подзаголовок это подтверждает.
   await expect(page.getByText("Ваши записи")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
-  await expect(page.locator(".hero p")).toContainText("Ваши занятия и оплата");
-  await expect(page.locator(".hero p")).not.toContainText("Выберите удобное время");
+  const head = page.locator(".panel-head");
+  await expect(head).toContainText("Занятия по предмету «Питон»");
+  // Метка режима — только у группы: индивидуальному подписывать нечего.
+  await expect(head.locator(".panel-badge")).toHaveCount(0);
+  await expect(page.locator(".hero")).toHaveCount(0);
 
   // Плашки: ближайшее занятие, Телемост.
   await expect(page.getByText("Ближайшее занятие")).toBeVisible();
-  const meet = page.locator("a.meet-link");
+  const meet = page.locator("a.panel-join");
   await expect(meet).toContainText("Телемост");
   await expect(meet).toHaveAttribute("href", "https://telemost.yandex.ru/j/e2e");
   // Кнопки «Подключить уведомления в Telegram» больше нет.
-  await expect(page.locator("a.tg-link")).toHaveCount(0);
+  await expect(page.locator("a.panel-tg")).toHaveCount(0);
 
   // Деньги — одним блоком: итог, разбивка «долг / вперёд», срок и история оплат.
   const pay = page.locator(".pay-card");
@@ -157,7 +160,7 @@ test("оплачено вперёд: видно на самом занятии �
   await mockApi(page, { my });
   await page.goto(tokenUrl());
 
-  await expect(page.locator(".next-lesson").first()).toContainText("оплачено");
+  await expect(page.locator(".panel-when")).toContainText("оплачено");
   const pay = page.locator(".pay-card");
   await expect(pay.locator(".pay-ok")).toContainText("Ближайшее занятие оплачено");
   await expect(pay).toContainText("Оплачено вперёд: 1 занятие, до Вт, 14 июля включительно");
@@ -211,13 +214,13 @@ test("без подтверждённых занятий: Телемост, па
 
   await expect(page.getByText("ждёт подтверждения")).toBeVisible();
   // Ничего «занятийного» — Телемост, пакет, счета, ближайшее занятие скрыты.
-  await expect(page.locator("a.meet-link")).toHaveCount(0);
+  await expect(page.locator("a.panel-join")).toHaveCount(0);
   await expect(page.locator(".pay-card")).toHaveCount(0);
   await expect(page.getByText("К оплате")).toHaveCount(0);
   await expect(page.getByText("Ближайшее занятие")).toHaveCount(0);
   // Подключение уведомлений — тоже «занятийное»: пока занятие не подтверждено,
   // предлагать ученику подписку не на что.
-  await expect(page.locator("a.tg-link")).toHaveCount(0);
+  await expect(page.locator("a.panel-tg")).toHaveCount(0);
 });
 
 test("уведомления в Telegram: кнопка ведёт на бота с deep-link ученика", async ({ page }) => {
@@ -228,7 +231,7 @@ test("уведомления в Telegram: кнопка ведёт на бота 
   await mockApi(page, { my });
   await page.goto(tokenUrl());
 
-  const btn = page.locator("a.tg-link");
+  const btn = page.locator("a.panel-tg");
   await expect(btn).toContainText("Подключить уведомления в Telegram");
   await expect(btn).toContainText("Откроется бот");
   await expect(btn).toContainText("ссылку на Телемост");
@@ -243,8 +246,8 @@ test("уведомления уже подключены — вместо кно
   await mockApi(page, { my });
   await page.goto(tokenUrl());
 
-  await expect(page.locator(".tg-on")).toContainText("Уведомления в Telegram подключены");
-  await expect(page.locator("a.tg-link")).toHaveCount(0);
+  await expect(page.locator(".panel-tg.on")).toContainText("Уведомления в Telegram подключены");
+  await expect(page.locator("a.panel-tg")).toHaveCount(0);
 });
 
 test("нет «25-го кадра»: пока /api/my грузится — спиннер, сетка не мелькает", async ({ page }) => {
@@ -260,7 +263,10 @@ test("нет «25-го кадра»: пока /api/my грузится — сп�
   await expect(page.locator(".slots-grid")).toHaveCount(0);
 });
 
-test("записи показываются выше блока оплаты", async ({ page }) => {
+test("на телефоне записи показываются выше блока оплаты", async ({ page }) => {
+  // Расписание ученику главнее счёта. На широком экране это две колонки (записи
+  // слева, деньги справа), а в одну колонку они складываются именно в таком порядке.
+  await page.setViewportSize({ width: 390, height: 800 });
   await mockApi(page, { my: MY_FULL });
   await page.goto(tokenUrl());
   const records = await page.locator(".my-card", { hasText: "Ваши записи" }).boundingBox();
@@ -336,7 +342,7 @@ test("группа: состав, оплата и «Не смогу прийти
   await page.goto(tokenUrl());
 
   // Шапка кабинета группы — своя карточка вместо общего приветствия.
-  const head = page.locator(".grp-head");
+  const head = page.locator(".panel-head");
   await expect(head).toContainText("ОГЭ, суббота");
   await expect(head).toContainText("Групповые занятия · 3 участника");
   // Сетки записи нет вовсе — ни сразу, ни кнопкой «записаться ещё».
@@ -344,9 +350,9 @@ test("группа: состав, оплата и «Не смогу прийти
   await expect(page.getByRole("button", { name: "Записаться на другое время" })).toHaveCount(0);
 
   // Ближайшее занятие — карточкой: дата, повтор и ссылка на занятие.
-  await expect(page.locator(".grp-when")).toContainText("18 июля");
-  await expect(page.locator(".grp-sub")).toContainText("каждую субботу");
-  await expect(page.locator("a.grp-join")).toHaveAttribute(
+  await expect(page.locator(".panel-when")).toContainText("18 июля");
+  await expect(page.locator(".panel-sub")).toContainText("каждую субботу");
+  await expect(page.locator("a.panel-join")).toHaveAttribute(
     "href",
     "https://telemost.yandex.ru/j/group"
   );

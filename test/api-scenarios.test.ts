@@ -868,6 +868,8 @@ describe("/api/my — записи и плашка «ближайшее заня
     const my = await getMy(TOKEN());
     // Расписание группы строится из этого списка: серия одна, а дат нужно несколько.
     expect(my.upcoming.slice(0, 2)).toEqual([TUE_9, TUE2_9]);
+    // Не больше четырёх: дальше карточка только растягивалась бы.
+    expect(my.upcoming).toHaveLength(4);
     expect(my.nextLesson).toBe(my.upcoming[0]);
   });
 
