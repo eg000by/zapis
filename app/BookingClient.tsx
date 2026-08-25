@@ -130,6 +130,27 @@ function fmtSlotMsk(iso: string, lessons = 1): string {
   return `${day}, ${start}–${hmMsk(end.toISOString())} (МСК)`;
 }
 
+// «каждую субботу» / «каждый вторник» — как читается повтор серии. Род у дней недели
+// разный, поэтому список, а не склейка со словом «каждый».
+const EVERY_WEEKDAY = [
+  "каждый понедельник",
+  "каждый вторник",
+  "каждую среду",
+  "каждый четверг",
+  "каждую пятницу",
+  "каждую субботу",
+  "каждое воскресенье",
+];
+
+// «участник/участника/участников» по числу.
+function membersWord(n: number): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return "участник";
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "участника";
+  return "участников";
+}
+
 // Первая буква заглавная: Intl отдаёт день недели строчным («вт, 14 июля»).
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -284,6 +305,9 @@ export default function BookingClient({
   const [skipped, setSkipped] = useState<string[]>([]);
   // Ближайшее занятие (конкретная дата) — считает сервер с учётом отмен/переносов.
   const [nextLesson, setNextLesson] = useState<string | null>(null);
+  // Ближайшие занятия списком (ISO начала) — расписание группы: занятие лежит одной
+  // серией, а ученику нужны даты. У индивидуального ученика не используется.
+  const [upcoming, setUpcoming] = useState<string[]>([]);
   // Перенос/отмена: выбранная запись + действие (move/cancel) + режим (all — вся серия,
   // once — одно занятие) + дата занятия.
   const [rsEvent, setRsEvent] = useState<MyEvent | null>(null);
@@ -402,6 +426,7 @@ export default function BookingClient({
         setMeetLink(d.meetLink || "");
         setTgNotify(d.tgNotify || null);
         setGroup(d.group || null);
+        setUpcoming(Array.isArray(d.upcoming) ? d.upcoming : []);
         setNextLesson(d.nextLesson || null);
       })
       .catch(() => setMy([]));
@@ -646,8 +671,11 @@ export default function BookingClient({
   }
 
   // «Не смогу прийти» (группа): предупреждает преподавателя и ничего не двигает.
-  async function reportAbsence(ev: MyEvent) {
-    if (!confirm(`Предупредить преподавателя, что вас не будет ${fmtMsk(ev.start, ev.lessons)}?`)) {
+  // «Не смогу прийти» по КОНКРЕТНОМУ занятию: у группы занятие приходит серией,
+  // и её start — дата первого занятия (часто в прошлом). Предупреждать нужно про ту
+  // дату, которую ученик видит в расписании.
+  async function reportAbsence(startIso: string, lessons = 1) {
+    if (!confirm(`Предупредить преподавателя, что вас не будет ${fmtMsk(startIso, lessons)}?`)) {
       return;
     }
     setBusyAction(true);
@@ -656,12 +684,12 @@ export default function BookingClient({
       const res = await fetch("/api/absence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, start: ev.start }),
+        body: JSON.stringify({ token, start: startIso }),
       });
       const data = await res.json();
       if (!res.ok) setNotice(data.error || "Не удалось отправить. Напишите преподавателю.");
       else {
-        setSkipped((cur) => [...cur, ev.start]);
+        setSkipped((cur) => [...cur, startIso]);
         setNotice("Преподаватель предупреждён. Занятие остаётся в расписании группы.");
       }
     } catch {
@@ -844,32 +872,353 @@ export default function BookingClient({
     );
   }
 
-  return (
-    <div className="wrap">
-      <div className="hero">
-        <h1>Здравствуйте, {greetName}! 👋</h1>
-        {/* Подзаголовок меняется по режиму экрана: пока выбираем время — приглашение
-            к записи; когда записи уже есть и показан кабинет — что здесь лежит. */}
-        <p>
-          {myLoading ? (
-            "Загружаем ваши записи…"
-          ) : showGrid ? (
-            <>
-              {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"}{" "}
-              по предмету «<b>{subject}</b>».
-            </>
-          ) : group ? (
-            <>
-              Занятия в группе «<b>{group.name}</b>» — {group.subject}.
-            </>
+  // Деньги — одна карточка. Вынесена в переменную: у участника группы кабинет
+  // раскладывается в две колонки, и та же карточка живёт в правой из них.
+  const payCard = showPayCard ? (
+    <div className="card my-card pay-card">
+      {dueTotal > 0 ? (
+        <>
+          <div className="day-title">К оплате сейчас</div>
+          <div className="pay-total">{fmtRub(dueTotal)}</div>
+          <div className="pay-split">
+            {dueDebt > 0 && dueAhead > 0
+              ? `из них долг за прошедшие — ${fmtRub(dueDebt)} · вперёд — ${fmtRub(dueAhead)}`
+              : dueDebt > 0
+                ? "долг за уже проведённые занятия"
+                : "предоплата за будущие занятия"}
+          </div>
+          <div className={`pay-due${dueDebt > 0 ? " overdue" : ""}`}>
+            {dueDebt > 0
+              ? "⚠️ Занятия уже проведены — оплатите, пожалуйста, сегодня"
+              : nextLesson
+                ? `📅 Оплатить до ${fmtDateMsk(nextLesson)} — начала следующего занятия`
+                : "📅 Оплатить до следующего занятия"}
+          </div>
+
+          {/* Экзаменационному ученику показываем ДВА способа оплатить один и тот же
+              счёт: поштучно и пакетом. Пакет не добавляется к сумме — он её закрывает. */}
+          {packageOffer ? (
+            <div className="pay-options">
+              <div className="pay-opt">
+                <div className="pay-opt-head">
+                  <b>По одному занятию</b>
+                  <span className="pay-opt-price">{fmtRub(dueTotal)}</span>
+                </div>
+                <div className="pay-opt-note">
+                  {payments.length === 1 && payments[0].note
+                    ? payments[0].note
+                    : `${payments.length} ${invoicesWord(payments.length)}: долг и ближайшее занятие`}
+                </div>
+                {payments.length === 1 ? (
+                  payments[0].payLink ? (
+                    <a className="pay-btn" href={payments[0].payLink} target="_blank" rel="noreferrer">
+                      Оплатить {fmtRub(dueTotal)} ↗
+                    </a>
+                  ) : !payHint ? (
+                    <span className="badge wait">ждём ссылку на оплату</span>
+                  ) : null
+                ) : (
+                  <div className="pay-list">
+                    {payments.map((p) => (
+                      <div key={p.id} className="pay-row">
+                        <span>{fmtRub(p.amountKopecks)}</span>
+                        {p.payLink ? (
+                          <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
+                            Оплатить ↗
+                          </a>
+                        ) : !payHint ? (
+                          <span className="badge wait">ждём ссылку</span>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="pay-opt best">
+                <div className="pay-opt-head">
+                  <b>
+                    {packageOffer.exam
+                      ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
+                      : `Месяц вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
+                  </b>
+                  <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
+                  {/* Выгоду показываем, только если она есть: при индивидуальной
+                      ставке пакет может не быть дешевле поштучной оплаты. */}
+                  {packageOffer.savingsKopecks > 0 && (
+                    <span className="pkg-save">
+                      −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
+                    </span>
+                  )}
+                </div>
+                <div className="pay-opt-note">
+                  {packageOffer.exam
+                    ? "Пакет закрывает текущий счёт: занятия спишутся с него, платить отдельно не нужно."
+                    : "Один платёж закрывает текущий счёт и остальные занятия месяца — платить отдельно не нужно."}
+                </div>
+                {packageOffer.payLink ? (
+                  <a
+                    className="pay-btn primary"
+                    href={packageOffer.payLink}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {packageOffer.exam ? "Оплатить пакет" : "Оплатить месяц"}{" "}
+                    {fmtRub(packageOffer.amountKopecks)} ↗
+                  </a>
+                ) : !payHint ? (
+                  <span className="badge wait">ждём ссылку на оплату</span>
+                ) : null}
+              </div>
+            </div>
+          ) : payments.length === 1 ? (
+            payments[0].payLink ? (
+              <a className="pay-btn primary" href={payments[0].payLink} target="_blank" rel="noreferrer">
+                Оплатить {fmtRub(dueTotal)} ↗
+              </a>
+            ) : !payHint ? (
+              <span className="badge wait">ждём ссылку на оплату</span>
+            ) : null
+          ) : (
+            <div className="pay-list">
+              {payments.map((p) => (
+                <div key={p.id} className="pay-row">
+                  <div className="my-info">
+                    <b>{fmtRub(p.amountKopecks)}</b>
+                    {p.note && <span className="my-when">{p.note}</span>}
+                  </div>
+                  {p.payLink ? (
+                    <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
+                      Оплатить ↗
+                    </a>
+                  ) : !payHint ? (
+                    <span className="badge wait">ждём ссылку</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+          {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
+        </>
+      ) : (
+        <>
+          <div className="day-title">Оплата</div>
+          <div className="pay-ok">
+            ✅ {balance?.nextPaid ? "Ближайшее занятие оплачено" : "Всё оплачено"}
+          </div>
+          <div className="pay-split">
+            {balance && balance.aheadHours > 0 && balance.paidUntil
+              ? `Оплачено вперёд: ${balance.aheadHours} ${lessonsWord(balance.aheadHours)}, до ${fmtDateMsk(balance.paidUntil)} включительно · платить сейчас ничего не нужно`
+              : "Платить сейчас ничего не нужно"}
+          </div>
+          {balance && balance.balanceKopecks > 0 && (
+            <div className="pay-split">Остаток на балансе: {fmtRub(balance.balanceKopecks)}</div>
+          )}
+          {/* Оплатить ещё дальше вперёд — по желанию: счёта нет, поэтому это
+              предложение, а не требование, и подписано именно так. */}
+          {packageOffer && (
+            <div className="pay-opt ahead">
+              <div className="pay-opt-head">
+                <b>
+                  {packageOffer.exam
+                    ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
+                    : `Оплатить вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
+                </b>
+                <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
+                {packageOffer.savingsKopecks > 0 && (
+                  <span className="pkg-save">
+                    −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
+                  </span>
+                )}
+              </div>
+              <div className="pay-opt-note">
+                По желанию: закрыть следующие занятия одним платежом, чтобы не платить
+                перед каждым.
+              </div>
+              {packageOffer.payLink ? (
+                <a className="pay-btn" href={packageOffer.payLink} target="_blank" rel="noreferrer">
+                  Оплатить {fmtRub(packageOffer.amountKopecks)} ↗
+                </a>
+              ) : !payHint ? (
+                <span className="badge wait">ждём ссылку на оплату</span>
+              ) : null}
+            </div>
+          )}
+          {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
+        </>
+      )}
+
+      {/* История оплат: «я же платил» ученик проверяет сам. */}
+      {paidHistory.length > 0 && (
+        <details className="pay-history">
+          <summary>Оплачено ранее ({paidHistory.length})</summary>
+          {paidHistory.map((h) => (
+            <div key={h.id} className="pay-hist-row">
+              <span className="my-when">{h.paidAt ? fmtDateMsk(h.paidAt) : "—"}</span>
+              <b>{fmtRub(h.amountKopecks)}</b>
+              {h.note && <span className="my-when">{h.note}</span>}
+            </div>
+          ))}
+        </details>
+      )}
+    </div>
+  ) : null;
+
+  // Кабинет участника группы. Не сетка записи, а панель: когда занятие, куда
+  // подключиться, сколько платить и кто ещё в группе. Раскладка — карточками: на
+  // широком экране в две колонки, на телефоне в одну.
+  const grpLessons = my?.[0]?.lessons ?? 1;
+  // «Дальше — каждую субботу»: у группы занятие еженедельное, и повтор понятнее
+  // словами, чем списком одинаковых дат.
+  const grpEvery =
+    nextLesson && my?.some((e) => e.recurring)
+      ? EVERY_WEEKDAY[mskDateOf(new Date(nextLesson)).wd]
+      : "";
+
+  const groupCabinet = group ? (
+    <div className="grp-grid">
+      <div className="grp-col">
+        <div className="card grp-head">
+          <h1>Здравствуйте, {greetName}! 👋</h1>
+          <p>
+            Группа «<b>{group.name}</b>» — {group.subject}
+          </p>
+          <span className="grp-badge">
+            Групповые занятия · {group.members.length} {membersWord(group.members.length)}
+          </span>
+        </div>
+
+        {hasConfirmedLessons && nextLesson && (
+          <div className="card">
+            <div className="grp-label">🕒 Ближайшее занятие</div>
+            <div className="grp-when">
+              {fmtMsk(nextLesson, grpLessons)}
+              {balance?.nextPaid && <span className="badge ok">✅ оплачено</span>}
+            </div>
+            {grpEvery && <div className="grp-sub">Дальше — {grpEvery}</div>}
+            {meetLink && (
+              <a className="grp-join" href={meetLink} target="_blank" rel="noreferrer">
+                🎥 Подключиться к занятию (Яндекс Телемост) ↗
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Расписание — датами, а не «еженедельно»: занятие у группы одно на всех и
+            лежит одной серией, но ученику нужны конкретные числа и оплата по каждому. */}
+        <div className="card my-card">
+          <div className="day-title">Расписание</div>
+          {upcoming.length === 0 ? (
+            <p className="hint" style={{ margin: 0 }}>
+              Занятия пока не назначены. Время ставит преподаватель — оно появится здесь.
+            </p>
           ) : (
             <>
-              Ваши занятия и оплата по предмету «<b>{subject}</b>».
+              {upcoming.map((iso) => {
+                const paid = !!balance?.paidUntil && new Date(iso) <= new Date(balance.paidUntil);
+                const told = skipped.includes(iso);
+                return (
+                  <div key={iso} className="my-item">
+                    <div className="my-row">
+                      <div className="my-info">
+                        <span className="my-when when-main">{fmtMsk(iso, grpLessons)}</span>
+                        {/* Ставка не задана — про оплату молчим, а не пишем «не оплачено». */}
+                        {balance && (
+                          <span className={`badge ${paid ? "ok" : "due"}`}>
+                            {paid ? "✅ оплачено" : "не оплачено"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="my-actions">
+                        <button
+                          className="mini"
+                          disabled={busyAction || told}
+                          onClick={() => reportAbsence(iso, grpLessons)}
+                        >
+                          {told ? "Предупредили ✓" : "Не смогу прийти"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="hint" style={{ margin: "12px 2px 0" }}>
+                Время занятий общее для группы: перенести или отменить его может только
+                преподаватель. Не сможете прийти — предупредите кнопкой у своей даты.
+              </p>
             </>
           )}
-        </p>
-        {showGrid && <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>}
+        </div>
       </div>
+
+      <div className="grp-col">
+        {payCard}
+
+        {/* Состав группы — только имена: чужие оплаты и контакты не показываем.
+            Свободные места видно сразу, чтобы вопрос «можно позвать друга?» решался
+            без переписки. */}
+        <div className="card group-card">
+          <div className="day-title">Ваша группа</div>
+          <div className="group-members">
+            {group.members.map((m) => (
+              <span key={m} className="group-chip">
+                🧑‍🎓 {m}
+              </span>
+            ))}
+            {group.members.length < group.limit && (
+              <span className="group-chip free">
+                ＋ {group.limit - group.members.length}{" "}
+                {group.limit - group.members.length === 1 ? "место свободно" : "места свободно"}
+              </span>
+            )}
+          </div>
+          <p className="hint" style={{ margin: "10px 2px 0" }}>
+            Только имена: чужие оплаты и контакты не показываем.
+          </p>
+        </div>
+
+        {hasConfirmedLessons &&
+          tgNotify &&
+          (tgNotify.connected ? (
+            <div className="card grp-tg on">✅ Уведомления в Telegram подключены</div>
+          ) : (
+            <a className="card grp-tg" href={tgNotify.url} target="_blank" rel="noreferrer">
+              <b>🔔 Подключить уведомления в Telegram →</b>
+              <small>
+                Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
+                ссылку на Телемост.
+              </small>
+            </a>
+          ))}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div className={`wrap${group ? " wrap-wide" : ""}`}>
+      {/* У участника группы приветствие живёт в его карточке-шапке (см. groupCabinet). */}
+      {!group && (
+        <div className="hero">
+          <h1>Здравствуйте, {greetName}! 👋</h1>
+          {/* Подзаголовок меняется по режиму экрана: пока выбираем время — приглашение
+              к записи; когда записи уже есть и показан кабинет — что здесь лежит. */}
+          <p>
+            {myLoading ? (
+              "Загружаем ваши записи…"
+            ) : showGrid ? (
+              <>
+                {trial ? "Выберите время для пробного занятия" : "Выберите удобное время для занятий"}{" "}
+                по предмету «<b>{subject}</b>».
+              </>
+            ) : (
+              <>
+                Ваши занятия и оплата по предмету «<b>{subject}</b>».
+              </>
+            )}
+          </p>
+          {showGrid && <span className="tz-badge">🕒 Время указано по Москве (МСК)</span>}
+        </div>
+      )}
 
       {notice && (
         <div className="notice" onClick={() => setNotice(null)}>
@@ -880,7 +1229,7 @@ export default function BookingClient({
       {/* Пока не знаем, есть ли записи, — спиннер вместо сетки (без «25-го кадра»). */}
       {myLoading && <div className="spinner" />}
 
-      {hasConfirmedLessons && nextLesson && (
+      {!group && hasConfirmedLessons && nextLesson && (
         <div className="next-lesson">
           📌 Ближайшее занятие: <b>{fmtMsk(nextLesson)}</b>
           {/* Оплата вперёд должна быть видна там, где ученик смотрит на само занятие,
@@ -889,7 +1238,7 @@ export default function BookingClient({
         </div>
       )}
 
-      {hasConfirmedLessons && meetLink && (
+      {!group && hasConfirmedLessons && meetLink && (
         <a className="next-lesson meet-link" href={meetLink} target="_blank" rel="noreferrer">
           🎥 Подключиться к занятию (Яндекс Телемост) ↗
         </a>
@@ -898,7 +1247,7 @@ export default function BookingClient({
       {/* Уведомления в Telegram. Бот не может написать первым — ученик подключается
           сам по deep-link, и /start привязывает его чат. Подключённому кнопку не
           показываем: нажимать больше нечего. */}
-      {hasConfirmedLessons && tgNotify && (
+      {!group && hasConfirmedLessons && tgNotify && (
         tgNotify.connected ? (
           <div className="next-lesson tg-on">✅ Уведомления в Telegram подключены</div>
         ) : (
@@ -915,7 +1264,7 @@ export default function BookingClient({
       )}
 
       {/* Записи — выше денег: расписание для ученика главнее счёта. */}
-      {my && my.length > 0 && (
+      {!group && my && my.length > 0 && (
         <div className="card my-card">
           <div className="day-title">Ваши записи</div>
           {my.map((ev) => (
@@ -942,46 +1291,31 @@ export default function BookingClient({
                     {ev.status === "confirmed" ? "✅ подтверждено" : "⏳ ждёт подтверждения"}
                   </span>
                 </div>
-                {/* В группе занятие общее: перенести или отменить его может только
-                    преподаватель. Ученику оставляем единственное действие — сказать,
-                    что не придёт; календарь при этом не меняется. */}
-                {group ? (
-                  <div className="my-actions">
-                    <button
-                      className="mini"
-                      disabled={busyAction || skipped.includes(ev.start)}
-                      onClick={() => reportAbsence(ev)}
-                    >
-                      {skipped.includes(ev.start) ? "Предупредили ✓" : "Не смогу прийти"}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="my-actions">
+                <div className="my-actions">
+                  <button
+                    className="mini"
+                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                    onClick={() => startReschedule(ev)}
+                  >
+                    Перенести
+                  </button>
+                  {ev.moved && (
                     <button
                       className="mini"
                       disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                      onClick={() => startReschedule(ev)}
+                      onClick={() => returnEvent(ev)}
                     >
-                      Перенести
+                      Вернуть
                     </button>
-                    {ev.moved && (
-                      <button
-                        className="mini"
-                        disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                        onClick={() => returnEvent(ev)}
-                      >
-                        Вернуть
-                      </button>
-                    )}
-                    <button
-                      className="mini danger"
-                      disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
-                      onClick={() => startCancel(ev)}
-                    >
-                      Отменить
-                    </button>
-                  </div>
-                )}
+                  )}
+                  <button
+                    className="mini danger"
+                    disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
+                    onClick={() => startCancel(ev)}
+                  >
+                    Отменить
+                  </button>
+                </div>
               </div>
               {/* Выбор «одно занятие / вся серия» — сразу под своей записью. */}
               {rsEvent?.id === ev.id && rsPanel}
@@ -1007,222 +1341,11 @@ export default function BookingClient({
 
       {/* Деньги — ОДИН блок: сумма к оплате, из чего она состоит, срок и способ.
           Раньше здесь были две карточки («Баланс» и «К оплате») с разными числами,
-          и было непонятно, какое из них платить. */}
-      {/* Состав группы — только имена: чужие оплаты и контакты не показываем.
-          Свободные места видно сразу, чтобы вопрос «можно позвать друга?» решался
-          без переписки. */}
-      {group && !myLoading && (
-        <div className="card group-card">
-          <div className="day-title">Ваша группа</div>
-          <div className="group-members">
-            {group.members.map((m) => (
-              <span key={m} className="group-chip">
-                🧑‍🎓 {m}
-              </span>
-            ))}
-            {group.members.length < group.limit && (
-              <span className="group-chip free">
-                ＋ {group.limit - group.members.length}{" "}
-                {group.limit - group.members.length === 1 ? "место свободно" : "места свободно"}
-              </span>
-            )}
-          </div>
-          <p className="hint" style={{ margin: "10px 2px 0" }}>
-            Время занятий общее для группы. Перенести или отменить может только
-            преподаватель — если не сможете прийти, предупредите его кнопкой у занятия.
-          </p>
-        </div>
-      )}
+          и было непонятно, какое из них платить. У участника группы этот же блок
+          лежит внутри groupCabinet, во второй колонке. */}
+      {!group && payCard}
 
-      {showPayCard && (
-        <div className="card my-card pay-card">
-          {dueTotal > 0 ? (
-            <>
-              <div className="day-title">К оплате сейчас</div>
-              <div className="pay-total">{fmtRub(dueTotal)}</div>
-              <div className="pay-split">
-                {dueDebt > 0 && dueAhead > 0
-                  ? `из них долг за прошедшие — ${fmtRub(dueDebt)} · вперёд — ${fmtRub(dueAhead)}`
-                  : dueDebt > 0
-                    ? "долг за уже проведённые занятия"
-                    : "предоплата за будущие занятия"}
-              </div>
-              <div className={`pay-due${dueDebt > 0 ? " overdue" : ""}`}>
-                {dueDebt > 0
-                  ? "⚠️ Занятия уже проведены — оплатите, пожалуйста, сегодня"
-                  : nextLesson
-                    ? `📅 Оплатить до ${fmtDateMsk(nextLesson)} — начала следующего занятия`
-                    : "📅 Оплатить до следующего занятия"}
-              </div>
-
-              {/* Экзаменационному ученику показываем ДВА способа оплатить один и тот же
-                  счёт: поштучно и пакетом. Пакет не добавляется к сумме — он её закрывает. */}
-              {packageOffer ? (
-                <div className="pay-options">
-                  <div className="pay-opt">
-                    <div className="pay-opt-head">
-                      <b>По одному занятию</b>
-                      <span className="pay-opt-price">{fmtRub(dueTotal)}</span>
-                    </div>
-                    <div className="pay-opt-note">
-                      {payments.length === 1 && payments[0].note
-                        ? payments[0].note
-                        : `${payments.length} ${invoicesWord(payments.length)}: долг и ближайшее занятие`}
-                    </div>
-                    {payments.length === 1 ? (
-                      payments[0].payLink ? (
-                        <a className="pay-btn" href={payments[0].payLink} target="_blank" rel="noreferrer">
-                          Оплатить {fmtRub(dueTotal)} ↗
-                        </a>
-                      ) : !payHint ? (
-                        <span className="badge wait">ждём ссылку на оплату</span>
-                      ) : null
-                    ) : (
-                      <div className="pay-list">
-                        {payments.map((p) => (
-                          <div key={p.id} className="pay-row">
-                            <span>{fmtRub(p.amountKopecks)}</span>
-                            {p.payLink ? (
-                              <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
-                                Оплатить ↗
-                              </a>
-                            ) : !payHint ? (
-                              <span className="badge wait">ждём ссылку</span>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pay-opt best">
-                    <div className="pay-opt-head">
-                      <b>
-                        {packageOffer.exam
-                          ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
-                          : `Месяц вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
-                      </b>
-                      <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
-                      {/* Выгоду показываем, только если она есть: при индивидуальной
-                          ставке пакет может не быть дешевле поштучной оплаты. */}
-                      {packageOffer.savingsKopecks > 0 && (
-                        <span className="pkg-save">
-                          −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="pay-opt-note">
-                      {packageOffer.exam
-                        ? "Пакет закрывает текущий счёт: занятия спишутся с него, платить отдельно не нужно."
-                        : "Один платёж закрывает текущий счёт и остальные занятия месяца — платить отдельно не нужно."}
-                    </div>
-                    {packageOffer.payLink ? (
-                      <a
-                        className="pay-btn primary"
-                        href={packageOffer.payLink}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {packageOffer.exam ? "Оплатить пакет" : "Оплатить месяц"}{" "}
-                        {fmtRub(packageOffer.amountKopecks)} ↗
-                      </a>
-                    ) : !payHint ? (
-                      <span className="badge wait">ждём ссылку на оплату</span>
-                    ) : null}
-                  </div>
-                </div>
-              ) : payments.length === 1 ? (
-                payments[0].payLink ? (
-                  <a className="pay-btn primary" href={payments[0].payLink} target="_blank" rel="noreferrer">
-                    Оплатить {fmtRub(dueTotal)} ↗
-                  </a>
-                ) : !payHint ? (
-                  <span className="badge wait">ждём ссылку на оплату</span>
-                ) : null
-              ) : (
-                <div className="pay-list">
-                  {payments.map((p) => (
-                    <div key={p.id} className="pay-row">
-                      <div className="my-info">
-                        <b>{fmtRub(p.amountKopecks)}</b>
-                        {p.note && <span className="my-when">{p.note}</span>}
-                      </div>
-                      {p.payLink ? (
-                        <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
-                          Оплатить ↗
-                        </a>
-                      ) : !payHint ? (
-                        <span className="badge wait">ждём ссылку</span>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
-            </>
-          ) : (
-            <>
-              <div className="day-title">Оплата</div>
-              <div className="pay-ok">
-                ✅ {balance?.nextPaid ? "Ближайшее занятие оплачено" : "Всё оплачено"}
-              </div>
-              <div className="pay-split">
-                {balance && balance.aheadHours > 0 && balance.paidUntil
-                  ? `Оплачено вперёд: ${balance.aheadHours} ${lessonsWord(balance.aheadHours)}, до ${fmtDateMsk(balance.paidUntil)} включительно · платить сейчас ничего не нужно`
-                  : "Платить сейчас ничего не нужно"}
-              </div>
-              {balance && balance.balanceKopecks > 0 && (
-                <div className="pay-split">Остаток на балансе: {fmtRub(balance.balanceKopecks)}</div>
-              )}
-              {/* Оплатить ещё дальше вперёд — по желанию: счёта нет, поэтому это
-                  предложение, а не требование, и подписано именно так. */}
-              {packageOffer && (
-                <div className="pay-opt ahead">
-                  <div className="pay-opt-head">
-                    <b>
-                      {packageOffer.exam
-                        ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
-                        : `Оплатить вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
-                    </b>
-                    <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
-                    {packageOffer.savingsKopecks > 0 && (
-                      <span className="pkg-save">
-                        −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="pay-opt-note">
-                    По желанию: закрыть следующие занятия одним платежом, чтобы не платить
-                    перед каждым.
-                  </div>
-                  {packageOffer.payLink ? (
-                    <a className="pay-btn" href={packageOffer.payLink} target="_blank" rel="noreferrer">
-                      Оплатить {fmtRub(packageOffer.amountKopecks)} ↗
-                    </a>
-                  ) : !payHint ? (
-                    <span className="badge wait">ждём ссылку на оплату</span>
-                  ) : null}
-                </div>
-              )}
-              {payHint && <p className="hint" style={{ marginTop: 12 }}>💳 {payHint}</p>}
-            </>
-          )}
-
-          {/* История оплат: «я же платил» ученик проверяет сам. */}
-          {paidHistory.length > 0 && (
-            <details className="pay-history">
-              <summary>Оплачено ранее ({paidHistory.length})</summary>
-              {paidHistory.map((h) => (
-                <div key={h.id} className="pay-hist-row">
-                  <span className="my-when">{h.paidAt ? fmtDateMsk(h.paidAt) : "—"}</span>
-                  <b>{fmtRub(h.amountKopecks)}</b>
-                  {h.note && <span className="my-when">{h.note}</span>}
-                </div>
-              ))}
-            </details>
-          )}
-        </div>
-      )}
+      {groupCabinet}
 
       {/* Активный перенос: сетка ниже выбирает новое время. */}
       {rescheduling && (

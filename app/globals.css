@@ -669,6 +669,12 @@ select:focus {
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* «не оплачено» в расписании группы — не тревога и не хорошая новость, а факт:
+   акцентный тег читался бы как отметка «всё в порядке». */
+.badge.due {
+  background: var(--busy-bg);
+  color: var(--muted);
+}
 .my-actions {
   display: flex;
   flex-direction: column;
@@ -1002,4 +1008,104 @@ a.meet-link:hover {
   width: 20px;
   height: 20px;
   flex: 0 0 auto;
+}
+
+/* ── Кабинет участника группы ───────────────────────────────────────────────
+   Не сетка записи, а панель: когда занятие, куда подключиться, сколько платить и
+   кто ещё в группе. Раскладка карточками — две колонки на широком экране, одна на
+   телефоне (auto-fit сам сложит). Внутри колонок отступ даёт grid-gap, поэтому
+   собственный margin у карточек здесь снимаем. */
+.wrap-wide {
+  max-width: 900px;
+}
+.grp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.grp-col {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.grp-col > .card,
+.grp-col > .card:first-child {
+  margin-top: 0;
+}
+
+/* Шапка: приветствие, группа и метка режима — вместо общего .hero */
+.grp-head h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  margin: 0 0 4px;
+  letter-spacing: -0.02em;
+}
+.grp-head p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.grp-head b {
+  color: var(--text);
+}
+.grp-badge {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* Ближайшее занятие: подпись — время — как часто — ссылка на Телемост */
+.grp-label {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.grp-when {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.grp-sub {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+a.grp-join {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+a.grp-join:hover {
+  filter: brightness(0.9);
+}
+
+/* Уведомления в Telegram — карточкой, в одном ряду с остальными */
+a.grp-tg {
+  display: block;
+  text-decoration: none;
+  color: var(--text);
+}
+.grp-tg b {
+  font-size: 15px;
+}
+.grp-tg small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.grp-tg.on {
+  color: var(--success);
+  font-weight: 600;
 }

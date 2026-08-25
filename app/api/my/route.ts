@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
-import { listContactEvents, nextOccurrenceForContact } from "@/lib/google";
+import { listContactEvents, nextOccurrencesForContact } from "@/lib/google";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
 import { getGroup, listGroupMembers, GROUP_LIMIT } from "@/lib/groups";
 import {
@@ -69,6 +69,9 @@ const NO_BILLING = {
   scheduleKey: string;
 };
 
+// Сколько ближайших занятий показывать списком (расписание группы).
+const UPCOMING_LIMIT = 6;
+
 export const dynamic = "force-dynamic";
 
 // Список записей владельца ссылки + счета к оплате + баланс (долг / оплачено до /
@@ -102,12 +105,14 @@ export async function GET(req: Request) {
 
     // Три независимых источника — параллельно (два запроса к календарю + БД);
     // nextLesson и биллинг — best-effort: их сбой не ломает список записей.
-    const [events, nextLesson, billing] = await Promise.all([
+    const [events, upcoming, billing] = await Promise.all([
       listContactEvents(key, new Date().toISOString()),
-      // Ближайшее занятие (конкретная дата) — с учётом отмен и переносов.
-      nextOccurrenceForContact(key).catch((e) => {
-        console.error("/api/my nextLesson lookup failed", e);
-        return null;
+      // Ближайшие занятия (конкретные даты) — с учётом отмен и переносов. Первое из
+      // них и есть nextLesson; остальные нужны расписанию группы, где занятие лежит
+      // одной серией, а ученику показываются даты.
+      nextOccurrencesForContact(key, UPCOMING_LIMIT).catch((e) => {
+        console.error("/api/my upcoming lookup failed", e);
+        return [] as string[];
       }),
       // Автосчета + счета к оплате + баланс.
       (async () => {
@@ -266,7 +271,8 @@ export async function GET(req: Request) {
       packageOffer: hasConfirmed ? billing.packageOffer : null,
       paidHistory: hasConfirmed ? billing.paidHistory : [],
       tgNotify: hasConfirmed ? billing.tgNotify : null,
-      nextLesson: hasConfirmed ? nextLesson : null,
+      nextLesson: hasConfirmed ? upcoming[0] || null : null,
+      upcoming: hasConfirmed ? upcoming : [],
       // Группа — не «занятийные» данные: даже до первого подтверждённого занятия
       // ученик должен видеть, что записан в группу, и что сетки записи здесь нет.
       group: billing.group,

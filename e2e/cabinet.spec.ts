@@ -335,10 +335,27 @@ test("группа: состав, оплата и «Не смогу прийти
   await mockApi(page, { my: MY_GROUP });
   await page.goto(tokenUrl());
 
-  await expect(page.locator(".hero p")).toContainText("Занятия в группе «ОГЭ, суббота»");
+  // Шапка кабинета группы — своя карточка вместо общего приветствия.
+  const head = page.locator(".grp-head");
+  await expect(head).toContainText("ОГЭ, суббота");
+  await expect(head).toContainText("Групповые занятия · 3 участника");
   // Сетки записи нет вовсе — ни сразу, ни кнопкой «записаться ещё».
   await expect(page.locator(".slots-grid")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "＋ Записаться на другое время" })).toHaveCount(0);
+
+  // Ближайшее занятие — карточкой: дата, повтор и ссылка на занятие.
+  await expect(page.locator(".grp-when")).toContainText("18 июля");
+  await expect(page.locator(".grp-sub")).toContainText("каждую субботу");
+  await expect(page.locator("a.grp-join")).toHaveAttribute(
+    "href",
+    "https://telemost.yandex.ru/j/group"
+  );
+
+  // Расписание — конкретными датами, с оплатой по каждому занятию.
+  const rows = page.locator(".my-card .my-row");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1)).toContainText("25 июля");
+  await expect(rows.nth(1)).toContainText("не оплачено");
 
   // Состав — только имена, плюс свободные места.
   const group = page.locator(".group-card");
@@ -347,19 +364,22 @@ test("группа: состав, оплата и «Не смогу прийти
   await expect(group).toContainText("1 место свободно");
 
   // Управлять общим занятием ученик не может.
-  const row = page.locator(".my-card .my-row").first();
+  const row = rows.nth(1);
   await expect(row.getByRole("button", { name: "Перенести" })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Отменить" })).toHaveCount(0);
 
-  // Единственное действие — предупредить преподавателя; календарь не меняется.
+  // Единственное действие — предупредить преподавателя, причём про ТУ дату, на
+  // которой нажали: у серии свой start (первое занятие), и он тут ни при чём.
   const posted: string[] = [];
   page.on("request", (r) => {
     if (r.url().includes("/api/absence")) posted.push(r.postData() || "");
   });
   page.on("dialog", (d) => d.accept());
   await row.getByRole("button", { name: "Не смогу прийти" }).click();
-  await expect.poll(() => posted.at(-1)).toContain('"start":"2026-07-18T13:00:00.000Z"');
+  await expect.poll(() => posted.at(-1)).toContain('"start":"2026-07-25T13:00:00.000Z"');
   await expect(row.getByRole("button", { name: "Предупредили ✓" })).toBeDisabled();
+  // Соседние даты остаются доступными — предупреждение относится к одной из них.
+  await expect(rows.first().getByRole("button", { name: "Не смогу прийти" })).toBeEnabled();
 
   // Деньги остаются персональными — по цене группы.
   await expect(page.locator(".pay-card")).toContainText("750 ₽");

@@ -522,10 +522,11 @@ export async function liveEventIdsForContact(key: string): Promise<Set<string>> 
   return ids;
 }
 
-// Ближайшее будущее занятие владельца ссылки (ISO начала) — конкретная дата, с учётом
+// Ближайшие будущие занятия владельца ссылки (ISO начала) — конкретные даты, с учётом
 // отменённых недель (EXDATE) и переносов. Разворачиваем все занятия в инстансы по времени
-// и берём первый непрошедший. null — предстоящих занятий нет.
-export async function nextOccurrenceForContact(key: string): Promise<string | null> {
+// и берём непрошедшие. Кабинету участника группы нужен именно список: занятие там одно
+// на всех и приходит одной серией, а расписание ученик читает датами.
+export async function nextOccurrencesForContact(key: string, limit = 1): Promise<string[]> {
   const cal = calendarClient();
   const now = new Date();
   const res = await cal.events.list({
@@ -536,15 +537,22 @@ export async function nextOccurrenceForContact(key: string): Promise<string | nu
     orderBy: "startTime",
     maxResults: 30,
   });
+  const out: string[] = [];
   for (const i of res.data.items || []) {
     if (i.status === "cancelled") continue;
     // Только подтверждённые: неподтверждённая заявка/перенос — ещё не «ближайшее занятие».
     if ((i.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
     const s = i.start?.dateTime || i.start?.date;
     if (!s || new Date(s).getTime() < now.getTime()) continue;
-    return new Date(s).toISOString();
+    out.push(new Date(s).toISOString());
+    if (out.length >= limit) break;
   }
-  return null;
+  return out;
+}
+
+// Ближайшее занятие одной строкой. null — предстоящих занятий нет.
+export async function nextOccurrenceForContact(key: string): Promise<string | null> {
+  return (await nextOccurrencesForContact(key, 1))[0] ?? null;
 }
 
 // Возвращает записи владельца ссылки (по contactKey), у которых есть будущие

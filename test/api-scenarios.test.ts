@@ -742,6 +742,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       packageOffer: null,
       paidHistory: [],
       nextLesson: null,
+      upcoming: [],
       lessonPriceKopecks: 0,
       tgNotify: null,
       group: null,
@@ -862,11 +863,21 @@ describe("/api/my — записи и плашка «ближайшее заня
     expect(my.nextLesson).toBe(TUE_9);
   });
 
+  it("upcoming — ближайшие занятия серии конкретными датами", async () => {
+    await bookConfirmed();
+    const my = await getMy(TOKEN());
+    // Расписание группы строится из этого списка: серия одна, а дат нужно несколько.
+    expect(my.upcoming.slice(0, 2)).toEqual([TUE_9, TUE2_9]);
+    expect(my.nextLesson).toBe(my.upcoming[0]);
+  });
+
   it("разово отменённое занятие пропадает из плашки (EXDATE)", async () => {
     const id = await bookConfirmed();
     await post("cancel", { token: TOKEN(), eventId: id, mode: "once", occStart: TUE_9 });
     const my = await getMy(TOKEN());
     expect(my.nextLesson).toBe(TUE2_9);
+    // Отменённая неделя исчезает и из расписания, а не только из плашки.
+    expect(my.upcoming).not.toContain(TUE_9);
   });
 
   it("pending-перенос не считается ближайшим занятием", async () => {
