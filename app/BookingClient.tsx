@@ -323,6 +323,11 @@ export default function BookingClient({
   const [busyAction, setBusyAction] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Активный день сетки, зажатый в её границы. Индекс живёт отдельно от самой сетки
+  // (её перезапрашивают при смене недели), и «четверг» из календаря мог указывать за
+  // конец более короткого ответа — экран падал бы целиком.
+  const dayIdx = days && days.length ? Math.min(activeDay, days.length - 1) : 0;
+
   // Подряд идущие часы показываем одним блоком («10:00–13:00»).
   const blocks = useMemo(() => groupConsecutive(selected), [selected]);
 
@@ -510,13 +515,19 @@ export default function BookingClient({
   }, [calMonth, weekFrom]);
 
   // Выбор даты в календаре: сетка переезжает на её календарную неделю, а активным
-  // становится сам выбранный день. Дату текущей недели в weekFrom не пишем —
-  // обычная сетка и так показывает ближайшие дни (и корректно прячет прошедшие).
+  // становится сам выбранный день.
+  //
+  // Дату ТЕКУЩЕЙ недели обычно не пишем в weekFrom: сетка по умолчанию и так
+  // показывает ближайшие дни и корректно прячет прошедшие часы. Но при разовом
+  // переносе «сетка по умолчанию» — это неделя переносимого занятия (occ), и без
+  // явной даты текущая неделя не открывалась бы вовсе: выбор просто возвращал бы
+  // ученика на неделю занятия. Поэтому при переносе дату пишем всегда.
   function pickDate(y: number, m: number, d: number) {
     const iso = mskNoonIso(y, m, d);
     const picked = mskDateOf(new Date(iso));
     const today = mskDateOf(new Date());
-    setWeekFrom(mondayNo(picked) === mondayNo(today) ? null : iso);
+    const thisWeek = mondayNo(picked) === mondayNo(today);
+    setWeekFrom(thisWeek && !gridOcc ? null : iso);
     setActiveDay(picked.wd);
     setCalOpen(false);
   }
@@ -1458,7 +1469,7 @@ export default function BookingClient({
             {days.map((d, i) => (
               <button
                 key={d.date}
-                className={`day-chip ${i === activeDay ? "active" : ""} ${d.closed ? "closed" : ""}`}
+                className={`day-chip ${i === dayIdx ? "active" : ""} ${d.closed ? "closed" : ""}`}
                 onClick={() => setActiveDay(i)}
               >
                 <b>{d.weekday}</b>
@@ -1471,17 +1482,17 @@ export default function BookingClient({
 
           <div className="card">
             <div className="day-title">
-              {days[activeDay].title}
-              {days[activeDay].slots[0] ? `, ${dayMonthMsk(days[activeDay].slots[0].start)}` : ""}
+              {days[dayIdx].title}
+              {days[dayIdx].slots[0] ? `, ${dayMonthMsk(days[dayIdx].slots[0].start)}` : ""}
             </div>
-            {days[activeDay].closed ? (
+            {days[dayIdx].closed ? (
               <p className="hint" style={{ margin: "4px 2px" }}>
                 <Icon name="moon" /> Выходной — в этот день занятий нет. Выберите другой день недели.
               </p>
             ) : (
               <>
                 <div className="slots-grid">
-                  {days[activeDay].slots.map((s) =>
+                  {days[dayIdx].slots.map((s) =>
                     s.busy ? (
                       <div key={s.start} className="slot busy">
                         {s.time}

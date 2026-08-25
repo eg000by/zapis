@@ -1,7 +1,7 @@
 // Личный кабинет ученика с записями: плашки, счета, способ оплаты, отсутствие
 // «25-го кадра» (сетка не мелькает, пока грузится /api/my).
 import { expect, test } from "@playwright/test";
-import { MY_EGE, MY_FULL, MY_GROUP, mockApi, tokenUrl } from "./helpers";
+import { MY_EGE, MY_FULL, MY_GROUP, SLOTS_WEEK, mockApi, tokenUrl } from "./helpers";
 
 test("кабинет: записи вместо сетки, все плашки на месте", async ({ page }) => {
   await mockApi(page, { my: MY_FULL });
@@ -337,6 +337,40 @@ test("«Записаться на другое время» открывает �
 
 // Кабинет участника группы — «панель», а не страница записи: время общее на всех,
 // и один ученик не может ни выбрать его, ни подвинуть.
+// Разовый перенос: сетка по умолчанию показывает неделю ПЕРЕНОСИМОГО занятия. Выбор
+// текущей недели в календаре раньше просто возвращал ученика на неделю занятия — дата
+// текущей недели не записывалась вовсе, потому что «обычная сетка и так её показывает».
+test("перенос: текущая неделя открывается из календаря", async ({ page }) => {
+  // Фиксируем «сегодня»: среда 15 июля 2026, 12:00 МСК. Текущая неделя — 13–19 июля,
+  // а двигаем занятие 21 июля, то есть со следующей.
+  await page.clock.setFixedTime(new Date("2026-07-15T09:00:00.000Z"));
+  const slotUrls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/slots")) slotUrls.push(r.url());
+  });
+  // Настоящая сетка всегда содержит все семь дней (выходные — пустыми), поэтому и
+  // в тесте берём полную неделю: активным днём становится сам выбранный.
+  await mockApi(page, { my: MY_FULL, slots: SLOTS_WEEK });
+  await page.goto(tokenUrl());
+
+  await page.getByRole("button", { name: "Перенести" }).click();
+  await page.getByRole("button", { name: "Только одно занятие" }).click();
+  await page.getByRole("button", { name: "Вт, 21 июля" }).click();
+  await expect.poll(() => slotUrls.at(-1)).toContain("occ=");
+
+  await page.getByRole("button", { name: "Другая дата" }).click();
+  await expect(page.locator(".cal-grid")).toBeVisible();
+  // Четверг 16 июля — рабочий день текущей недели.
+  await page.locator(".cal-day", { hasText: /^16$/ }).click();
+
+  await expect(page.locator(".cal-grid")).toHaveCount(0);
+  await expect(page.locator(".week-label")).toContainText("13–19 июля");
+  // Неделя занятия больше не навязывается: в запросе обе части — какое занятие
+  // двигаем и какую неделю показать.
+  await expect.poll(() => slotUrls.at(-1)).toContain("from=");
+  expect(slotUrls.at(-1)).toContain("occ=");
+});
+
 test("группа: состав, оплата и «Не смогу прийти» вместо переноса", async ({ page }) => {
   await mockApi(page, { my: MY_GROUP });
   await page.goto(tokenUrl());

@@ -20,6 +20,9 @@
   --accent-soft: #eef2ff;
   --busy-bg: #f3f4f6;
   --busy-text: #9ca3af;
+  /* Фон наведения. Намеренно нейтральный: акцентная заливка занята выбранным
+     состоянием, и если ховер красить тем же цветом, «навёл» и «выбрал» сливаются. */
+  --hover-bg: #e3e8f2;
   --success: #16a34a;
   --danger: #dc2626;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(16, 24, 40, 0.06);
@@ -44,6 +47,7 @@
     --accent-soft: #20223a;
     --busy-bg: #1e222c;
     --busy-text: #5b6270;
+    --hover-bg: #262c3a;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
   }
 }
@@ -253,9 +257,11 @@ body {
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.cal-day:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+@media (hover: hover) {
+  /* Акцентная рамка здесь занята отметкой «сегодня», поэтому наведение — фоном. */
+  .cal-day:hover:not(:disabled):not(.picked) {
+    background: var(--hover-bg);
+  }
 }
 .cal-day:disabled {
   background: var(--busy-bg);
@@ -270,6 +276,7 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+  font-weight: 700;
 }
 
 .day-chip {
@@ -307,6 +314,12 @@ body {
   }
   .day-chip b {
     font-size: 16px;
+  }
+}
+@media (hover: hover) {
+  .day-chip:hover:not(.active) {
+    background: var(--hover-bg);
+    border-color: var(--muted);
   }
 }
 .day-chip.active {
@@ -366,9 +379,18 @@ body {
   transition: all 0.12s ease;
   font-family: inherit;
 }
-.slot:hover {
-  background: var(--accent);
-  color: #fff;
+/* Наведение — только на устройствах с настоящим курсором: на телефоне состояние
+   :hover «залипает» после тапа, и выбранный слот стало бы не отличить от нажатого. */
+@media (hover: hover) {
+  .slot:hover:not(.busy):not(.picked) {
+    background: var(--accent-soft);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.1);
+  }
+  /* На уже выбранном ховер означает «сниму выбор» — заливку не меняем, а гасим. */
+  .slot.picked:hover {
+    filter: brightness(1.12);
+  }
 }
 .slot.busy {
   border-color: var(--border);
@@ -608,10 +630,13 @@ select:focus {
   }
 }
 
-/* Выбранный слот (мультивыбор) */
+/* Выбранный слот (мультивыбор). Кольцо вокруг — второй признак поверх цвета: выбор
+   должен читаться и тогда, когда цвет плохо различим. */
 .slot.picked {
   background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* Нижняя панель выбора */
@@ -729,13 +754,15 @@ select:focus {
   cursor: pointer;
   white-space: nowrap;
 }
-.mini:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.mini.danger:hover {
-  border-color: var(--danger);
-  color: var(--danger);
+@media (hover: hover) {
+  .mini:hover:not(:disabled) {
+    background: var(--hover-bg);
+    border-color: var(--muted);
+  }
+  .mini.danger:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
 }
 .mini:disabled {
   opacity: 0.5;
