@@ -185,11 +185,46 @@ export interface TgButton {
   data: string;
 }
 
+// Telegram ограничивает callback_data 64 БАЙТАМИ, и на превышение отвечает
+// BUTTON_DATA_INVALID — не отправляя сообщение целиком. Экран при этом просто не
+// открывается, а кнопка выглядит сломанной: ошибка видна только в логах. Поэтому
+// проверяем на месте, где данные собираются, и называем виноватую кнопку.
+export const CALLBACK_DATA_LIMIT = 64;
+
 // Собирает inline-клавиатуру из строк кнопок.
 export function inlineKeyboard(rows: TgButton[][]): unknown {
+  for (const row of rows) {
+    for (const b of row) {
+      const bytes = Buffer.byteLength(b.data, "utf8");
+      if (bytes > CALLBACK_DATA_LIMIT) {
+        console.error(
+          `callback_data ${bytes} байт (> ${CALLBACK_DATA_LIMIT}) у кнопки «${b.text}»: ${b.data}`
+        );
+      }
+    }
+  }
   return {
     inline_keyboard: rows.map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))),
   };
+}
+
+// ── uuid в callback_data ─────────────────────────────────────────────────────
+// Один uuid текстом — 36 байт из 64, поэтому кнопка с ДВУМЯ id (кого и куда) в
+// лимит не влезает. Те же 16 байт в base64url — 22 символа, и пара помещается.
+export function packUuid(id: string): string {
+  const hex = id.replace(/-/g, "");
+  if (!/^[0-9a-f]{32}$/i.test(hex)) return id; // не uuid — оставляем как есть
+  return Buffer.from(hex, "hex").toString("base64url");
+}
+
+// Обратное преобразование. Строку, которая не является упакованным uuid (короткий
+// id из тестов, старая кнопка), возвращаем без изменений.
+export function unpackUuid(s: string): string {
+  if (!/^[A-Za-z0-9_-]{22}$/.test(s)) return s;
+  const buf = Buffer.from(s, "base64url");
+  if (buf.length !== 16 || buf.toString("base64url") !== s) return s;
+  const h = buf.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 // Запрос ответа: следующий текст владельца прилетит как reply (для ввода заметок).

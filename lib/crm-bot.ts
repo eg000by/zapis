@@ -147,7 +147,17 @@ export async function showStudentCard(
     ...(group
       ? [`👥 Группа: <b>${escapeHtml(group.name)}</b> · ${rub(group.rateKopecks)} ₽ за занятие`]
       : []),
-    `💰 ${s.rateKopecks > 0 ? `${rub(s.rateKopecks)} ₽/час` : "ставка не задана"} · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
+    // У участника группы личная ставка не участвует в расчётах: платит он по цене
+    // группы. Писать «ставка не задана» тут — пугать пустотой, которой не должно быть.
+    `💰 ${
+      group
+        ? s.rateKopecks > 0
+          ? `личная ставка ${rub(s.rateKopecks)} ₽/час — в группе не применяется`
+          : "платит по цене группы"
+        : s.rateKopecks > 0
+          ? `${rub(s.rateKopecks)} ₽/час`
+          : "ставка не задана"
+    } · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
   ];
   if (out.advanceKopecks > 0) lines.push(`⏭ Выставлено вперёд: ${rub(out.advanceKopecks)} ₽`);
   if (out.packageKopecks > 0)

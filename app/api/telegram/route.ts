@@ -15,6 +15,7 @@ import {
   sendTo,
   deleteMyCommands,
   setMyCommands,
+  unpackUuid,
 } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
@@ -30,6 +31,8 @@ import {
   promptNewGroup,
   setGroupTime,
   showAddMember,
+  promptNewGroupStudent,
+  finishNewGroupStudent,
   showGroupCard,
   showGroupDayPicker,
   showGroupMembers,
@@ -238,13 +241,25 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  // Новый ученик прямо в группе: предмет и цену берём у неё, спрашиваем только имя.
+  if (data.startsWith("grpstu:")) {
+    await promptNewGroupStudent(chatId, data.slice(7));
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data === "grpstuskip") {
+    await finishNewGroupStudent(chatId, "");
+    await answerCallback(cq.id);
+    return ok();
+  }
   if (data.startsWith("grpjoin:")) {
-    const [groupId, studentId] = data.slice(8).split(":");
+    // id пришли упакованными: пара uuid текстом не помещается в callback_data.
+    const [groupId, studentId] = data.slice(8).split(":").map(unpackUuid);
     await answerCallback(cq.id, await joinGroup(chatId, messageId, groupId, studentId));
     return ok();
   }
   if (data.startsWith("grpkick:")) {
-    const [studentId, groupId] = data.slice(8).split(":");
+    const [studentId, groupId] = data.slice(8).split(":").map(unpackUuid);
     await kickFromGroup(chatId, messageId, studentId, groupId);
     await answerCallback(cq.id, "Убран из группы");
     return ok();

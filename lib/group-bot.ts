@@ -8,6 +8,7 @@ import {
   editMessageText,
   escapeHtml,
   inlineKeyboard,
+  packUuid,
   sendOwner,
   type TgButton,
 } from "./telegram";
@@ -23,7 +24,12 @@ import {
   setGroupMeetLink,
   updateGroup,
 } from "./groups";
-import { listStudents } from "./students";
+import {
+  getStudentByContactKey,
+  listStudents,
+  updateStudent,
+  upsertStudent,
+} from "./students";
 import { clearState, getState, setState } from "./botstate";
 import {
   CALENDAR_ID,
@@ -36,6 +42,7 @@ import {
 import { buildRecurrence, buildWeek, formatMsk, weekWindowBounds } from "./slots";
 import { RECURRENCE_WEEKS, SUBJECTS, TIMEZONE } from "./config";
 import { getOrCreateStudentLinkCode } from "./shortlink";
+import { contactKey } from "./link";
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -137,12 +144,26 @@ export async function showGroupMembers(
     }
     lines.push(`• ${escapeHtml(m.name)}${link}`);
   }
-  if (!members.length) lines.push("\nПока никого. Добавьте учеников кнопкой ниже.");
+  if (!members.length) {
+    lines.push(
+      "\nПока никого. «Новый ученик» — завести и сразу добавить сюда: предмет и цену возьмём у группы."
+    );
+  }
 
   const rows: TgButton[][] = [];
-  if (members.length < GROUP_LIMIT) rows.push([{ text: "➕ Добавить ученика", data: `grpadd:${g.id}` }]);
+  // Два пути: завести ученика прямо здесь (предмет и цена уже известны — они у группы)
+  // либо подтянуть того, кто уже заведён. Первый — основной: заводить ученика через
+  // общий мастер, чтобы потом переложить его в группу, значит дважды указывать предмет
+  // и ставку, которые группа и так задаёт.
+  if (members.length < GROUP_LIMIT) {
+    rows.push([
+      { text: "➕ Новый ученик", data: `grpstu:${g.id}` },
+      { text: "👤 Из существующих", data: `grpadd:${g.id}` },
+    ]);
+  }
   for (const m of members) {
-    rows.push([{ text: `➖ Убрать ${m.name}`, data: `grpkick:${m.id}:${g.id}` }]);
+    // Два uuid в 64 байта callback_data не влезают — пакуем (см. packUuid).
+    rows.push([{ text: `➖ Убрать ${m.name}`, data: `grpkick:${packUuid(m.id)}:${packUuid(g.id)}` }]);
   }
   rows.push([{ text: "⬅️ Группа", data: `grp:${g.id}` }]);
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(rows));
@@ -158,15 +179,28 @@ export async function showAddMember(
   const all = await listStudents();
   const free = all.filter((s) => s.active && !s.trial && !s.groupId);
   const rows: TgButton[][] = free.map((s) => [
-    { text: `${s.name} · ${s.subject}`, data: `grpjoin:${groupId}:${s.id}` },
+    { text: `${s.name} · ${s.subject}`, data: `grpjoin:${packUuid(groupId)}:${packUuid(s.id)}` },
   ]);
   rows.push([{ text: "⬅️ Участники", data: `grpmem:${groupId}` }]);
+  // Пустой список сам по себе ничего не объясняет: чаще всего нужный ученик просто
+  // в архиве. Поэтому говорим, кого и почему отсеяли, — иначе кнопка выглядит сломанной.
+  const archived = all.filter((s) => !s.active).length;
+  const trials = all.filter((s) => s.active && s.trial).length;
+  const taken = all.filter((s) => s.active && !s.trial && !!s.groupId).length;
+  const why = [
+    archived ? `в архиве — ${archived}` : "",
+    trials ? `пробных — ${trials}` : "",
+    taken ? `уже в группах — ${taken}` : "",
+  ].filter(Boolean);
   await emit(
     chatId,
     messageId,
     free.length
       ? "Кого добавить в группу?\n\nБудущие личные занятия ученика при этом снимутся: в группе он занимается по её расписанию."
-      : "Свободных учеников нет: все либо уже в группе, либо пробные. Заведите ученика в разделе «Ученики».",
+      : "Некого добавить: в группу идёт действующий ученик без группы и не пробный." +
+          (why.length ? `\n\nОстальные: ${why.join(", ")}.` : "") +
+          (archived ? "\n\nУченика из архива сначала верните в разделе «Ученики»." : "") +
+          (!all.length ? "\n\nЗаведите ученика в разделе «Ученики»." : ""),
     inlineKeyboard(rows)
   );
 }
@@ -395,6 +429,124 @@ export async function submitGroupRate(chatId: number | string, rubles: number): 
   await showGroupCard(chatId, null, g.id);
 }
 
+// ── Новый ученик прямо в группе ──────────────────────────────────────────────
+// Предмет и цена у группы уже заданы, поэтому спрашиваем только то, чего она не
+// знает: имя и (необязательно) телеграм. Общий мастер /new для этого не годится —
+// там те же предмет и ставка спрашиваются заново, а потом ещё нужен второй заход
+// «добавить в группу».
+export async function promptNewGroupStudent(
+  chatId: number | string,
+  groupId: string
+): Promise<void> {
+  const g = await getGroup(groupId);
+  if (!g) {
+    await sendOwner("Группа не найдена.");
+    return;
+  }
+  if ((await listGroupMembers(g.id)).filter((m) => m.active).length >= GROUP_LIMIT) {
+    await sendOwner(`В группе уже ${GROUP_LIMIT} человек.`);
+    return;
+  }
+  await setState(String(chatId), "grp.stu.name", g.id);
+  await sendOwner(
+    `🧑‍🎓 <b>Новый ученик в группу «${escapeHtml(g.name)}»</b>\n\n` +
+      `Предмет: ${escapeHtml(g.subject)} · цена: ${
+        g.rateKopecks > 0 ? `${rub(g.rateKopecks)} ₽ за занятие` : "не задана"
+      }\n\nПришлите имя ученика одним сообщением.`,
+    inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
+  );
+}
+
+async function askGroupStudentTg(
+  chatId: number | string,
+  groupId: string,
+  name: string
+): Promise<void> {
+  await setState(String(chatId), "grp.stu.tg", JSON.stringify({ g: groupId, name }));
+  await sendOwner(
+    `Имя: <b>${escapeHtml(name)}</b>\n\n✈️ Telegram ученика — пришлите <code>@username</code> или нажмите «Пропустить».`,
+    inlineKeyboard([
+      [{ text: "Пропустить", data: "grpstuskip" }, { text: "✖️ Отмена", data: "cancel" }],
+    ])
+  );
+}
+
+// Заводит ученика и сразу кладёт его в группу. Личную ставку оставляем нулевой:
+// платит он по цене группы (balance берёт её у группы), а тарифная ставка предмета
+// в карточке выглядела бы как индивидуальная цена, о которой не договаривались.
+export async function finishNewGroupStudent(
+  chatId: number | string,
+  tg: string
+): Promise<void> {
+  const st = await getState(String(chatId));
+  if (!st || st.action !== "grp.stu.tg") {
+    await sendOwner("Сессия истекла. Начните заново из карточки группы.");
+    return;
+  }
+  let groupId = "";
+  let name = "";
+  try {
+    const o = JSON.parse(st.targetId) as { g: string; name: string };
+    groupId = o.g;
+    name = o.name;
+  } catch {}
+  const g = groupId ? await getGroup(groupId) : null;
+  if (!g || !name) {
+    await clearState(String(chatId));
+    await sendOwner("Не хватило данных. Начните заново из карточки группы.");
+    return;
+  }
+  await clearState(String(chatId));
+
+  // Ключ контакта считается от имени, предмета и телеграма — такой ученик может уже
+  // существовать (в том числе в архиве, а архивных upsert не воскрешает). Тогда мы его
+  // не заводим заново, а возвращаем в строй: именно это и значит «добавить в группу».
+  const ck = contactKey({ name, subject: g.subject, tg, trial: false });
+  const existing = await getStudentByContactKey(ck).catch(() => null);
+  const s = await upsertStudent({
+    name,
+    subject: g.subject,
+    tg,
+    contactKey: ck,
+    trial: false,
+  });
+  if (existing) {
+    // Личную ставку у существующего не трогаем: в группе она не применяется, а после
+    // выхода из группы пригодится.
+    if (!existing.active) await updateStudent(s.id, { active: true });
+  } else {
+    await updateStudent(s.id, { rateKopecks: 0 });
+  }
+  const res = await addToGroup(s.id, g.id);
+  if (!res.ok) {
+    await sendOwner(
+      res.reason === "full" ? `В группе уже ${GROUP_LIMIT} человек.` : "Не удалось добавить в группу."
+    );
+    return;
+  }
+
+  const base = process.env.SITE_BASE_URL || "";
+  let link = "";
+  try {
+    const code = await getOrCreateStudentLinkCode(s.id, false);
+    if (base) link = `\n\nСсылка для ученика:\n<code>${escapeHtml(`${base}/z/${code}`)}</code>`;
+  } catch (e) {
+    console.error("group student link failed", s.id, e);
+  }
+  const was = existing
+    ? existing.active
+      ? " (был уже заведён)"
+      : " (возвращён из архива)"
+    : "";
+  await sendOwner(
+    `✅ <b>${escapeHtml(name)}</b> в группе «${escapeHtml(g.name)}»${was}.\n` +
+      `📚 ${escapeHtml(g.subject)} · 💰 ${
+        g.rateKopecks > 0 ? `${rub(g.rateKopecks)} ₽ за занятие` : "цена группы не задана"
+      }${link}`
+  );
+  await showGroupMembers(chatId, null, g.id);
+}
+
 export async function promptGroupRate(chatId: number | string, groupId: string): Promise<void> {
   await setState(String(chatId), "grp.rate", groupId);
   await sendOwner(
@@ -420,6 +572,16 @@ export async function applyGroupInput(
 ): Promise<boolean> {
   if (action === "grp.new.name") {
     await submitGroupName(chatId, text.trim().slice(0, 60));
+    return true;
+  }
+  if (action === "grp.stu.name") {
+    await askGroupStudentTg(chatId, targetId, text.trim().slice(0, 60));
+    return true;
+  }
+  if (action === "grp.stu.tg") {
+    // «-» — то же, что «Пропустить»: телеграм ученика знать необязательно.
+    const tg = text.trim() === "-" ? "" : text.trim();
+    await finishNewGroupStudent(chatId, tg.startsWith("@") || !tg ? tg : `@${tg}`);
     return true;
   }
   if (action === "grp.new.rate") {
