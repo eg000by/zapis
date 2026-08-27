@@ -98,6 +98,16 @@ function lessonsWord(n: number): string {
   return "занятий";
 }
 
+// Подпись счёта для ученика. В самой заметке лежит служебный текст («Автосчёт:
+// следующее занятие (1 ч)») — он нужен преподавателю в боте, чтобы отличать
+// автосчёт от выставленного руками. Ученику важно одно: за что платит. Заметку
+// показываем как есть только у ручного счёта — её преподаватель написал сам.
+function payLabel(p: { kind: string; note: string }): string {
+  if (p.kind === "advance") return "Следующее занятие";
+  if (p.kind === "debt") return "За проведённые занятия";
+  return p.note;
+}
+
 // "счёт/счёта/счетов" по числу.
 function invoicesWord(n: number): string {
   const d10 = n % 10;
@@ -873,7 +883,7 @@ export default function BookingClient({
           <p style={{ whiteSpace: "pre-line" }}>
             Вы выбрали:{"\n"}
             <b>{doneWhen}</b>
-            {"\n\n"}Преподаватель подтвердит запись, и время закрепится за вами. Спасибо!
+            {"\n\n"}Преподаватель подтвердит запись — время закрепится за вами.
           </p>
           <button className="btn" style={{ maxWidth: 260, margin: "24px auto 0" }} onClick={() => setDoneWhen(null)}>
             Готово
@@ -894,10 +904,10 @@ export default function BookingClient({
           <div className="pay-total">{fmtRub(dueTotal)}</div>
           <div className="pay-split">
             {dueDebt > 0 && dueAhead > 0
-              ? `из них долг за прошедшие — ${fmtRub(dueDebt)} · вперёд — ${fmtRub(dueAhead)}`
+              ? `долг ${fmtRub(dueDebt)} · вперёд ${fmtRub(dueAhead)}`
               : dueDebt > 0
-                ? "долг за уже проведённые занятия"
-                : "предоплата за будущие занятия"}
+                ? "за проведённые занятия"
+                : "за будущие занятия"}
           </div>
           <div className={`pay-due${dueDebt > 0 ? " overdue" : ""}`}>
             {dueDebt > 0 ? (
@@ -908,7 +918,7 @@ export default function BookingClient({
               <>
                 <Icon name="calendar" />{" "}
                 {nextLesson
-                  ? `Оплатить до ${fmtDateMsk(nextLesson)} — начала следующего занятия`
+                  ? `Оплатить до ${fmtDateMsk(nextLesson)}`
                   : "Оплатить до следующего занятия"}
               </>
             )}
@@ -924,8 +934,8 @@ export default function BookingClient({
                   <span className="pay-opt-price">{fmtRub(dueTotal)}</span>
                 </div>
                 <div className="pay-opt-note">
-                  {payments.length === 1 && payments[0].note
-                    ? payments[0].note
+                  {payments.length === 1
+                    ? payLabel(payments[0])
                     : `${payments.length} ${invoicesWord(payments.length)}: долг и ближайшее занятие`}
                 </div>
                 {payments.length === 1 ? (
@@ -970,11 +980,7 @@ export default function BookingClient({
                     </span>
                   )}
                 </div>
-                <div className="pay-opt-note">
-                  {packageOffer.exam
-                    ? "Пакет закрывает текущий счёт: занятия спишутся с него, платить отдельно не нужно."
-                    : "Один платёж закрывает текущий счёт и остальные занятия месяца — платить отдельно не нужно."}
-                </div>
+                <div className="pay-opt-note">Вместо оплаты по одному занятию</div>
                 {packageOffer.payLink ? (
                   <a
                     className="pay-btn primary"
@@ -1004,7 +1010,7 @@ export default function BookingClient({
                 <div key={p.id} className="pay-row">
                   <div className="my-info">
                     <b>{fmtRub(p.amountKopecks)}</b>
-                    {p.note && <span className="my-when">{p.note}</span>}
+                    {payLabel(p) && <span className="my-when">{payLabel(p)}</span>}
                   </div>
                   {p.payLink ? (
                     <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
@@ -1032,7 +1038,7 @@ export default function BookingClient({
           </div>
           <div className="pay-split">
             {balance && balance.aheadHours > 0 && balance.paidUntil
-              ? `Оплачено вперёд: ${balance.aheadHours} ${lessonsWord(balance.aheadHours)}, до ${fmtDateMsk(balance.paidUntil)} включительно · платить сейчас ничего не нужно`
+              ? `Оплачено вперёд ${balance.aheadHours} ${lessonsWord(balance.aheadHours)} — до ${fmtDateMsk(balance.paidUntil)}`
               : "Платить сейчас ничего не нужно"}
           </div>
           {balance && balance.balanceKopecks > 0 && (
@@ -1055,10 +1061,7 @@ export default function BookingClient({
                   </span>
                 )}
               </div>
-              <div className="pay-opt-note">
-                По желанию: закрыть следующие занятия одним платежом, чтобы не платить
-                перед каждым.
-              </div>
+              <div className="pay-opt-note">Чтобы не платить перед каждым занятием</div>
               {packageOffer.payLink ? (
                 <a className="pay-btn" href={packageOffer.payLink} target="_blank" rel="noreferrer">
                   Оплатить {fmtRub(packageOffer.amountKopecks)} ↗
@@ -1153,7 +1156,7 @@ export default function BookingClient({
         {everyWeekday && <div className="panel-sub">Дальше — {everyWeekday}</div>}
         {meetLink && (
           <a className="panel-join" href={meetLink} target="_blank" rel="noreferrer">
-            <Icon name="video" /> Подключиться к занятию (Яндекс Телемост) ↗
+            <Icon name="video" /> Подключиться к занятию ↗
           </a>
         )}
       </div>
@@ -1166,7 +1169,7 @@ export default function BookingClient({
       <div className="day-title">Расписание</div>
       {upcoming.length === 0 ? (
         <p className="hint" style={{ margin: 0 }}>
-          Занятия пока не назначены. Время ставит преподаватель — оно появится здесь.
+          Занятия пока не назначены
         </p>
       ) : (
         <>
@@ -1223,7 +1226,7 @@ export default function BookingClient({
   const myCard =
     my && my.length > 0 ? (
       <div className="card my-card">
-        <div className="day-title">Ваши записи</div>
+        <div className="day-title">Расписание</div>
         {my.map((ev) => (
           <div key={ev.id} className="my-item">
             <div className="my-row">
@@ -1323,9 +1326,6 @@ export default function BookingClient({
           </span>
         )}
       </div>
-      <p className="hint" style={{ margin: "10px 2px 0" }}>
-        Только имена: чужие оплаты и контакты не показываем.
-      </p>
     </div>
   ) : null;
 
@@ -1342,10 +1342,7 @@ export default function BookingClient({
           <b>
             <Icon name="bell" /> Подключить уведомления в Telegram →
           </b>
-          <small>
-            Откроется бот — нажмите «Запустить». Напомним о занятии заранее и пришлём
-            ссылку на Телемост.
-          </small>
+          <small>Напомним о занятии и пришлём ссылку</small>
         </a>
       )
     ) : null;
@@ -1510,11 +1507,12 @@ export default function BookingClient({
                     )
                   )}
                 </div>
-                <p className="hint">
-                  {rescheduling
-                    ? "Нажмите на свободное время — запись переедет на него."
-                    : "Можно выбрать несколько слотов. Серые — уже заняты."}
-                </p>
+                {/* Подсказка нужна только при переносе: там неочевидно, что клик по
+                    времени двигает уже существующую запись. В обычной записи «занято»
+                    написано на самих серых слотах. */}
+                {rescheduling && (
+                  <p className="hint">Нажмите на свободное время — запись переедет на него.</p>
+                )}
               </>
             )}
           </div>
@@ -1652,8 +1650,8 @@ export default function BookingClient({
 
             <p className="sheet-note">
               {trial
-                ? "Разовое пробное занятие. Отменить или перенести можно в разделе «Ваши записи»."
-                : "Время закрепится за вами каждую неделю, оплата — после подтверждения. Перенести или отменить можно в разделе «Ваши записи»."}
+                ? "Разовое пробное занятие"
+                : "Каждую неделю в это время. Оплата — после подтверждения"}
             </p>
 
             {formError && <div className="error-text">{formError}</div>}

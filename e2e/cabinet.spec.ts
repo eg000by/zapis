@@ -8,7 +8,7 @@ test("кабинет: записи вместо сетки, все плашки 
   await page.goto(tokenUrl());
 
   // Сетки нет — есть кабинет, и подзаголовок это подтверждает.
-  await expect(page.getByText("Ваши записи")).toBeVisible();
+  await expect(page.getByText("Расписание")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
   const head = page.locator(".panel-head");
   await expect(head).toContainText("Занятия по предмету «Питон»");
@@ -19,7 +19,7 @@ test("кабинет: записи вместо сетки, все плашки 
   // Плашки: ближайшее занятие, Телемост.
   await expect(page.getByText("Ближайшее занятие")).toBeVisible();
   const meet = page.locator("a.panel-join");
-  await expect(meet).toContainText("Телемост");
+  await expect(meet).toContainText("Подключиться к занятию");
   await expect(meet).toHaveAttribute("href", "https://telemost.yandex.ru/j/e2e");
   // Кнопки «Подключить уведомления в Telegram» больше нет.
   await expect(page.locator("a.panel-tg")).toHaveCount(0);
@@ -28,8 +28,7 @@ test("кабинет: записи вместо сетки, все плашки 
   const pay = page.locator(".pay-card");
   await expect(pay).toContainText("К оплате сейчас");
   await expect(pay.locator(".pay-total")).toHaveText("7 500 ₽"); // 1 500 долг + 6 000 вперёд
-  await expect(pay.locator(".pay-split")).toContainText("долг за прошедшие — 1 500 ₽");
-  await expect(pay.locator(".pay-split")).toContainText("вперёд — 6 000 ₽");
+  await expect(pay.locator(".pay-split")).toHaveText("долг 1 500 ₽ · вперёд 6 000 ₽");
   await expect(pay.locator(".pay-due.overdue")).toContainText("оплатите");
   await expect(pay.locator(".pay-history summary")).toContainText("Оплачено ранее (1)");
 
@@ -95,7 +94,8 @@ test("экзамен ЕГЭ: два способа оплатить ОДИН с�
   await expect(pkg.locator(".pay-opt-price")).toHaveText("17 000 ₽");
   await expect(pkg.locator(".pkg-save")).toContainText("−15%");
   await expect(pkg.locator(".pkg-save")).toContainText("выгода 3 000 ₽");
-  await expect(pkg).toContainText("Пакет закрывает текущий счёт");
+  // Подпись у второго варианта — про то, что он ВМЕСТО счёта рядом, а не вдобавок.
+  await expect(pkg).toContainText("Вместо оплаты по одному занятию");
   await expect(pkg.getByRole("link", { name: /Оплатить пакет/ })).toHaveAttribute(
     "href",
     "https://yookassa.test/package"
@@ -125,7 +125,7 @@ test("обычный ученик: второй вариант — весь ме
   await expect(month).toContainText("Месяц вперёд · 5 занятий");
   await expect(month.locator(".pay-opt-price")).toHaveText("7 500 ₽");
   await expect(month.locator(".pkg-save")).toHaveCount(0);
-  await expect(month).toContainText("закрывает текущий счёт");
+  await expect(month).toContainText("Вместо оплаты по одному занятию");
   await expect(month.getByRole("link", { name: /Оплатить месяц/ })).toHaveAttribute(
     "href",
     "https://yookassa.test/month"
@@ -163,12 +163,11 @@ test("оплачено вперёд: видно на самом занятии �
   await expect(page.locator(".panel-when")).toContainText("оплачено");
   const pay = page.locator(".pay-card");
   await expect(pay.locator(".pay-ok")).toContainText("Ближайшее занятие оплачено");
-  await expect(pay).toContainText("Оплачено вперёд: 1 занятие, до Вт, 14 июля включительно");
-  await expect(pay).toContainText("платить сейчас ничего не нужно");
+  await expect(pay).toContainText("Оплачено вперёд 1 занятие — до Вт, 14 июля");
   // Оплатить дальше вперёд можно, но это предложение, а не счёт.
   const ahead = pay.locator(".pay-opt.ahead");
   await expect(ahead).toContainText("Оплатить вперёд · 4 занятия");
-  await expect(ahead).toContainText("По желанию");
+  await expect(ahead).toContainText("Чтобы не платить перед каждым занятием");
   await expect(pay.locator(".pay-total")).toHaveCount(0);
 });
 
@@ -233,8 +232,7 @@ test("уведомления в Telegram: кнопка ведёт на бота 
 
   const btn = page.locator("a.panel-tg");
   await expect(btn).toContainText("Подключить уведомления в Telegram");
-  await expect(btn).toContainText("Откроется бот");
-  await expect(btn).toContainText("ссылку на Телемост");
+  await expect(btn).toContainText("Напомним о занятии");
   await expect(btn).toHaveAttribute("href", "https://t.me/zapis_test_bot?start=stu-1");
 });
 
@@ -259,7 +257,7 @@ test("нет «25-го кадра»: пока /api/my грузится — сп�
   await expect(page.locator(".slots-grid")).toHaveCount(0);
 
   // После ответа — кабинет (и по-прежнему без сетки).
-  await expect(page.getByText("Ваши записи")).toBeVisible();
+  await expect(page.getByText("Расписание")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
 });
 
@@ -269,7 +267,7 @@ test("на телефоне записи показываются выше бл�
   await page.setViewportSize({ width: 390, height: 800 });
   await mockApi(page, { my: MY_FULL });
   await page.goto(tokenUrl());
-  const records = await page.locator(".my-card", { hasText: "Ваши записи" }).boundingBox();
+  const records = await page.locator(".my-card", { hasText: "Расписание" }).boundingBox();
   const pay = await page.locator(".pay-card").boundingBox();
   expect(records!.y).toBeLessThan(pay!.y);
 });
