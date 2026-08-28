@@ -16,11 +16,12 @@ test("кабинет: записи вместо сетки, все плашки 
   await expect(head.locator(".panel-badge")).toHaveCount(0);
   await expect(page.locator(".hero")).toHaveCount(0);
 
-  // Плашки: ближайшее занятие, Телемост.
+  // Карточка ближайшего занятия и обе постоянные ссылки: звонок и рабочая доска.
   await expect(page.getByText("Ближайшее занятие")).toBeVisible();
-  const meet = page.locator("a.panel-join");
-  await expect(meet).toContainText("Подключиться к занятию");
+  const meet = page.getByRole("link", { name: /Подключиться к занятию/ });
   await expect(meet).toHaveAttribute("href", "https://telemost.yandex.ru/j/e2e");
+  const board = page.getByRole("link", { name: /Открыть доску/ });
+  await expect(board).toHaveAttribute("href", "https://unidraw.io/app/board/e2e");
   // Кнопки «Подключить уведомления в Telegram» больше нет.
   await expect(page.locator("a.panel-tg")).toHaveCount(0);
 
@@ -384,9 +385,14 @@ test("группа: состав, оплата и «Не смогу прийти
   // Ближайшее занятие — карточкой: дата, повтор и ссылка на занятие.
   await expect(page.locator(".panel-when")).toContainText("18 июля");
   await expect(page.locator(".panel-sub")).toContainText("каждую субботу");
-  await expect(page.locator("a.panel-join")).toHaveAttribute(
+  // Ссылки у группы общие на всех: и звонок, и доска.
+  await expect(page.getByRole("link", { name: /Подключиться к занятию/ })).toHaveAttribute(
     "href",
     "https://telemost.yandex.ru/j/group"
+  );
+  await expect(page.getByRole("link", { name: /Открыть доску/ })).toHaveAttribute(
+    "href",
+    "https://unidraw.io/app/board/group"
   );
 
   // Расписание — конкретными датами, с оплатой по каждому занятию.

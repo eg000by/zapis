@@ -20,6 +20,7 @@ const NO_BILLING = {
   payments: [],
   balance: null,
   meetLink: "",
+  boardLink: "",
   payHint: "",
   packageOffer: null,
   paidHistory: [],
@@ -29,6 +30,8 @@ const NO_BILLING = {
   scheduleKey: "",
 } as {
   meetLink: string;
+  // Постоянная ссылка на рабочую доску занятия — ходит в паре со ссылкой на звонок.
+  boardLink: string;
   // Способ оплаты «СБП-перевод»: текст реквизитов вместо кнопки оплаты (иначе пусто).
   payHint: string;
   payments: { id: string; amountKopecks: number; note: string; payLink: string; kind: string }[];
@@ -201,6 +204,7 @@ export async function GET(req: Request) {
             tgNotify,
             // Ссылка на занятие у группы общая — она и показывается участникам.
             meetLink: group ? group.meetLink : student?.meetLink || "",
+            boardLink: group ? group.boardLink : student?.boardLink || "",
             scheduleKey: key,
             group: group
               ? {
@@ -269,6 +273,7 @@ export async function GET(req: Request) {
       payments: hasConfirmed ? billing.payments : [],
       balance: hasConfirmed ? billing.balance : null,
       meetLink: hasConfirmed ? billing.meetLink : "",
+      boardLink: hasConfirmed ? billing.boardLink : "",
       payHint: hasConfirmed ? billing.payHint : "",
       packageOffer: hasConfirmed ? billing.packageOffer : null,
       paidHistory: hasConfirmed ? billing.paidHistory : [],

@@ -14,7 +14,7 @@ import {
   listStudents,
   promoteStudentToFull,
   setStudentArchived,
-  setStudentMeetLink,
+  setStudentLink,
   updateStudent,
   upsertStudent,
 } from "./students";
@@ -173,6 +173,7 @@ export async function showStudentCard(
     }
   }
   if (s.meetLink) lines.push(`🎥 ${escapeHtml(s.meetLink)}`);
+  if (s.boardLink) lines.push(`🧩 ${escapeHtml(s.boardLink)}`);
   if (s.note) lines.push(`📝 ${escapeHtml(s.note)}`);
 
   const rows: TgButton[][] = [
@@ -351,7 +352,8 @@ export async function showStudentTools(
   }
   const keyboard = inlineKeyboard([
     [{ text: "📝 Заметка об ученике", data: `snote:${s.id}` }],
-    [{ text: "🎥 Изменить ссылку на Телемост", data: `smeet:${s.id}` }],
+    [{ text: "🎥 Ссылка на звонок", data: `smeet:${s.id}` }],
+    [{ text: "🧩 Ссылка на доску", data: `sboard:${s.id}` }],
     [{ text: s.active ? "🗄 В архив" : "♻️ Вернуть из архива", data: `arch:${s.id}` }],
     [{ text: "🗑 Удалить ученика", data: `delstu:${s.id}` }],
     [{ text: "⬅️ Назад к ученику", data: `stu:${s.id}` }],
@@ -916,7 +918,11 @@ export async function cancelPending(chatId: number | string): Promise<void> {
   }
   await sendOwner("✖️ Отменено.");
   try {
-    if (st.action === "student.note" || st.action === "student.meetlink") {
+    if (
+      st.action === "student.note" ||
+      st.action === "student.meetlink" ||
+      st.action === "student.board"
+    ) {
       await showStudentCard(chatId, null, st.targetId);
     } else if (st.action === "settings.sbp") {
       await showPaySettings(chatId, null);
@@ -956,14 +962,19 @@ export async function promptStudentNote(chatId: number | string, studentId: stri
   await sendOwner("✍️ Пришлите текст заметки об ученике одним сообщением:", cancelKb());
 }
 
-// Постоянная ссылка Яндекс Телемоста — закрепляется в кабинете ученика (паритет с /admin).
-export async function promptStudentMeetLink(
+// Постоянные ссылки занятия — звонок и рабочая доска. Обе закрепляются в кабинете
+// ученика и уходят в его напоминания (паритет с /admin).
+export async function promptStudentLink(
   chatId: number | string,
-  studentId: string
+  studentId: string,
+  which: "meetLink" | "boardLink"
 ): Promise<void> {
-  await setState(String(chatId), "student.meetlink", studentId);
+  const meet = which === "meetLink";
+  await setState(String(chatId), meet ? "student.meetlink" : "student.board", studentId);
   await sendOwner(
-    "🎥 Пришлите постоянную ссылку Яндекс Телемоста (https://telemost.yandex.ru/j/…) — она закрепится в кабинете ученика.\nЧтобы убрать ссылку, пришлите <code>-</code>.",
+    meet
+      ? "🎥 Пришлите постоянную ссылку на звонок (например https://telemost.yandex.ru/j/…) — она закрепится в кабинете ученика.\nЧтобы убрать ссылку, пришлите <code>-</code>."
+      : "🧩 Пришлите постоянную ссылку на доску (например https://unidraw.io/app/board/…) — она закрепится в кабинете ученика.\nЧтобы убрать ссылку, пришлите <code>-</code>.",
     cancelKb()
   );
 }
@@ -1130,18 +1141,20 @@ export async function applyPendingInput(chatId: number | string, text: string): 
     await showStudentCard(chatId, null, st.targetId);
     return true;
   }
-  if (st.action === "student.meetlink") {
+  if (st.action === "student.meetlink" || st.action === "student.board") {
+    const meet = st.action === "student.meetlink";
     const clear = /^(-|нет|удалить)$/i.test(value);
     if (!clear && !/^https?:\/\//i.test(value)) {
       // Похоже, это не ссылка — просим повторить, состояние сохраняем.
-      await sendOwner("Это не похоже на ссылку. Пришлите адрес вида <code>https://telemost.yandex.ru/j/…</code> или <code>-</code>, чтобы убрать.");
+      await sendOwner("Это не похоже на ссылку. Пришлите адрес вида <code>https://…</code> или <code>-</code>, чтобы убрать.");
       return true;
     }
     // Сохраняем ссылку и обновляем её в описании уже созданных событий календаря
     // (общая операция с /admin — lib/students.ts).
-    await setStudentMeetLink(st.targetId, clear ? "" : value);
+    await setStudentLink(st.targetId, meet ? "meetLink" : "boardLink", clear ? "" : value);
     await clearState(String(chatId));
-    await sendOwner(clear ? "✅ Ссылка Телемоста убрана." : "✅ Ссылка Телемоста закреплена в кабинете ученика.");
+    const what = meet ? "Ссылка на звонок" : "Ссылка на доску";
+    await sendOwner(clear ? `✅ ${what} убрана.` : `✅ ${what} закреплена в кабинете ученика.`);
     await showStudentCard(chatId, null, st.targetId);
     return true;
   }

@@ -14,7 +14,12 @@ vi.mock("@/lib/shortlink", () => ({
   getOrCreateStudentLinkCode: vi.fn(async () => "abc123"),
 }));
 
-const STUDENT = { id: "stu-1", trial: false, meetLink: "https://telemost.yandex.ru/j/777" };
+const STUDENT = {
+  id: "stu-1",
+  trial: false,
+  meetLink: "https://telemost.yandex.ru/j/777",
+  boardLink: "https://unidraw.io/app/board/abc",
+};
 const text = () => String(vi.mocked(sendTo).mock.calls[0]?.[1] ?? "");
 
 beforeEach(() => {
@@ -23,22 +28,25 @@ beforeEach(() => {
 });
 
 describe("pinStudentLinks", () => {
-  it("закрепляет кабинет, Телемост и контакт преподавателя", async () => {
+  it("закрепляет кабинет, звонок, доску и контакт преподавателя", async () => {
     await pinStudentLinks(STUDENT, 555);
 
     const t = text();
     expect(t).toContain("https://zapis-ten.vercel.app/z/abc123");
     expect(t).toContain("https://telemost.yandex.ru/j/777");
+    // Доска — такая же рабочая ссылка, как звонок: в закрепе нужны обе.
+    expect(t).toContain("https://unidraw.io/app/board/abc");
     expect(t).toContain("https://t.me/eg0by");
     expect(pinChatMessage).toHaveBeenCalledWith(555, 42);
   });
 
-  it("без ссылки на Телемост сообщение всё равно уходит — с кабинетом и контактом", async () => {
-    await pinStudentLinks({ ...STUDENT, meetLink: "" }, 555);
+  it("без рабочих ссылок сообщение всё равно уходит — с кабинетом и контактом", async () => {
+    await pinStudentLinks({ ...STUDENT, meetLink: "", boardLink: "" }, 555);
 
     expect(text()).toContain("/z/abc123");
     expect(text()).toContain("https://t.me/eg0by");
-    expect(text()).not.toContain("Телемост");
+    expect(text()).not.toContain("Подключиться");
+    expect(text()).not.toContain("Доска");
   });
 
   it("сбой закрепа не ломает подключение уведомлений", async () => {

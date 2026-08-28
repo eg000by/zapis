@@ -307,6 +307,8 @@ export default function BookingClient({
   const [lessonPrice, setLessonPrice] = useState(0);
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — задаёт преподаватель.
   const [meetLink, setMeetLink] = useState<string>("");
+  // Ссылка на рабочую доску — вторая постоянная ссылка занятия, рядом со звонком.
+  const [boardLink, setBoardLink] = useState<string>("");
   // Подключение уведомлений в Telegram: deep-link на бота + подключено ли уже.
   const [tgNotify, setTgNotify] = useState<{ url: string; connected: boolean } | null>(null);
   // Группа, если ученик занимается в группе. Тогда кабинет — «панель»: расписание
@@ -440,6 +442,7 @@ export default function BookingClient({
         setPaidHistory(d.paidHistory || []);
         setLessonPrice(d.lessonPriceKopecks || 0);
         setMeetLink(d.meetLink || "");
+        setBoardLink(d.boardLink || "");
         setTgNotify(d.tgNotify || null);
         setGroup(d.group || null);
         setUpcoming(Array.isArray(d.upcoming) ? d.upcoming : []);
@@ -1154,9 +1157,15 @@ export default function BookingClient({
           )}
         </div>
         {everyWeekday && <div className="panel-sub">Дальше — {everyWeekday}</div>}
+        {/* Обе постоянные ссылки занятия: звонок и доска, на которой идёт работа. */}
         {meetLink && (
           <a className="panel-join" href={meetLink} target="_blank" rel="noreferrer">
             <Icon name="video" /> Подключиться к занятию ↗
+          </a>
+        )}
+        {boardLink && (
+          <a className="panel-join" href={boardLink} target="_blank" rel="noreferrer">
+            <Icon name="board" /> Открыть доску ↗
           </a>
         )}
       </div>

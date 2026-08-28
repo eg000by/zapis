@@ -26,7 +26,7 @@ import {
   joinGroup,
   kickFromGroup,
   promptDeleteGroup,
-  promptGroupMeet,
+  promptGroupLink,
   promptGroupRate,
   promptNewGroup,
   setGroupTime,
@@ -58,7 +58,7 @@ import {
   promptPaymentLink,
   promptReportLessonNote,
   promptSbpDetails,
-  promptStudentMeetLink,
+  promptStudentLink,
   promptStudentNote,
   renewSeriesBot,
   sendBookingLink,
@@ -280,8 +280,13 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id, await setGroupTime(chatId, messageId, Number(data.slice(8))));
     return ok();
   }
+  if (data.startsWith("grpboard:")) {
+    await promptGroupLink(chatId, data.slice(9), "boardLink");
+    await answerCallback(cq.id);
+    return ok();
+  }
   if (data.startsWith("grpmeet:")) {
-    await promptGroupMeet(chatId, data.slice(8));
+    await promptGroupLink(chatId, data.slice(8), "meetLink");
     await answerCallback(cq.id);
     return ok();
   }
@@ -444,8 +449,13 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  if (data.startsWith("sboard:")) {
+    await promptStudentLink(chatId, data.slice(7), "boardLink");
+    await answerCallback(cq.id);
+    return ok();
+  }
   if (data.startsWith("smeet:")) {
-    await promptStudentMeetLink(chatId, data.slice(6));
+    await promptStudentLink(chatId, data.slice(6), "meetLink");
     await answerCallback(cq.id);
     return ok();
   }
@@ -716,13 +726,16 @@ async function handleBookingAction(
   try {
     if (action === "c") {
       // Обновляем описание события: убираем «ожидает подтверждения» и добавляем
-      // ссылку на Телемост ученика (если она закреплена в его кабинете).
+      // постоянные ссылки ученика — звонок и доску (если они закреплены в кабинете).
       let meetLink = "";
+      let boardLink = "";
       if (priv.studentId) {
         try {
-          meetLink = (await getStudent(priv.studentId))?.meetLink || "";
+          const s = await getStudent(priv.studentId);
+          meetLink = s?.meetLink || "";
+          boardLink = s?.boardLink || "";
         } catch (e) {
-          console.error("meetLink lookup (confirm) failed", e);
+          console.error("lesson links lookup (confirm) failed", e);
         }
       }
       // Разовый перенос одной недели — тоже занятие серии: у инстанса-исключения
@@ -734,6 +747,7 @@ async function handleBookingAction(
         confirmed: true,
         tg,
         meetLink,
+        boardLink,
       });
       await cal.events.patch({
         calendarId: CALENDAR_ID,

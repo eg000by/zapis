@@ -21,6 +21,10 @@ export const students = pgTable("students", {
   trialNotifiedAt: timestamp("trial_notified_at", { withTimezone: true }),
   // Постоянная ссылка на онлайн-занятие (Яндекс Телемост) — показывается в кабинете.
   meetLink: text("meet_link").notNull().default(""),
+  // Постоянная ссылка на интерактивную доску, на которой идёт работа во время
+  // занятия. Живёт рядом со ссылкой на звонок и ходит с ней в паре: ученику нужны
+  // обе, и обе бесполезны, если их искать в переписке.
+  boardLink: text("board_link").notNull().default(""),
   // chat_id ученика в Telegram — для сервисных уведомлений. Заполняется, когда ученик
   // сам открывает бота по deep-link из кабинета (бот не может написать первым).
   tgChatId: text("tg_chat_id").notNull().default(""),
@@ -50,6 +54,7 @@ export const groups = pgTable("groups", {
   // чтобы её не пришлось переписывать всем при смене цены группы.
   rateKopecks: integer("rate_kopecks").notNull().default(0),
   meetLink: text("meet_link").notNull().default(""),
+  boardLink: text("board_link").notNull().default(""),
   active: boolean("active").notNull().default(true),
   note: text("note").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

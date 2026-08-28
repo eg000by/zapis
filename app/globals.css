@@ -1142,12 +1142,17 @@ a.meet-link:hover {
   color: var(--muted);
 }
 a.panel-join {
-  display: inline-block;
+  /* Ссылок может быть две (звонок и доска) — ставим их в столбик, а не в строку. */
+  display: block;
+  width: fit-content;
   margin-top: 12px;
   color: var(--accent);
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
+}
+a.panel-join + a.panel-join {
+  margin-top: 8px;
 }
 a.panel-join:hover {
   filter: brightness(0.9);

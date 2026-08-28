@@ -51,6 +51,7 @@ export function lessonDescription(opts: {
   trial?: boolean;
   tg?: string;
   meetLink?: string;
+  boardLink?: string;
 }): string {
   const single = opts.trial ? "Пробное занятие (разовое)\n" : "Разовое занятие\n";
   return (
@@ -61,7 +62,8 @@ export function lessonDescription(opts: {
     `Предмет: ${opts.subject}\n` +
     (opts.recurring ? `Повтор: еженедельно\n` : single) +
     (opts.tg ? `Telegram: ${opts.tg}\n` : "") +
-    (opts.meetLink ? `Телемост: ${opts.meetLink}\n` : "")
+    (opts.meetLink ? `Телемост: ${opts.meetLink}\n` : "") +
+    (opts.boardLink ? `Доска: ${opts.boardLink}\n` : "")
   );
 }
 
@@ -74,20 +76,28 @@ export function isRecurringEvent(ev: {
   return !!ev.recurringEventId || (Array.isArray(ev.recurrence) && ev.recurrence.length > 0);
 }
 
-// Перестраивает строку «Телемост: …» в описании события: убирает старую (если была)
-// и добавляет новую, когда ссылка задана. Хвостовые пустые строки подчищаем.
-// Запасной путь для старых событий, у которых в extendedProperties нет данных
-// для полной пересборки описания.
-function withMeetLink(description: string, meetLink: string): string {
+// Постоянные ссылки занятия: звонок и рабочая доска. Ходят парой везде — в описании
+// события, в кабинете и в уведомлениях, — поэтому и обновляются одной операцией.
+export interface LessonLinks {
+  meetLink: string;
+  boardLink: string;
+}
+
+// Перестраивает строки «Телемост: …» и «Доска: …» в описании события: убирает старые
+// (если были) и добавляет новые, когда ссылки заданы. Хвостовые пустые строки
+// подчищаем. Запасной путь для старых событий, у которых в extendedProperties нет
+// данных для полной пересборки описания.
+function withLinks(description: string, links: LessonLinks): string {
   const lines = (description || "")
     .split("\n")
-    .filter((l) => !/^\s*телемост\s*:/i.test(l));
+    .filter((l) => !/^\s*(телемост|доска)\s*:/i.test(l));
   while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-  if (meetLink) lines.push(`Телемост: ${meetLink}`);
+  if (links.meetLink) lines.push(`Телемост: ${links.meetLink}`);
+  if (links.boardLink) lines.push(`Доска: ${links.boardLink}`);
   return lines.join("\n");
 }
 
-// Обновляет ссылку на Телемост в описании всех подтверждённых событий ученика
+// Обновляет постоянные ссылки в описании всех подтверждённых событий ученика
 // (серии — по мастеру, одиночные — сами). Вызывается при добавлении/смене ссылки
 // в кабинете, чтобы она появилась в уже существующих событиях календаря.
 //
@@ -96,7 +106,7 @@ function withMeetLink(description: string, meetLink: string): string {
 // Телемост и оставить неверную шапку нельзя. Патчи идут параллельно: вызывается
 // из формы /admin и из вебхука Telegram, последовательные round-trip'ы к календарю
 // задерживали бы ответ.
-export async function applyMeetLinkToEvents(key: string, meetLink: string): Promise<number> {
+export async function applyLinksToEvents(key: string, links: LessonLinks): Promise<number> {
   const cal = calendarClient();
   const now = Date.now();
   const res = await cal.events.list({
@@ -122,9 +132,10 @@ export async function applyMeetLinkToEvents(key: string, meetLink: string): Prom
               recurring: isRecurringEvent(ev),
               confirmed: true,
               tg: priv.tg,
-              meetLink,
+              meetLink: links.meetLink,
+              boardLink: links.boardLink,
             })
-          : withMeetLink(ev.description || "", meetLink);
+          : withLinks(ev.description || "", links);
       if (next === (ev.description || "")) return 0;
       try {
         await cal.events.patch({
@@ -134,7 +145,7 @@ export async function applyMeetLinkToEvents(key: string, meetLink: string): Prom
         });
         return 1;
       } catch (e) {
-        console.error("applyMeetLinkToEvents patch failed", ev.id, e);
+        console.error("applyLinksToEvents patch failed", ev.id, e);
         return 0;
       }
     })

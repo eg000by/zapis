@@ -5,7 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { students, type Student } from "./schema";
 import { detectExamTariff } from "./config";
-import { applyMeetLinkToEvents, deleteFutureEventsForContact } from "./google";
+import { applyLinksToEvents, deleteFutureEventsForContact } from "./google";
 
 // Заводит или обновляет ученика по contactKey (HMAC имени+предмета+tg, lib/link.ts).
 // contactKey стабилен для связки имя/предмет/tg, поэтому повторная бронь того же
@@ -105,6 +105,7 @@ export async function updateStudent(
       | "trial"
       | "trialNotifiedAt"
       | "meetLink"
+      | "boardLink"
       | "tgChatId"
     >
   >
@@ -158,20 +159,26 @@ export async function setStudentArchived(
   }
 }
 
-// Закрепляет ссылку на Телемост за учеником и обновляет её в описании уже созданных
-// событий календаря (best-effort). Общая операция для /admin и бота — иначе
-// последовательность «сохранить + применить» копируется по поверхностям и разъезжается.
-export async function setStudentMeetLink(id: string, meetLink: string): Promise<void> {
-  let link = (meetLink || "").trim();
+// Закрепляет за учеником постоянную ссылку — на звонок или на рабочую доску — и
+// обновляет описание уже созданных событий календаря (best-effort). Общая операция
+// для /admin и бота: иначе последовательность «сохранить + применить» копируется по
+// поверхностям и разъезжается. В событие пишутся обе ссылки сразу, поэтому вторую
+// перечитываем из карточки — иначе смена одной стирала бы другую.
+export async function setStudentLink(
+  id: string,
+  which: "meetLink" | "boardLink",
+  value: string
+): Promise<void> {
+  let link = (value || "").trim();
   // В форме /admin легко вставить адрес без схемы — нормализуем, иначе ссылка
   // в описании события и в кабинете окажется нерабочей.
   if (link && !/^https?:\/\//i.test(link)) link = `https://${link}`;
-  await updateStudent(id, { meetLink: link });
+  await updateStudent(id, { [which]: link });
   try {
     const s = await getStudent(id);
-    if (s) await applyMeetLinkToEvents(s.contactKey, link);
+    if (s) await applyLinksToEvents(s.contactKey, { meetLink: s.meetLink, boardLink: s.boardLink });
   } catch (e) {
-    console.error("applyMeetLinkToEvents failed", e);
+    console.error("applyLinksToEvents failed", e);
   }
 }
 

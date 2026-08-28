@@ -96,17 +96,20 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
           ? [student]
           : [];
       const meet = group ? group.meetLink : student?.meetLink || "";
+      // Доска — такая же рабочая ссылка, как звонок: без неё занятие не начать.
+      const board = group ? group.boardLink : student?.boardLink || "";
 
       // Сколько осталось — НЕ пишем: прогон крона может опоздать или прийти раньше,
       // и «через 45 минут» окажется враньём. Время начала верно всегда.
       const meetLine = meet
-        ? `🎥 Телемост: ${meet}`
-        : "⚠️ Ссылка на Телемост не задана — добавьте в карточке ученика.";
+        ? `🎥 Звонок: ${meet}`
+        : "⚠️ Ссылка на звонок не задана — добавьте в карточке ученика.";
+      const boardLine = board ? `\n🧩 Доска: ${board}` : "";
       await sendOwner(
         `⏰ <b>Скоро занятие</b>\n\n` +
           `🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(o.subject)}\n` +
           `🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n` +
-          `${meetLine}\n\n` +
+          `${meetLine}${boardLine}\n\n` +
           `${o.groupId ? `👥 Участников: ${members.length}` : await previousLessonLine(o.studentId, now)}`
       );
 
@@ -119,6 +122,7 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
           `⏰ <b>Скоро занятие</b>\n\n` +
             `Начало в ${hmMsk(o.start)} (МСК).\n` +
             (meet ? `🎥 Подключиться: ${meet}\n` : "") +
+            (board ? `🧩 Доска: ${board}\n` : "") +
             (contact ? `\nВопрос преподавателю: ${contact}` : "")
         );
       }

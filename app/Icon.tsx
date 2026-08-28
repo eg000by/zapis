@@ -9,6 +9,7 @@
 export type IconName =
   | "clock"
   | "video"
+  | "board"
   | "check"
   | "checkCircle"
   | "calendar"
@@ -42,6 +43,13 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <rect x="3" y="6" width="13" height="12" rx="2.5" />
       <path d="M16 10.5 21 8v8l-5-2.5z" />
+    </>
+  ),
+  // Доска: рамка с росчерком — так же читается и в 16 px, и рядом с камерой.
+  board: (
+    <>
+      <rect x="3" y="4" width="18" height="14" rx="2" />
+      <path d="M7 14c2-4 4.5-5.5 6-4s3 1 4-1M12 18v2.5" />
     </>
   ),
   check: <path d="M4.5 12.5 9.5 17.5 19.5 7" />,

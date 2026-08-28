@@ -21,11 +21,11 @@ export async function notifyStudent(
   }
 }
 
-// Отправляет ученику сообщение с его постоянными ссылками (личный кабинет + Телемост)
+// Отправляет ученику сообщение с его постоянными ссылками (кабинет, звонок, доска)
 // и закрепляет его в чате — вызывается при подключении уведомлений (/start).
 // Best-effort: без адреса сайта/ссылок просто молчим, сбой закрепа не ломает привязку.
 export async function pinStudentLinks(
-  student: Pick<Student, "id" | "trial" | "meetLink">,
+  student: Pick<Student, "id" | "trial" | "meetLink" | "boardLink">,
   chatId: number | string
 ): Promise<void> {
   try {
@@ -35,7 +35,8 @@ export async function pinStudentLinks(
       const code = await getOrCreateStudentLinkCode(student.id, student.trial);
       lines.push(`🗓 Личный кабинет (записи и оплата): ${base}/z/${code}`);
     }
-    if (student.meetLink) lines.push(`🎥 Подключиться к занятию (Телемост): ${student.meetLink}`);
+    if (student.meetLink) lines.push(`🎥 Подключиться к занятию: ${student.meetLink}`);
+    if (student.boardLink) lines.push(`🧩 Доска для работы: ${student.boardLink}`);
     // Контакт преподавателя — в том же закрепе: чтобы «а как с вами связаться»
     // не искалось по переписке.
     const contact = teacherTgUrl();

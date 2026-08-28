@@ -35,6 +35,7 @@ const STUDENT = {
   id: "stu-1",
   name: "Стас",
   meetLink: "https://telemost.yandex.ru/j/777",
+  boardLink: "https://unidraw.io/app/board/abc",
   tgChatId: "",
 };
 
@@ -81,12 +82,33 @@ describe("sendUpcomingLessonAlerts", () => {
     expect(recordPing).toHaveBeenCalledWith("soon:ev1_a");
   });
 
-  it("ссылки на Телемост нет — прямо говорим об этом, а не молчим", async () => {
+  // Доска — такая же рабочая ссылка, как звонок: без неё занятие не начать, и
+  // искать её в переписке за минуту до начала никто не должен.
+  it("ссылка на доску уходит и преподавателю, и ученику", async () => {
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(SOON)] as never);
+    vi.mocked(getStudent).mockResolvedValue({ ...STUDENT, tgChatId: "77" } as never);
+
+    await sendUpcomingLessonAlerts(NOW);
+    expect(ownerText()).toContain("https://unidraw.io/app/board/abc");
+    expect(studentText()).toContain("https://unidraw.io/app/board/abc");
+    expect(studentText()).toContain("https://telemost.yandex.ru/j/777");
+  });
+
+  it("доски нет — про неё просто молчим (звонок при этом на месте)", async () => {
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(SOON)] as never);
+    vi.mocked(getStudent).mockResolvedValue({ ...STUDENT, boardLink: "" } as never);
+
+    await sendUpcomingLessonAlerts(NOW);
+    expect(ownerText()).not.toContain("Доска");
+    expect(ownerText()).toContain("https://telemost.yandex.ru/j/777");
+  });
+
+  it("ссылки на звонок нет — прямо говорим об этом, а не молчим", async () => {
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(SOON)] as never);
     vi.mocked(getStudent).mockResolvedValue({ ...STUDENT, meetLink: "" } as never);
 
     await sendUpcomingLessonAlerts(NOW);
-    expect(ownerText()).toContain("Ссылка на Телемост не задана");
+    expect(ownerText()).toContain("Ссылка на звонок не задана");
   });
 
   it("прошлых занятий не было — так и пишем", async () => {

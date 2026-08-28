@@ -144,6 +144,7 @@ export const MY_GROUP = {
   },
   payHint: "",
   meetLink: "https://telemost.yandex.ru/j/group",
+  boardLink: "https://unidraw.io/app/board/group",
   paidHistory: [],
   nextLesson: "2026-07-18T13:00:00.000Z",
   // Расписание группы — конкретными датами: занятие лежит одной серией, но ученик
@@ -189,6 +190,7 @@ export const MY_FULL = {
     nextPaid: false,
   },
   meetLink: "https://telemost.yandex.ru/j/e2e",
+  boardLink: "https://unidraw.io/app/board/e2e",
   payHint: "",
   paidHistory: [
     { id: "old1", amountKopecks: 600000, note: "Июнь, 4 занятия", paidAt: "2026-06-03T09:00:00.000Z" },

@@ -248,7 +248,7 @@ export default async function AdminPage({
         )}
 
         <div className="card" style={{ marginTop: 16 }}>
-          <label style={{ marginTop: 0 }}>Ссылка на занятие (Яндекс Телемост)</label>
+          <label style={{ marginTop: 0 }}>Ссылка на звонок</label>
           <p className="hint" style={{ marginTop: 0 }}>
             Постоянная ссылка комнаты — показывается ученику в кабинете кнопкой «Подключиться».
           </p>
@@ -261,6 +261,29 @@ export default async function AdminPage({
               type="url"
               defaultValue={student.meetLink}
               placeholder="https://telemost.yandex.ru/j/…"
+              style={{ width: "100%", boxSizing: "border-box" }}
+            />
+            <button className="btn" type="submit">
+              Сохранить ссылку
+            </button>
+          </form>
+        </div>
+
+        <div className="card" style={{ marginTop: 16 }}>
+          <label style={{ marginTop: 0 }}>Ссылка на доску</label>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Интерактивная доска, на которой идёт работа: ученик открывает её из кабинета
+            и из напоминания о занятии.
+          </p>
+          <form method="POST" action="/api/admin">
+            <input type="hidden" name="key" value={key} />
+            <input type="hidden" name="action" value="student.board" />
+            <input type="hidden" name="studentId" value={student.id} />
+            <input
+              name="boardLink"
+              type="url"
+              defaultValue={student.boardLink}
+              placeholder="https://unidraw.io/app/board/…"
               style={{ width: "100%", boxSizing: "border-box" }}
             />
             <button className="btn" type="submit">

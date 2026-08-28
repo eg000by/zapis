@@ -21,7 +21,7 @@ import {
   listGroupMembers,
   listGroups,
   removeFromGroup,
-  setGroupMeetLink,
+  setGroupLink,
   updateGroup,
 } from "./groups";
 import {
@@ -103,6 +103,7 @@ export async function showGroupCard(
     next ? `🕒 Ближайшее занятие: ${escapeHtml(formatMsk(next))}` : "🕒 Время занятий не задано",
   ];
   if (g.meetLink) lines.push(`🎥 ${escapeHtml(g.meetLink)}`);
+  if (g.boardLink) lines.push(`🧩 ${escapeHtml(g.boardLink)}`);
 
   const rows: TgButton[][] = [
     [
@@ -110,9 +111,10 @@ export async function showGroupCard(
       { text: "🕒 Время занятий", data: `grptime:${g.id}` },
     ],
     [
-      { text: "🎥 Телемост", data: `grpmeet:${g.id}` },
-      { text: "💰 Цена", data: `grprate:${g.id}` },
+      { text: "🎥 Звонок", data: `grpmeet:${g.id}` },
+      { text: "🧩 Доска", data: `grpboard:${g.id}` },
     ],
+    [{ text: "💰 Цена", data: `grprate:${g.id}` }],
     [{ text: "🗑 Удалить группу", data: `grpdel:${g.id}` }],
     [{ text: "⬅️ Группы", data: "grps" }],
   ];
@@ -555,10 +557,19 @@ export async function promptGroupRate(chatId: number | string, groupId: string):
   );
 }
 
-export async function promptGroupMeet(chatId: number | string, groupId: string): Promise<void> {
-  await setState(String(chatId), "grp.meet", groupId);
+// Постоянные ссылки группы — звонок и доска: обе общие на всех участников.
+export async function promptGroupLink(
+  chatId: number | string,
+  groupId: string,
+  which: "meetLink" | "boardLink"
+): Promise<void> {
+  const meet = which === "meetLink";
+  await setState(String(chatId), meet ? "grp.meet" : "grp.board", groupId);
   await sendOwner(
-    "🎥 Пришлите ссылку Яндекс Телемоста для группы — она закрепится в кабинете каждого участника.\nЧтобы убрать ссылку, пришлите <code>-</code>.",
+    (meet
+      ? "🎥 Пришлите ссылку на звонок для группы (например https://telemost.yandex.ru/j/…)"
+      : "🧩 Пришлите ссылку на доску для группы (например https://unidraw.io/app/board/…)") +
+      " — она закрепится в кабинете каждого участника.\nЧтобы убрать ссылку, пришлите <code>-</code>.",
     inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
   );
 }
@@ -595,8 +606,9 @@ export async function applyGroupInput(
     await showGroupCard(chatId, null, targetId);
     return true;
   }
-  if (action === "grp.meet") {
-    await setGroupMeetLink(targetId, text.trim() === "-" ? "" : text.trim());
+  if (action === "grp.meet" || action === "grp.board") {
+    const which = action === "grp.meet" ? "meetLink" : "boardLink";
+    await setGroupLink(targetId, which, text.trim() === "-" ? "" : text.trim());
     await clearState(String(chatId));
     await showGroupCard(chatId, null, targetId);
     return true;

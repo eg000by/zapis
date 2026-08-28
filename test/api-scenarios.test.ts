@@ -738,6 +738,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       payments: [],
       balance: null,
       meetLink: "",
+      boardLink: "",
       payHint: "",
       packageOffer: null,
       paidHistory: [],
@@ -749,16 +750,19 @@ describe("/api/my — записи и плашка «ближайшее заня
     });
   });
 
-  it("отдаёт ссылку на Телемост из карточки ученика", async () => {
+  it("отдаёт постоянные ссылки занятия из карточки ученика", async () => {
     await bookConfirmed();
     const { getStudentByContactKey } = await import("@/lib/students");
     vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
       id: "stu-1",
       name: "Тест Тестов",
       meetLink: "https://telemost.yandex.ru/j/12345",
+      boardLink: "https://unidraw.io/app/board/abc",
     } as any);
     const my = await getMy(TOKEN());
     expect(my.meetLink).toBe("https://telemost.yandex.ru/j/12345");
+    // Доска — вторая рабочая ссылка: ученику нужны обе, и обе за тем же гейтом.
+    expect(my.boardLink).toBe("https://unidraw.io/app/board/abc");
   });
 
   it("без подтверждённых занятий не отдаёт ни Телемост, ни счета (гейт на сервере)", async () => {
@@ -772,6 +776,7 @@ describe("/api/my — записи и плашка «ближайшее заня
       id: "stu-1",
       name: "Тест Тестов",
       meetLink: "https://telemost.yandex.ru/j/12345",
+      boardLink: "https://unidraw.io/app/board/abc",
     } as any);
     vi.mocked(ensureAutoInvoices).mockResolvedValueOnce({
       debtKopecks: 300000, debtHours: 2, aheadHours: 0,
@@ -785,6 +790,7 @@ describe("/api/my — записи и плашка «ближайшее заня
     const my = await getMy(TOKEN());
     expect(my.events).toHaveLength(1); // заявка в списке видна
     expect(my.meetLink).toBe("");
+    expect(my.boardLink).toBe("");
     expect(my.payments).toEqual([]);
     expect(my.balance).toBeNull();
     expect(my.packageOffer).toBeNull();

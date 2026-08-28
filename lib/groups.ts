@@ -10,7 +10,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "./db";
 import { groups, students, type Group, type Student } from "./schema";
 import { groupKey } from "./link";
-import { applyMeetLinkToEvents, deleteFutureEventsForContact } from "./google";
+import { applyLinksToEvents, deleteFutureEventsForContact } from "./google";
 
 // Сколько человек имеет смысл вести одновременно на онлайн-занятии.
 export const GROUP_LIMIT = 4;
@@ -55,7 +55,9 @@ export async function getGroupByContactKey(key: string): Promise<Group | null> {
 
 export async function updateGroup(
   id: string,
-  fields: Partial<Pick<Group, "name" | "subject" | "rateKopecks" | "meetLink" | "active" | "note">>
+  fields: Partial<
+    Pick<Group, "name" | "subject" | "rateKopecks" | "meetLink" | "boardLink" | "active" | "note">
+  >
 ): Promise<void> {
   await db().update(groups).set(fields).where(eq(groups.id, id));
 }
@@ -73,18 +75,22 @@ export async function countGroupMembers(groupId: string): Promise<number> {
   return (await listGroupMembers(groupId)).length;
 }
 
-// Ссылка на Телемост у группы общая: закрепляем её и в уже созданных событиях,
+// Постоянные ссылки у группы общие: закрепляем их и в уже созданных событиях,
 // иначе в описании занятия останется старая (та же логика, что у ученика).
-export async function setGroupMeetLink(id: string, meetLink: string): Promise<void> {
-  let link = (meetLink || "").trim();
+export async function setGroupLink(
+  id: string,
+  which: "meetLink" | "boardLink",
+  value: string
+): Promise<void> {
+  let link = (value || "").trim();
   if (link && !/^https?:\/\//i.test(link)) link = `https://${link}`;
-  await updateGroup(id, { meetLink: link });
+  await updateGroup(id, { [which]: link });
   const g = await getGroup(id);
   if (!g) return;
   try {
-    await applyMeetLinkToEvents(g.contactKey, link);
+    await applyLinksToEvents(g.contactKey, { meetLink: g.meetLink, boardLink: g.boardLink });
   } catch (e) {
-    console.error("setGroupMeetLink: не удалось обновить события", id, e);
+    console.error("setGroupLink: не удалось обновить события", id, e);
   }
 }
 

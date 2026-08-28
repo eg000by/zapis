@@ -4,7 +4,7 @@ import {
   getStudent,
   promoteStudentToFull,
   setStudentArchived,
-  setStudentMeetLink,
+  setStudentLink,
   updateStudent,
 } from "@/lib/students";
 import { setLessonNote } from "@/lib/lessons";
@@ -53,10 +53,11 @@ export async function POST(req: Request) {
       // Тот же сервис, что и кнопка архива в боте: уход в архив снимает будущие
       // занятия с календаря (паритет поверхностей, см. lib/students.ts).
       await setStudentArchived(studentId, String(form.get("active")) !== "1");
-    } else if (action === "student.meetlink") {
+    } else if (action === "student.meetlink" || action === "student.board") {
       // Сохраняем ссылку и обновляем её в описании уже созданных событий календаря
       // (общая операция с ботом — lib/students.ts).
-      await setStudentMeetLink(studentId, String(form.get("meetLink") || ""));
+      const which = action === "student.meetlink" ? "meetLink" : "boardLink";
+      await setStudentLink(studentId, which, String(form.get(which) || ""));
     } else if (action === "student.mkfull") {
       // Пробный → полноценный: снимаем trial, задаём ставку (указанную или тарифную
       // для ОГЭ/ЕГЭ), прошедшее пробное помечаем бесплатным (не долг), красим заново.
