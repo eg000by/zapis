@@ -1,7 +1,8 @@
 // Фейковый Google Calendar в памяти для тестов. Реализует подмножество API,
 // которым пользуется приложение, с той же семантикой, что и настоящий:
 //  - events.patch МЕРДЖИТ extendedProperties.private по ключам ("" остаётся ключом);
-//  - list(singleEvents=true) разворачивает RRULE:FREQ=WEEKLY;COUNT=n с учётом EXDATE
+//  - list(singleEvents=true) разворачивает RRULE:FREQ=WEEKLY (COUNT=n либо UNTIL=…)
+//    с учётом EXDATE
 //    и materialized-исключений (перенесённые инстансы имеют originalStartTime);
 //  - instances(eventId) возвращает наступления серии в окне по ТЕКУЩЕМУ времени;
 //  - patch/delete по id инстанса материализует исключение (delete ~ EXDATE);
@@ -53,12 +54,25 @@ function isMaster(ev: StoredEvent): boolean {
   return Array.isArray(ev.recurrence) && ev.recurrence.length > 0;
 }
 
-function parseRule(ev: StoredEvent): { count: number; exdates: Set<number> } {
+function parseRule(ev: StoredEvent): {
+  count: number;
+  until: number | null;
+  exdates: Set<number>;
+} {
   let count = 1;
+  let until: number | null = null;
   const exdates = new Set<number>();
   for (const line of ev.recurrence || []) {
     const rr = line.match(/^RRULE:.*COUNT=(\d+)/);
     if (rr) count = Number(rr[1]);
+    // UNTIL обрезает серию по времени: так «заканчивают» уже идущую серию, не стирая
+    // прошедшие занятия (архив ученика, перенос серии на другое время). Штамп — UTC.
+    const un = line.match(/^RRULE:.*UNTIL=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/);
+    if (un) {
+      until = Date.UTC(+un[1], +un[2] - 1, +un[3], +un[4], +un[5], +un[6]);
+      // COUNT и UNTIL взаимоисключающи; при UNTIL считаем наступления до него.
+      if (!/COUNT=/.test(line)) count = 520;
+    }
     const ex = line.match(/^EXDATE(?:;TZID=[^:]+)?:(.+)$/);
     if (ex) {
       // Штампы «стеночного» МСК: 20260722T181000
@@ -71,7 +85,7 @@ function parseRule(ev: StoredEvent): { count: number; exdates: Set<number> } {
       }
     }
   }
-  return { count, exdates };
+  return { count, until, exdates };
 }
 
 function utcStamp(ms: number): string {
@@ -118,11 +132,12 @@ function expand(master: StoredEvent): InstanceItem[] {
   const durMs = master.end?.dateTime
     ? new Date(master.end.dateTime).getTime() - startMs
     : 3600000;
-  const { count, exdates } = parseRule(master);
+  const { count, until, exdates } = parseRule(master);
   const exc = exceptionsOf(master.id);
   const out: InstanceItem[] = [];
   for (let w = 0; w < count; w++) {
     const occMs = startMs + w * WEEK_MS;
+    if (until !== null && occMs > until) break;
     if (exdates.has(occMs)) continue;
     const override = exc.get(occMs);
     if (override) {

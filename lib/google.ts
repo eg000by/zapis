@@ -461,6 +461,27 @@ function truncateRrule(rrule: string, stamp: string): string {
   return `RRULE:${parts.join(";")}`;
 }
 
+// Обрезает уже идущую серию по времени `at`: будущие наступления пропадают, прошлые
+// остаются историей. Это единственный способ «закончить» серию, не стирая проведённые
+// занятия: у повторяющегося события прошлое порождается тем же правилом, что и будущее,
+// поэтому сдвиг DTSTART переписал бы всю историю задним числом.
+// Возвращает false, если событие не серия (обрезать нечего).
+export async function truncateSeriesAt(eventId: string, at: Date): Promise<boolean> {
+  const cal = calendarClient();
+  const ev = (await cal.events.get({ calendarId: CALENDAR_ID, eventId })).data;
+  const recurrence = ev.recurrence || [];
+  if (!recurrence.length) return false;
+  const stamp = utcRuleStamp(at);
+  await cal.events.patch({
+    calendarId: CALENDAR_ID,
+    eventId,
+    requestBody: {
+      recurrence: recurrence.map((r) => (/^RRULE:/i.test(r) ? truncateRrule(r, stamp) : r)),
+    },
+  });
+  return true;
+}
+
 // Удаляет все БУДУЩИЕ непроведённые занятия ученика из календаря (при удалении ученика):
 // одиночные будущие события — целиком; серии, начавшиеся в прошлом, — обрезает по
 // UNTIL=сейчас (прошлые занятия-история остаются); серии целиком в будущем — целиком.

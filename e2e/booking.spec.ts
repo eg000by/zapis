@@ -107,10 +107,15 @@ test("календарь: выбор даты переводит сетку на
   // Прошедшие даты и выходные выбрать нельзя.
   expect(await page.locator(".cal-day:disabled").count()).toBeGreaterThan(0);
 
-  // Листаем на следующий месяц и берём первый доступный день — так тест не зависит
-  // от того, какое сегодня число.
+  // Листаем на следующий месяц и берём доступный день во ВТОРОЙ его половине — так
+  // тест не зависит от того, какое сегодня число. Первые числа следующего месяца
+  // брать нельзя: они могут попасть в текущую календарную неделю (когда сегодня —
+  // её конец), а неделя, которая и так показана, в запрос не уходит.
   await page.getByRole("button", { name: "Следующий месяц" }).click();
-  const day = page.locator(".cal-day:not([disabled])").first();
+  const day = page
+    .locator(".cal-day:not([disabled])")
+    .filter({ hasText: /^(1[5-9]|2[0-2])$/ })
+    .first();
   const picked = (await day.textContent())!.trim();
   await day.click();
 
@@ -118,7 +123,11 @@ test("календарь: выбор даты переводит сетку на
   await expect(page.locator(".cal-grid")).toHaveCount(0);
   await expect.poll(() => slotUrls.at(-1)).toContain("from=");
   await expect(page.locator(".week-label")).toContainText("Неделя");
-  await expect(page.locator(".week-label")).toContainText(picked);
+  // Показана именно неделя выбранного дня: «Неделя 14–20 сентября» — и 15-е в ней.
+  const label = (await page.locator(".week-label").textContent())!;
+  const from = Number(label.match(/(\d+)/)![1]);
+  expect(Number(picked)).toBeGreaterThanOrEqual(from);
+  expect(Number(picked)).toBeLessThanOrEqual(from + 6);
 
   // И обратно к ближайшей неделе — одной кнопкой.
   await page.getByRole("button", { name: "← Ближайшие" }).click();

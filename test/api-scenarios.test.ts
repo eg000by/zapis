@@ -729,6 +729,106 @@ describe("/api/telegram — вебхук", () => {
   });
 });
 
+// ────────── Перенос уже идущей серии: история занятий не должна пропадать ──────────
+// У повторяющегося события прошлое порождается тем же правилом, что и будущее, поэтому
+// сдвиг DTSTART переписывает историю задним числом: проведённые занятия исчезают из
+// календаря, а оплаченные часы «переезжают» на будущие — кабинет показывает ближайшие
+// занятия оплаченными. Поэтому идущая серия не двигается, а заменяется новой.
+describe("перенос серии, которая уже идёт", () => {
+  // Три занятия серии позади (14, 21, 28 июля), «сегодня» — 4 августа.
+  const AFTER = new Date("2026-08-04T09:00:00.000Z");
+  const NEW_SLOT = "2026-08-06T06:00:00.000Z"; // Чт 09:00
+
+  async function startedSeries(): Promise<string> {
+    const id = await bookConfirmed(TUE_9);
+    vi.setSystemTime(AFTER);
+    return id;
+  }
+
+  it("заявка на перенос не трогает прежнюю серию", async () => {
+    const id = await startedSeries();
+    const before = getStored(id)!;
+
+    const r = await post("reschedule", { token: TOKEN(), eventId: id, mode: "all", start: NEW_SLOT });
+    expect(r.status).toBe(200);
+
+    // Старая серия цела: то же начало, то же правило, тот же статус.
+    const after = getStored(id)!;
+    expect(after.start?.dateTime).toBe(before.start?.dateTime);
+    expect(after.recurrence).toEqual(before.recurrence);
+    expect(after.extendedProperties?.private?.status).toBe("confirmed");
+
+    // Новая — отдельная заявка, знающая, кого заменяет.
+    const created = allStored().filter((e) => e.status !== "cancelled").slice(-1)[0];
+    expect(created.id).not.toBe(id);
+    expect(created.start?.dateTime).toBe(NEW_SLOT);
+    expect(created.extendedProperties?.private?.status).toBe("pending");
+    expect(created.extendedProperties?.private?.seriesMove).toBe("1");
+    expect(created.extendedProperties?.private?.prevSeriesId).toBe(id);
+  });
+
+  it("подтверждение: прошлые занятия остаются, будущих у старой серии нет", async () => {
+    const id = await startedSeries();
+    await post("reschedule", { token: TOKEN(), eventId: id, mode: "all", start: NEW_SLOT });
+    const created = allStored().filter((e) => e.status !== "cancelled").slice(-1)[0];
+    // Кнопка уведомления несёт ревизию (cr:<rev>:<id>) — так же, как её шлёт бот.
+    await tgCallback(`cr:1:${created.id}`);
+
+    const { listContactOccurrences } = await import("@/lib/google");
+    const starts = (await listContactOccurrences(KEY())).map((o) => o.start.toISOString());
+    // История на месте — именно её терял прежний перенос.
+    expect(starts).toContain(TUE_9);
+    expect(starts).toContain(TUE2_9);
+    expect(starts).toContain(TUE3_9);
+    // Старая серия обрезана: после «сейчас» её наступлений больше нет.
+    const old = getStored(id)!;
+    expect(old.recurrence?.[0]).toMatch(/UNTIL=/);
+    expect(starts.filter((iso) => iso > AFTER.toISOString() && iso.endsWith("T06:00:00.000Z")))
+      .toEqual(expect.arrayContaining([NEW_SLOT]));
+    expect(getStored(created.id)?.extendedProperties?.private?.status).toBe("confirmed");
+  });
+
+  it("отклонение: новой серии нет, прежняя идёт как шла", async () => {
+    const id = await startedSeries();
+    await post("reschedule", { token: TOKEN(), eventId: id, mode: "all", start: NEW_SLOT });
+    const created = allStored().filter((e) => e.status !== "cancelled").slice(-1)[0];
+    await tgCallback(`dr:1:${created.id}`);
+
+    expect(getStored(created.id)?.status).not.toBe("confirmed");
+    const old = getStored(id)!;
+    expect(old.recurrence?.[0]).not.toMatch(/UNTIL=/);
+    expect(old.extendedProperties?.private?.status).toBe("confirmed");
+  });
+
+  it("отмена идущей серии обрезает её, а не стирает историю", async () => {
+    const id = await startedSeries();
+    const r = await post("cancel", { token: TOKEN(), eventId: id, mode: "all" });
+    expect(r.status).toBe(200);
+
+    const { listContactOccurrences } = await import("@/lib/google");
+    const starts = (await listContactOccurrences(KEY())).map((o) => o.start.toISOString());
+    // Прошлое цело (включая сегодняшнее утреннее занятие), будущего нет.
+    expect(starts).toEqual([TUE_9, TUE2_9, TUE3_9, "2026-08-04T06:00:00.000Z"]);
+    expect(getStored(id)?.recurrence?.[0]).toMatch(/UNTIL=/);
+  });
+
+  it("отмена ещё не начавшейся серии удаляет её целиком", async () => {
+    const id = await bookConfirmed(TUE_9);
+    const r = await post("cancel", { token: TOKEN(), eventId: id, mode: "all" });
+    expect(r.status).toBe(200);
+    expect(getStored(id)).toBeUndefined();
+  });
+
+  it("серия, которая ещё не началась, по-прежнему двигается на месте", async () => {
+    // Терять нечего: прошлых занятий у неё нет, и лишнее событие ни к чему.
+    const id = await bookConfirmed(TUE_9);
+    const r = await post("reschedule", { token: TOKEN(), eventId: id, mode: "all", start: THU2_9 });
+    expect(r.status).toBe(200);
+    expect(getStored(id)?.start?.dateTime).toBe(THU2_9);
+    expect(getStored(id)?.extendedProperties?.private?.status).toBe("pending");
+  });
+});
+
 // ────────────────────────────── /api/my ──────────────────────────────
 
 describe("/api/my — записи и плашка «ближайшее занятие»", () => {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CALENDAR_ID, calendarClient, fetchBusy } from "@/lib/google";
+import { CALENDAR_ID, calendarClient, fetchBusy, lessonDescription } from "@/lib/google";
 import {
   blockSpanMinutes,
   buildRecurrence,
@@ -212,6 +212,66 @@ export async function POST(req: Request) {
     }
 
     const end = new Date(new Date(startIso).getTime() + blockSpanMinutes(lessons) * 60000);
+
+    // Серия, которая уже идёт, НЕ двигается на месте: у повторяющегося события прошлые
+    // занятия порождаются тем же правилом, что и будущие, поэтому сдвиг DTSTART стирает
+    // всю историю задним числом — проведённые занятия исчезают из календаря, а вместе с
+    // ними и основание уже оплаченных счетов (оплаченные часы «переезжают» на будущие
+    // занятия, и кабинет показывает их оплаченными).
+    //
+    // Поэтому: заводим НОВУЮ серию заявкой, а прежнюю не трогаем — до решения
+    // преподавателя занятия остаются в силе на старом времени. Подтверждение обрежет
+    // старую серию по «сейчас» (прошлое останется), отклонение — просто удалит новую.
+    const isSeries = Array.isArray(ev.recurrence) && ev.recurrence.length > 0;
+    const started = !!evStart && new Date(evStart).getTime() < now.getTime();
+    if (isSeries && started && priv.status === "confirmed") {
+      const created = await cal.events.insert({
+        calendarId: CALENDAR_ID,
+        requestBody: {
+          summary: `${PENDING_PREFIX}${student} — ${subject}`,
+          description: lessonDescription({
+            student,
+            subject,
+            recurring: true,
+            confirmed: false,
+            tg: priv.tg,
+          }),
+          start: { dateTime: startIso, timeZone: TIMEZONE },
+          end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
+          ...(r.recurrence ? { recurrence: r.recurrence } : {}),
+          status: "tentative",
+          extendedProperties: {
+            private: {
+              ...priv,
+              status: "pending",
+              lessons: String(lessons),
+              rev: "1",
+              // Какую серию заменяем: подтверждение обрежет её, отклонение — оставит.
+              seriesMove: "1",
+              prevSeriesId: eventId,
+              ...(prevStart ? { prevStart } : {}),
+            },
+          },
+        },
+      });
+
+      const when = `${formatMskRange(startIso, lessons)}, еженедельно`;
+      try {
+        await notifyRequest({
+          eventId: created.data.id || "",
+          name: student || contact.name,
+          tg: contact.tg,
+          subject,
+          when,
+          header: "🔄 <b>Перенос серии</b> — нужно подтвердить",
+          rev: 1,
+        });
+      } catch (e) {
+        console.error("Telegram notify (series move) failed", e);
+      }
+      return NextResponse.json({ ok: true, when });
+    }
+
     await cal.events.patch({
       calendarId: CALENDAR_ID,
       eventId,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CALENDAR_ID, calendarClient } from "@/lib/google";
+import { CALENDAR_ID, calendarClient, truncateSeriesAt } from "@/lib/google";
 import { decodeToken, contactKey } from "@/lib/link";
 import { setLessonStatusByEvent } from "@/lib/lessons";
 import { formatMskRange } from "@/lib/slots";
@@ -93,8 +93,17 @@ export async function POST(req: Request) {
       }
       await cal.events.delete({ calendarId: CALENDAR_ID, eventId: inst.id! });
       cancelledOnce = true;
+    } else if (isSeries && ev.start?.dateTime && new Date(ev.start.dateTime) < new Date()) {
+      // Отмена серии, которая УЖЕ ИДЁТ: удалять её целиком нельзя — вместе с будущими
+      // занятиями исчезли бы проведённые, а на них стоят оплаты (оплаченные часы
+      // «переехали» бы на оставшиеся занятия и показались бы оплаченными вперёд).
+      // Поэтому обрезаем по «сейчас»: будущего у серии больше нет, прошлое — история.
+      // Строки занятий при этом не трогаем: проведённые занятия так и остались
+      // проведёнными, отменено только будущее, которого в БД ещё нет.
+      await truncateSeriesAt(eventId, new Date());
     } else {
-      // Отмена всей серии / разового занятия / отдельного перенесённого занятия.
+      // Отмена разового занятия, отдельного перенесённого или серии, которая ещё не
+      // началась: терять нечего — удаляем целиком.
       await cal.events.delete({ calendarId: CALENDAR_ID, eventId });
       // CRM (best-effort): помечаем занятие отменённым, чтобы карточка не показывала фантом.
       try {

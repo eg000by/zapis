@@ -5,6 +5,7 @@ import {
   fetchBusy,
   isRecurringEvent,
   lessonDescription,
+  truncateSeriesAt,
 } from "@/lib/google";
 import { blockSpanMinutes, formatMskRange, validateSlot, windowBounds } from "@/lib/slots";
 import {
@@ -759,6 +760,17 @@ async function handleBookingAction(
           extendedProperties: { private: { status: "confirmed" } },
         },
       });
+      // Перенос серии: новая серия подтверждена — старую обрезаем «сейчас». Прошлые
+      // занятия остаются историей (их нельзя терять: на них стоят оплаты), будущих у
+      // неё больше не будет. Делаем это ПОСЛЕ подтверждения новой: если обрезать
+      // раньше и подтверждение упадёт, ученик остался бы вообще без занятий.
+      if (priv.seriesMove === "1" && priv.prevSeriesId) {
+        try {
+          await truncateSeriesAt(priv.prevSeriesId, new Date());
+        } catch (e) {
+          console.error("truncate previous series (confirm) failed", priv.prevSeriesId, e);
+        }
+      }
       try {
         await setLessonStatusByEvent(eventId, "confirmed");
         // Пересчитываем цвета всех занятий ученика (баланс оплат × прошлое/будущее).
@@ -778,6 +790,29 @@ async function handleBookingAction(
         await notifyStudentById(
           priv.studentId,
           `✅ Ваша запись подтверждена!\n📚 ${escapeHtml(subject)}\n🕒 <b>${escapeHtml(when)}</b>`
+        );
+      }
+    } else if (priv.seriesMove === "1") {
+      // Отклонение переноса серии: новая серия была только заявкой — удаляем её.
+      // Прежняя всё это время шла как обычно, восстанавливать нечего.
+      await cal.events.delete({ calendarId: CALENDAR_ID, eventId });
+      try {
+        if (priv.studentId) await recolorStudent(priv.studentId);
+      } catch (e) {
+        console.error("CRM color (decline series move) failed", e);
+      }
+      await answerCallback(cq.id, "Перенос отклонён ❌");
+      if (chatId && messageId) {
+        await editMessageText(
+          chatId,
+          messageId,
+          `↩️ <b>Перенос серии отклонён</b>\n\n🧑‍🎓 ${student}\n📚 ${subject}\nЗанятия остаются в прежнее время.`
+        );
+      }
+      if (priv.studentId) {
+        await notifyStudentById(
+          priv.studentId,
+          "↩️ Перенос не согласован — занятия остаются в прежнее время."
         );
       }
     } else if (moved && priv.origStart) {
