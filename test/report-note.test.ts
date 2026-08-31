@@ -77,7 +77,7 @@ describe("📝 заметка к занятию — подтверждение, 
     expect(recolorStudent).toHaveBeenCalledWith("stu-1");
     // Строка занятия заводится по инстансу календаря, ввод заметки включён.
     expect(findOrCreateOccurrenceLesson).toHaveBeenCalled();
-    expect(setState).toHaveBeenCalledWith("1", "lesson.note", "les-1");
+    expect(setState).toHaveBeenCalledWith("1", "lesson.note", "les-1", undefined);
     expect(vi.mocked(sendOwner).mock.calls[0][0]).toContain("Заметка к занятию");
   });
 
@@ -87,7 +87,7 @@ describe("📝 заметка к занятию — подтверждение, 
 
     await promptReportLessonNote(1, INSTANCE);
     expect(recolorStudent).toHaveBeenCalledWith("stu-1");
-    expect(setState).toHaveBeenCalledWith("1", "lesson.note", "les-1");
+    expect(setState).toHaveBeenCalledWith("1", "lesson.note", "les-1", undefined);
   });
 
   it("события нет в календаре — ничего не пересчитываем", async () => {

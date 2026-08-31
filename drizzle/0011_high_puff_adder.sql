@@ -1,0 +1,1 @@
+ALTER TABLE "bot_state" ADD COLUMN "prompt_message_id" text DEFAULT '' NOT NULL;

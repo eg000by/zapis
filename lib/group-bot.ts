@@ -30,7 +30,7 @@ import {
   updateStudent,
   upsertStudent,
 } from "./students";
-import { clearState, getState, setState } from "./botstate";
+import { clearState, getState, promptIdOf, setState } from "./botstate";
 import {
   CALENDAR_ID,
   calendarClient,
@@ -47,14 +47,15 @@ import { contactKey } from "./link";
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
+// См. crm-bot.emit: экран правится на месте, новое сообщение — только если не вышло.
 async function emit(
   chatId: number | string,
   messageId: number | null,
   text: string,
   keyboard?: unknown
 ): Promise<void> {
-  if (messageId != null) await editMessageText(chatId, messageId, text, keyboard);
-  else await sendOwner(text, keyboard);
+  if (messageId != null && (await editMessageText(chatId, messageId, text, keyboard))) return;
+  await sendOwner(text, keyboard);
 }
 
 export async function showGroupsList(
@@ -385,22 +386,22 @@ export async function setGroupTime(
 
 // ── Мастер создания и правки полей ───────────────────────────────────────────
 export async function promptNewGroup(chatId: number | string): Promise<void> {
-  await setState(String(chatId), "grp.new.name", "");
-  await sendOwner(
+  const prompt = await sendOwner(
     "👥 <b>Новая группа</b>\n\nПришлите название — его увидят ученики в кабинете. Например: <code>ОГЭ, суббота</code>",
     inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
   );
+  await setState(String(chatId), "grp.new.name", "", prompt?.message_id);
 }
 
 export async function submitGroupName(chatId: number | string, name: string): Promise<void> {
-  await setState(String(chatId), "grp.new.subject", JSON.stringify({ name }));
-  await sendOwner(
+  const prompt = await sendOwner(
     `Название: <b>${escapeHtml(name)}</b>\n\nВыберите предмет:`,
     inlineKeyboard([
       ...SUBJECTS.map((s, i) => [{ text: s, data: `grpsub:${i}` }]),
       [{ text: "✖️ Отмена", data: "cancel" }],
     ])
   );
+  await setState(String(chatId), "grp.new.subject", JSON.stringify({ name }), prompt?.message_id);
 }
 
 export async function submitGroupSubject(chatId: number | string, index: number): Promise<void> {
@@ -408,11 +409,11 @@ export async function submitGroupSubject(chatId: number | string, index: number)
   if (!st || st.action !== "grp.new.subject") return;
   const { name } = JSON.parse(st.targetId) as { name: string };
   const subject = SUBJECTS[index] || SUBJECTS[0];
-  await setState(String(chatId), "grp.new.rate", JSON.stringify({ name, subject }));
-  await sendOwner(
+  const prompt = await sendOwner(
     `Предмет: <b>${escapeHtml(subject)}</b>\n\nПришлите цену ОДНОГО занятия для КАЖДОГО участника, в рублях. Например: <code>750</code>`,
     inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
   );
+  await setState(String(chatId), "grp.new.rate", JSON.stringify({ name, subject }), prompt?.message_id);
 }
 
 export async function submitGroupRate(chatId: number | string, rubles: number): Promise<void> {
@@ -449,14 +450,14 @@ export async function promptNewGroupStudent(
     await sendOwner(`В группе уже ${GROUP_LIMIT} человек.`);
     return;
   }
-  await setState(String(chatId), "grp.stu.name", g.id);
-  await sendOwner(
+  const prompt = await sendOwner(
     `🧑‍🎓 <b>Новый ученик в группу «${escapeHtml(g.name)}»</b>\n\n` +
       `Предмет: ${escapeHtml(g.subject)} · цена: ${
         g.rateKopecks > 0 ? `${rub(g.rateKopecks)} ₽ за занятие` : "не задана"
       }\n\nПришлите имя ученика одним сообщением.`,
     inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
   );
+  await setState(String(chatId), "grp.stu.name", g.id, prompt?.message_id);
 }
 
 async function askGroupStudentTg(
@@ -464,13 +465,13 @@ async function askGroupStudentTg(
   groupId: string,
   name: string
 ): Promise<void> {
-  await setState(String(chatId), "grp.stu.tg", JSON.stringify({ g: groupId, name }));
-  await sendOwner(
+  const prompt = await sendOwner(
     `Имя: <b>${escapeHtml(name)}</b>\n\n✈️ Telegram ученика — пришлите <code>@username</code> или нажмите «Пропустить».`,
     inlineKeyboard([
       [{ text: "Пропустить", data: "grpstuskip" }, { text: "✖️ Отмена", data: "cancel" }],
     ])
   );
+  await setState(String(chatId), "grp.stu.tg", JSON.stringify({ g: groupId, name }), prompt?.message_id);
 }
 
 // Заводит ученика и сразу кладёт его в группу. Личную ставку оставляем нулевой:
@@ -550,11 +551,11 @@ export async function finishNewGroupStudent(
 }
 
 export async function promptGroupRate(chatId: number | string, groupId: string): Promise<void> {
-  await setState(String(chatId), "grp.rate", groupId);
-  await sendOwner(
+  const prompt = await sendOwner(
     "💰 Пришлите цену одного занятия для каждого участника, в рублях:",
     inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
   );
+  await setState(String(chatId), "grp.rate", groupId, prompt?.message_id);
 }
 
 // Постоянные ссылки группы — звонок и доска: обе общие на всех участников.
@@ -564,14 +565,14 @@ export async function promptGroupLink(
   which: "meetLink" | "boardLink"
 ): Promise<void> {
   const meet = which === "meetLink";
-  await setState(String(chatId), meet ? "grp.meet" : "grp.board", groupId);
-  await sendOwner(
+  const prompt = await sendOwner(
     (meet
       ? "🎥 Пришлите ссылку на звонок для группы (например https://telemost.yandex.ru/j/…)"
       : "🧩 Пришлите ссылку на доску для группы (например https://unidraw.io/app/board/…)") +
       " — она закрепится в кабинете каждого участника.\nЧтобы убрать ссылку, пришлите <code>-</code>.",
     inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]])
   );
+  await setState(String(chatId), meet ? "grp.meet" : "grp.board", groupId, prompt?.message_id);
 }
 
 // Применяет текстовый ввод к группе. Возвращает true, если ввод был «групповым».
@@ -579,7 +580,9 @@ export async function applyGroupInput(
   chatId: number | string,
   action: string,
   targetId: string,
-  text: string
+  text: string,
+  // Сообщение-приглашение: результат рисуем поверх него, а не новым сообщением.
+  promptId: number | null = null
 ): Promise<boolean> {
   if (action === "grp.new.name") {
     await submitGroupName(chatId, text.trim().slice(0, 60));
@@ -603,14 +606,14 @@ export async function applyGroupInput(
     const rub = Math.max(0, Math.round(Number(text.replace(/[^\d]/g, "")) || 0));
     await updateGroup(targetId, { rateKopecks: rub * 100 });
     await clearState(String(chatId));
-    await showGroupCard(chatId, null, targetId);
+    await showGroupCard(chatId, promptId, targetId);
     return true;
   }
   if (action === "grp.meet" || action === "grp.board") {
     const which = action === "grp.meet" ? "meetLink" : "boardLink";
     await setGroupLink(targetId, which, text.trim() === "-" ? "" : text.trim());
     await clearState(String(chatId));
-    await showGroupCard(chatId, null, targetId);
+    await showGroupCard(chatId, promptId, targetId);
     return true;
   }
   return false;

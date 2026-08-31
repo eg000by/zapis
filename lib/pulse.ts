@@ -9,6 +9,7 @@ import { pingSent, recordPing } from "./pings";
 import { escapeHtml, inlineKeyboard, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
 import { ensureAutoInvoices } from "./autobill";
+import { refreshPanel } from "./panel";
 import { activeMembers } from "./groups";
 import { attendanceKeyboard } from "./attendance";
 
@@ -89,5 +90,8 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
       console.error("pulse: autobill failed", studentId, e);
     }
   }
+  // Панель дня обновляется тем же прогоном: занятие прошло — в ней это уже видно,
+  // и заходить в бот, чтобы посмотреть расписание, не нужно.
+  await refreshPanel().catch((e) => console.error("pulse: panel refresh failed", e));
   return { sent, billed };
 }

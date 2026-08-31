@@ -20,19 +20,25 @@ vi.mock("googleapis", async () => {
   const { google } = await import("./helpers/fake-google");
   return { google, calendar_v3: {} };
 });
-vi.mock("@/lib/telegram", () => ({
-  notifyRequest: vi.fn(async () => {}),
-  sendOwner: vi.fn(async () => {}),
-  sendTo: vi.fn(async () => {}),
-  answerCallback: vi.fn(async () => {}),
-  editMessageText: vi.fn(async () => {}),
-  escapeHtml: (s: string) => s,
-  inlineKeyboard: (rows: unknown) => ({ inline_keyboard: rows }),
-  forceReply: () => ({ force_reply: true }),
-  botUsername: vi.fn(async () => "test_bot"),
-  setMyCommands: vi.fn(async () => {}),
-  deleteMyCommands: vi.fn(async () => {}),
-}));
+// Подменяем только то, что ходит в сеть: чистые помощники (разметка, упаковка id,
+// подписи меню) остаются настоящими — иначе тесты ломаются от каждого нового экспорта.
+vi.mock("@/lib/telegram", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/telegram")>();
+  return {
+    ...actual,
+    notifyRequest: vi.fn(async () => {}),
+    // sendOwner отдаёт message_id: на нём держится «ответ рисуется поверх приглашения».
+    sendOwner: vi.fn(async () => ({ message_id: 1 })),
+    sendTo: vi.fn(async () => ({ message_id: 1 })),
+    answerCallback: vi.fn(async () => {}),
+    editMessageText: vi.fn(async () => true),
+    deleteMessage: vi.fn(async () => {}),
+    pinChatMessage: vi.fn(async () => {}),
+    botUsername: vi.fn(async () => "test_bot"),
+    setMyCommands: vi.fn(async () => {}),
+    deleteMyCommands: vi.fn(async () => {}),
+  };
+});
 vi.mock("@/lib/students", () => ({
   upsertStudent: vi.fn(async () => ({ id: "stu-1" })),
   getStudent: vi.fn(async () => null),

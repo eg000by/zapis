@@ -67,13 +67,15 @@ export async function answerCallback(callbackQueryId: string, text?: string): Pr
   await api("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
 }
 
+// Возвращает false, если править было нечего (сообщение удалено, слишком старое) —
+// вызывающий тогда шлёт новое, а не молчит.
 export async function editMessageText(
   chatId: number | string,
   messageId: number,
   text: string,
   replyMarkup?: unknown
-): Promise<void> {
-  await api("editMessageText", {
+): Promise<boolean> {
+  const data = await api("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text: clampMessage(text),
@@ -81,6 +83,18 @@ export async function editMessageText(
     link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
+  return !!data?.ok;
+}
+
+// Удаление сообщения. В личном чате бот может удалять и свои, и присланные ему —
+// этим подчищается служебная переписка (приглашение к вводу, сам ввод, «сохранено»).
+// Best-effort: сообщение старше 48 часов или уже удалённое — не повод падать.
+export async function deleteMessage(
+  chatId: number | string,
+  messageId: number | null | undefined
+): Promise<void> {
+  if (!messageId) return;
+  await api("deleteMessage", { chat_id: chatId, message_id: messageId });
 }
 
 // Меняет только клавиатуру сообщения. Нужна там, где состояние живёт в самих
@@ -158,10 +172,15 @@ export async function pinChatMessage(
 }
 
 // Отправка сообщения владельцу (TELEGRAM_CHAT_ID) — для команд CRM.
-export async function sendOwner(text: string, replyMarkup?: unknown): Promise<void> {
+// Возвращает отправленное сообщение: его message_id нужен, чтобы потом переписать
+// это же сообщение вместо отправки нового.
+export async function sendOwner(
+  text: string,
+  replyMarkup?: unknown
+): Promise<{ message_id?: number } | null> {
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!chatId) throw new Error("TELEGRAM_CHAT_ID не задан");
-  await sendTo(chatId, text, replyMarkup);
+  return sendTo(chatId, text, replyMarkup);
 }
 
 // Username бота — для deep-link t.me/<бот>?start=…. Явный TELEGRAM_BOT_USERNAME из env
@@ -178,6 +197,26 @@ export async function botUsername(): Promise<string> {
     cachedUsername = "";
   }
   return cachedUsername ?? "";
+}
+
+// ── Постоянное меню ─────────────────────────────────────────────────────────
+// Reply-клавиатура живёт у поля ввода, а не внутри сообщения: она всегда на виду,
+// не уплывает вверх вместе с перепиской и сама сообщений не создаёт. Inline-кнопки
+// остаются для действий внутри экранов, где важен контекст конкретной карточки.
+export const MENU_TODAY = "Сегодня";
+export const MENU_STUDENTS = "Ученики";
+export const MENU_DEBTS = "Долги";
+export const MENU_GROUPS = "Группы";
+
+export function menuKeyboard(): unknown {
+  return {
+    keyboard: [
+      [{ text: MENU_TODAY }, { text: MENU_STUDENTS }],
+      [{ text: MENU_DEBTS }, { text: MENU_GROUPS }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
 }
 
 export interface TgButton {

@@ -14,11 +14,18 @@ import {
   escapeHtml,
   sendOwner,
   sendTo,
+  deleteMessage,
   deleteMyCommands,
+  menuKeyboard,
   setMyCommands,
   unpackUuid,
+  MENU_TODAY,
+  MENU_STUDENTS,
+  MENU_DEBTS,
+  MENU_GROUPS,
 } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
+import { refreshPanel, showToday } from "@/lib/panel";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
 import { applyAttendance, toggleAttendance } from "@/lib/attendance";
@@ -217,6 +224,11 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
 
   // ── Группы ───────────────────────────────────────────────────────────────
+  if (data === "panel") {
+    await showToday(chatId, messageId);
+    await answerCallback(cq.id, "Обновлено");
+    return ok();
+  }
   if (data === "grps") {
     await showGroupsList(chatId, messageId);
     await answerCallback(cq.id);
@@ -501,6 +513,7 @@ const BOT_COMMANDS: { command: string; emoji: string; description: string }[] = 
   { command: "load", emoji: "🗓", description: "Загрузка недели и свободные слоты" },
   { command: "debts", emoji: "🧾", description: "Кто и сколько должен" },
   { command: "pay", emoji: "💳", description: "Способ оплаты (ЮKassa / СБП)" },
+  { command: "today", emoji: "📅", description: "Панель дня: занятия и долги" },
   { command: "cancel", emoji: "✖️", description: "Отменить текущий ввод" },
   { command: "help", emoji: "❓", description: "Справка по командам" },
 ];
@@ -543,6 +556,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 async function handleMessage(msg: any): Promise<NextResponse> {
   const chatId = msg.chat?.id;
   const text = String(msg.text || "").trim();
+  const incomingId = msg.message_id as number | undefined;
   if (!chatId || !text) return ok();
 
   // Подключение уведомлений учеником: deep-link из кабинета t.me/<бот>?start=<studentId>.
@@ -591,10 +605,27 @@ async function handleMessage(msg: any): Promise<NextResponse> {
     return ok();
   }
 
+  // Кнопки постоянного меню (reply-клавиатура): это навигация, а не ввод, поэтому
+  // разбираем их раньше ожидающего ввода — и убираем нажатие из переписки.
+  if ([MENU_TODAY, MENU_STUDENTS, MENU_DEBTS, MENU_GROUPS].includes(text)) {
+    await deleteMessage(chatId, incomingId);
+    await cancelPending(chatId);
+    if (text === MENU_TODAY) await showToday(chatId, null);
+    else if (text === MENU_STUDENTS) await showStudentsList(chatId, null);
+    else if (text === MENU_DEBTS) await showDebtors(chatId, null);
+    else await showGroupsList(chatId, null);
+    return ok();
+  }
+
   if (text === "/start") {
     await refreshBotMenu();
-    await sendOwner(HELP);
-    await showStudentsList(chatId, null);
+    await sendOwner(HELP, menuKeyboard());
+    // Панель дня сразу: закрепляется в шапке чата и дальше только переписывается.
+    await refreshPanel({ bump: true }).catch((e) => console.error("panel on /start failed", e));
+    return ok();
+  }
+  if (text.startsWith("/today")) {
+    await showToday(chatId, null);
     return ok();
   }
   if (text.startsWith("/students")) {
@@ -635,8 +666,12 @@ async function handleMessage(msg: any): Promise<NextResponse> {
     return ok();
   }
 
-  // Бот ждёт ввод (имя/заметка/сумма/ссылка)?
-  if (await applyPendingInput(chatId, text)) return ok();
+  // Бот ждёт ввод (имя/заметка/сумма/ссылка)? Ответ уже перенесён в сам экран,
+  // поэтому присланный текст из переписки убираем — он больше ничего не сообщает.
+  if (await applyPendingInput(chatId, text)) {
+    await deleteMessage(chatId, incomingId);
+    return ok();
+  }
 
   if (text.startsWith("/")) {
     await sendOwner(HELP);

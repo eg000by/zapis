@@ -99,6 +99,10 @@ export const botState = pgTable("bot_state", {
   chatId: text("chat_id").primaryKey(),
   action: text("action").notNull(), // напр. "student.note" | "lesson.note"
   targetId: text("target_id").notNull().default(""),
+  // Сообщение-приглашение к вводу («пришлите текст заметки»). Результат ввода
+  // рисуется ПОВЕРХ него: приглашение превращается в обновлённый экран, и переписка
+  // не растёт на три сообщения ради одной заметки.
+  promptMessageId: text("prompt_message_id").notNull().default(""),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

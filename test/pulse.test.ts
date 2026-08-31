@@ -10,6 +10,9 @@ import { recolorStudent } from "@/lib/coloring";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/coloring", () => ({ recolorStudent: vi.fn(async () => {}) }));
+// Панель дня обновляется тем же прогоном, но это отдельная механика — здесь она
+// только шумела бы в проверках отправленных сообщений.
+vi.mock("@/lib/panel", () => ({ refreshPanel: vi.fn(async () => {}) }));
 vi.mock("@/lib/pings", () => ({
   pingSent: vi.fn(async () => false),
   recordPing: vi.fn(async () => {}),
