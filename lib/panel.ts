@@ -78,27 +78,10 @@ export async function renderPanel(now = new Date()): Promise<{ text: string; key
     }
   }
 
-  // Долги — вторая половина панели: это то, ради чего в бот заходят между занятиями.
-  const active = debtors.filter((d) => d.active);
-  if (active.length) {
-    const total = active.reduce((s, d) => s + d.debtKopecks, 0);
-    lines.push(`\n<b>Долги</b> · ${rub(total)} ₽ у ${active.length}`);
-    for (const d of active.slice(0, 5)) {
-      lines.push(`🔴 ${escapeHtml(d.name)} — ${rub(d.debtKopecks)} ₽`);
-    }
-    if (active.length > 5) lines.push(`…и ещё ${active.length - 5}`);
-  } else {
-    lines.push("\nДолгов нет.");
-  }
-
-  const kb: TgButton[][] = [
-    [
-      { text: "👥 Ученики", data: "stus" },
-      { text: "🧾 Долги", data: "debts" },
-    ],
-    [{ text: "🔄 Обновить", data: "panel" }],
-  ];
-  return { text: lines.join("\n"), keyboard: inlineKeyboard(kb) };
+  // Кнопок у панели нет намеренно: любой экран, открытый из неё, переписывал бы
+  // само закреплённое сообщение — и в шапке чата вместо расписания оказывался
+  // список учеников. Панель только показывает день; действия — из меню снизу.
+  return { text: lines.join("\n"), keyboard: undefined };
 }
 
 // Обновляет панель. bump — показать её заново внизу переписки (нажали «Сегодня»):

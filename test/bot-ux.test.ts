@@ -168,20 +168,17 @@ describe("панель дня", () => {
     contactKey: "key",
   });
 
-  it("показывает занятия дня и долги одним сообщением", async () => {
+  it("показывает занятия дня одним сообщением", async () => {
     vi.setSystemTime(new Date("2026-09-02T12:00:00.000Z")); // 15:00 МСК
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(10, "Амина"), occ(19, "Стас")] as never);
-    vi.mocked(listDebtors).mockResolvedValue([
-      { studentId: "stu-2", name: "Вася", debtKopecks: 150000, oldestAt: null, active: true },
-    ] as never);
 
-    const { text } = await renderPanel();
+    const { text, keyboard } = await renderPanel();
     expect(text).toContain("Амина");
     expect(text).toContain("Стас");
     expect(text).toContain("1 из 2 позади"); // 10:00 прошло, 19:00 впереди
-    expect(text).toContain("Вася");
-    // Разделитель разрядов у ru-RU — неразрывный пробел, поэтому \s, а не " ".
-    expect(text).toMatch(/1\s500\s₽/);
+    // Кнопок у панели нет: любая из них переписала бы само закреплённое сообщение,
+    // и в шапке чата вместо расписания оказывался бы открытый экран.
+    expect(keyboard).toBeUndefined();
   });
 
   it("обновление правит то же сообщение, а не шлёт новое", async () => {
@@ -191,7 +188,7 @@ describe("панель дня", () => {
     expect(vi.mocked(sendOwner)).not.toHaveBeenCalled();
   });
 
-  it("по кнопке «Сегодня» панель показывается заново внизу — прежняя убирается", async () => {
+  it("по /today панель показывается заново внизу — прежняя убирается", async () => {
     vi.mocked(getSetting).mockResolvedValue("500");
     await refreshPanel({ bump: true });
     expect(vi.mocked(deleteMessage)).toHaveBeenCalledWith("1", 500);

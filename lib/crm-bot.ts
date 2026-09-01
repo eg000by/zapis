@@ -884,11 +884,18 @@ export async function submitRateForNew(chatId: number | string, rubles: number):
 }
 
 // Финал (из callback ntrial:<0|1>): создаёт/освежает ученика в БД и шлёт ссылку.
-export async function chooseTrialForNew(chatId: number | string, trial: boolean): Promise<void> {
+// Финал мастера. Возвращает короткий текст для всплывающего уведомления: сам итог
+// («добавлен, 1200 ₽/час») в переписке не нужен — он виден в карточке, которая
+// открывается на месте последнего шага мастера. Ссылку на запись тоже не шлём
+// отдельным сообщением: она есть в тексте карточки.
+export async function chooseTrialForNew(
+  chatId: number | string,
+  messageId: number | null,
+  trial: boolean
+): Promise<string> {
   const st = await getState(String(chatId));
   if (!st || st.action !== "stu.new.trial") {
-    await sendOwner("Сессия создания ученика истекла. Начните заново: /new");
-    return;
+    return "Сессия создания истекла — начните заново: /new";
   }
   let name = "";
   let subject = "";
@@ -903,20 +910,16 @@ export async function chooseTrialForNew(chatId: number | string, trial: boolean)
   } catch {}
   if (!name || !subject) {
     await clearState(String(chatId));
-    await sendOwner("Не хватило данных. Начните заново: /new");
-    return;
+    return "Не хватило данных — начните заново: /new";
   }
   // trial влияет и на contactKey (как на /admin), и на саму ссылку — держим их согласованными.
   const ck = contactKey({ name, subject, tg, trial });
   const s = await upsertStudent({ name, subject, tg, contactKey: ck, trial, rateKopecks });
   await clearState(String(chatId));
-  await sendOwner(
-    `✅ Ученик <b>${escapeHtml(name)}</b> добавлен${trial ? " · пробное" : ""}${
-      rateKopecks > 0 ? ` · ${rub(rateKopecks)} ₽/час` : ""
-    }.`
-  );
-  await sendBookingLink(chatId, s.id, trial);
-  await showStudentCard(chatId, null, s.id);
+  await showStudentCard(chatId, messageId, s.id);
+  return `${name} добавлен${trial ? " · пробное" : ""}${
+    rateKopecks > 0 ? ` · ${rub(rateKopecks)} ₽/час` : ""
+  }`;
 }
 
 // Завершает перевод в полноценные: снимает trial, помечает прошедшее пробное
@@ -970,11 +973,16 @@ export async function makeStudentFull(
 
 // Отменяет текущий ожидаемый ввод (заметка/счёт/ссылка/новый ученик) и по
 // возможности возвращает на предыдущий экран. Вызывается из кнопки «Отмена» и /cancel.
-export async function cancelPending(chatId: number | string): Promise<void> {
+// quiet — свернуть начатый ввод молча (переход по меню). Без него каждое нажатие
+// кнопки меню оставляло бы в переписке «Нечего отменять».
+export async function cancelPending(
+  chatId: number | string,
+  opts: { quiet?: boolean } = {}
+): Promise<void> {
   const st = await getState(String(chatId));
   await clearState(String(chatId));
   if (!st) {
-    await sendOwner("Нечего отменять.");
+    if (!opts.quiet) await sendOwner("Нечего отменять.");
     return;
   }
   const back = promptIdOf(st);

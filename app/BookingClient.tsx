@@ -333,12 +333,32 @@ export default function BookingClient({
   // Ученик с записями открыл сетку, чтобы записаться на дополнительное время.
   const [pickingNew, setPickingNew] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
+  // Что именно сейчас выполняется: ключ вида "cancel:<id>". Кнопка, на которую
+  // нажали, показывает это словами — иначе действие уходит на сервер молча
+  // (календарь отвечает не мгновенно), и кажется, что клик не сработал.
+  const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeKind, setNoticeKind] = useState<"ok" | "err" | "info">("info");
+
+  // Сообщение о результате. Держится всплывающей плашкой поверх страницы: обычная
+  // строка в потоке уезжала за пределы экрана, и успех оставался незамеченным.
+  function say(text: string, kind: "ok" | "err" | "info" = "info") {
+    setNotice(text);
+    setNoticeKind(kind);
+  }
 
   // Активный день сетки, зажатый в её границы. Индекс живёт отдельно от самой сетки
   // (её перезапрашивают при смене недели), и «четверг» из календаря мог указывать за
   // конец более короткого ответа — экран падал бы целиком.
   const dayIdx = days && days.length ? Math.min(activeDay, days.length - 1) : 0;
+
+  // Плашка результата гаснет сама: висящее «Запись отменена» через минуту уже
+  // непонятно к чему относится. Ошибку держим дольше — её нужно успеть прочитать.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), noticeKind === "err" ? 9000 : 5000);
+    return () => clearTimeout(t);
+  }, [notice, noticeKind]);
 
   // Подряд идущие часы показываем одним блоком («10:00–13:00»).
   const blocks = useMemo(() => groupConsecutive(selected), [selected]);
@@ -598,12 +618,12 @@ export default function BookingClient({
       // Уже перенесённое одиночное занятие — двигаем его же ещё раз.
       setRsMode("once");
       setRsOcc(ev.origStart || ev.start);
-      setNotice("Выберите новое время для этого занятия.");
+      say("Выберите новое время для этого занятия.");
     } else if (!ev.recurring) {
       // Разовое (пробное) занятие — переносим целиком.
       setRsMode("all");
       setRsOcc(null);
-      setNotice("Выберите новое время ниже для переноса.");
+      say("Выберите новое время ниже для переноса.");
     } else {
       // Повторяющаяся серия — спросим, что именно переносим.
       setRsMode(null);
@@ -615,6 +635,7 @@ export default function BookingClient({
   async function pickForReschedule(start: string) {
     if (!rsEvent) return;
     setBusyAction(true);
+    setPending(`move:${start}`);
     setNotice(null);
     // Слот сетки уже стоит на нужной дате: для разового переноса сервер построил
     // её на неделю переносимого занятия (см. gridOcc), и досдвигать нечего.
@@ -634,18 +655,19 @@ export default function BookingClient({
       const data = await res.json();
       if (!res.ok) {
         // Например, слот заняли за секунду до нас — обновляем сетку, старая бронь цела.
-        setNotice(data.error || "Не удалось перенести запись. Ваше прежнее время осталось за вами.");
+        say(data.error || "Не удалось перенести запись. Ваше прежнее время осталось за вами.", "err");
         await refreshSlots(false);
       } else {
         resetRs();
-        setNotice(`Перенесено на ${data.when}. Ждём подтверждения преподавателя.`);
+        say(`Перенесено на ${data.when}. Ждём подтверждения преподавателя.`, "ok");
         reloadSlots();
         loadMy();
       }
     } catch {
-      setNotice("Ошибка сети. Попробуйте ещё раз.");
+      say("Ошибка сети. Попробуйте ещё раз.", "err");
     } finally {
       setBusyAction(false);
+      setPending(null);
     }
   }
 
@@ -673,6 +695,7 @@ export default function BookingClient({
 
   async function doCancel(ev: MyEvent, mode: "all" | "once", occStart?: string) {
     setBusyAction(true);
+    setPending(`cancel:${ev.id}`);
     setNotice(null);
     try {
       const res = await fetch("/api/cancel", {
@@ -681,17 +704,18 @@ export default function BookingClient({
         body: JSON.stringify({ token, eventId: ev.id, mode, ...(occStart ? { occStart } : {}) }),
       });
       const data = await res.json();
-      if (!res.ok) setNotice(data.error || "Не удалось отменить запись.");
+      if (!res.ok) say(data.error || "Не удалось отменить запись.", "err");
       else {
         resetRs();
-        setNotice(mode === "once" ? "Занятие отменено." : "Запись отменена.");
+        say(mode === "once" ? "Занятие отменено." : "Запись отменена.", "ok");
         reloadSlots();
         loadMy();
       }
     } catch {
-      setNotice("Ошибка сети. Попробуйте ещё раз.");
+      say("Ошибка сети. Попробуйте ещё раз.", "err");
     } finally {
       setBusyAction(false);
+      setPending(null);
     }
   }
 
@@ -704,6 +728,7 @@ export default function BookingClient({
       return;
     }
     setBusyAction(true);
+    setPending(`abs:${startIso}`);
     setNotice(null);
     try {
       const res = await fetch("/api/absence", {
@@ -712,15 +737,16 @@ export default function BookingClient({
         body: JSON.stringify({ token, start: startIso }),
       });
       const data = await res.json();
-      if (!res.ok) setNotice(data.error || "Не удалось отправить. Напишите преподавателю.");
+      if (!res.ok) say(data.error || "Не удалось отправить. Напишите преподавателю.", "err");
       else {
         setSkipped((cur) => [...cur, startIso]);
-        setNotice("Преподаватель предупреждён. Занятие остаётся в расписании группы.");
+        say("Преподаватель предупреждён. Занятие остаётся в расписании группы.", "ok");
       }
     } catch {
-      setNotice("Ошибка сети. Попробуйте ещё раз.");
+      say("Ошибка сети. Попробуйте ещё раз.", "err");
     } finally {
       setBusyAction(false);
+      setPending(null);
     }
   }
 
@@ -729,6 +755,7 @@ export default function BookingClient({
     const where = ev.origStart ? ` (${fmtMsk(ev.origStart, ev.lessons)})` : "";
     if (!confirm(`Вернуть занятие на прежнее время${where}?`)) return;
     setBusyAction(true);
+    setPending(`return:${ev.id}`);
     setNotice(null);
     try {
       const res = await fetch("/api/return", {
@@ -737,16 +764,17 @@ export default function BookingClient({
         body: JSON.stringify({ token, eventId: ev.id }),
       });
       const data = await res.json();
-      if (!res.ok) setNotice(data.error || "Не удалось вернуть занятие.");
+      if (!res.ok) say(data.error || "Не удалось вернуть занятие.", "err");
       else {
-        setNotice(`Занятие возвращено на ${data.when}.`);
+        say(`Занятие возвращено на ${data.when}.`, "ok");
         reloadSlots();
         loadMy();
       }
     } catch {
-      setNotice("Ошибка сети. Попробуйте ещё раз.");
+      say("Ошибка сети. Попробуйте ещё раз.", "err");
     } finally {
       setBusyAction(false);
+      setPending(null);
     }
   }
 
@@ -775,7 +803,7 @@ export default function BookingClient({
         setSubmitting(false);
         if (survivors.length === 0) {
           setSheetOpen(false);
-          setNotice("Выбранное время только что заняли. Пожалуйста, выберите другое.");
+          say("Выбранное время только что заняли. Пожалуйста, выберите другое.", "err");
         } else {
           setFormError(data.error || "Это время уже заняли. Сетка обновлена — выберите другое.");
         }
@@ -860,7 +888,7 @@ export default function BookingClient({
                       if (confirm(`Отменить занятие ${fmtDateMsk(iso)}?`)) doCancel(rsEvent, "once", iso);
                     } else {
                       setRsOcc(iso);
-                      setNotice("Выберите новое время ниже для переноса.");
+                      say("Выберите новое время ниже для переноса.");
                     }
                   }}
                 >
@@ -1209,7 +1237,9 @@ export default function BookingClient({
                       disabled={busyAction || told}
                       onClick={() => reportAbsence(iso, lessonsPerOcc)}
                     >
-                      {told ? (
+                      {pending === `abs:${iso}` ? (
+                        "Отправляем…"
+                      ) : told ? (
                         <>
                           <Icon name="check" /> Предупредили
                         </>
@@ -1284,7 +1314,7 @@ export default function BookingClient({
                     disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
                     onClick={() => returnEvent(ev)}
                   >
-                    Вернуть
+                    {pending === `return:${ev.id}` ? "Возвращаем…" : "Вернуть"}
                   </button>
                 )}
                 <button
@@ -1292,7 +1322,7 @@ export default function BookingClient({
                   disabled={busyAction || (!!rsEvent && rsEvent.id !== ev.id)}
                   onClick={() => startCancel(ev)}
                 >
-                  Отменить
+                  {pending === `cancel:${ev.id}` ? "Отменяем…" : "Отменить"}
                 </button>
               </div>
             </div>
@@ -1308,7 +1338,7 @@ export default function BookingClient({
             disabled={busyAction}
             onClick={() => {
               setPickingNew(true);
-              setNotice("Выберите время для новой записи ниже.");
+              say("Выберите время для новой записи ниже.");
             }}
           >
             <Icon name="plus" /> Записаться на другое время
@@ -1379,8 +1409,13 @@ export default function BookingClient({
       )}
 
       {notice && (
-        <div className="notice" onClick={() => setNotice(null)}>
-          {notice}
+        <div className={`toast ${noticeKind}`} onClick={() => setNotice(null)} role="status">
+          {noticeKind === "ok" ? (
+            <Icon name="checkCircle" />
+          ) : noticeKind === "err" ? (
+            <Icon name="alert" />
+          ) : null}
+          <span>{notice}</span>
         </div>
       )}
 
@@ -1507,11 +1542,15 @@ export default function BookingClient({
                     ) : (
                       <button
                         key={s.start}
-                        className={`slot ${selected.includes(s.start) ? "picked" : ""}`}
+                        className={`slot ${selected.includes(s.start) ? "picked" : ""}${
+                          pending === `move:${s.start}` ? " working" : ""
+                        }`}
                         disabled={busyAction}
                         onClick={() => onSlotClick(s)}
                       >
-                        {s.time}
+                        {/* Перенос уходит на сервер не мгновенно — нажатый слот
+                            говорит, что он в работе, а не «клик не сработал». */}
+                        {pending === `move:${s.start}` ? "…" : s.time}
                       </button>
                     )
                   )}

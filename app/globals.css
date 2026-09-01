@@ -997,15 +997,58 @@ a.meet-link:hover {
   color: #b45309;
 }
 
-.notice {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--accent-soft);
-  color: var(--accent);
+/* Результат действия — всплывающей плашкой поверх страницы. Раньше это была строка
+   в потоке: на длинной странице она оказывалась за экраном, и успешная отмена
+   выглядела как «ничего не произошло». Плашка гаснет сама (см. BookingClient). */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--text);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  animation: toastIn 0.18s ease;
+}
+.toast.ok {
+  color: var(--success);
+  border-color: rgba(22, 163, 74, 0.35);
+}
+.toast.err {
+  color: var(--danger);
+  border-color: rgba(220, 38, 38, 0.35);
+}
+.toast.info {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+@keyframes toastIn {
+  from {
+    transform: translate(-50%, 12px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+/* Слот, по которому идёт перенос: заметно, что он в работе. */
+.slot.working {
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: progress;
 }
 
 /* Итог выбранных слотов в форме подтверждения */

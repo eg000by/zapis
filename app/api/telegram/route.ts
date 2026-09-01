@@ -19,9 +19,7 @@ import {
   menuKeyboard,
   setMyCommands,
   unpackUuid,
-  MENU_TODAY,
   MENU_STUDENTS,
-  MENU_DEBTS,
   MENU_GROUPS,
 } from "@/lib/telegram";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
@@ -224,11 +222,6 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
 
   // ── Группы ───────────────────────────────────────────────────────────────
-  if (data === "panel") {
-    await showToday(chatId, messageId);
-    await answerCallback(cq.id, "Обновлено");
-    return ok();
-  }
   if (data === "grps") {
     await showGroupsList(chatId, messageId);
     await answerCallback(cq.id);
@@ -352,8 +345,9 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
   if (data.startsWith("ntrial:")) {
-    await chooseTrialForNew(chatId, data.slice(7) === "1");
-    await answerCallback(cq.id);
+    // Итог создания — всплывающим уведомлением: в переписке остаётся только карточка.
+    const toast = await chooseTrialForNew(chatId, messageId, data.slice(7) === "1");
+    await answerCallback(cq.id, toast);
     return ok();
   }
   if (data.startsWith("stu:")) {
@@ -606,13 +600,12 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
 
   // Кнопки постоянного меню (reply-клавиатура): это навигация, а не ввод, поэтому
-  // разбираем их раньше ожидающего ввода — и убираем нажатие из переписки.
-  if ([MENU_TODAY, MENU_STUDENTS, MENU_DEBTS, MENU_GROUPS].includes(text)) {
+  // разбираем их раньше ожидающего ввода — и убираем нажатие из переписки. Начатый
+  // ввод сворачиваем ТИХО: «Нечего отменять» на каждое нажатие меню — мусор.
+  if ([MENU_STUDENTS, MENU_GROUPS].includes(text)) {
     await deleteMessage(chatId, incomingId);
-    await cancelPending(chatId);
-    if (text === MENU_TODAY) await showToday(chatId, null);
-    else if (text === MENU_STUDENTS) await showStudentsList(chatId, null);
-    else if (text === MENU_DEBTS) await showDebtors(chatId, null);
+    await cancelPending(chatId, { quiet: true });
+    if (text === MENU_STUDENTS) await showStudentsList(chatId, null);
     else await showGroupsList(chatId, null);
     return ok();
   }

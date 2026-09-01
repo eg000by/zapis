@@ -203,17 +203,12 @@ export async function botUsername(): Promise<string> {
 // Reply-клавиатура живёт у поля ввода, а не внутри сообщения: она всегда на виду,
 // не уплывает вверх вместе с перепиской и сама сообщений не создаёт. Inline-кнопки
 // остаются для действий внутри экранов, где важен контекст конкретной карточки.
-export const MENU_TODAY = "Сегодня";
 export const MENU_STUDENTS = "Ученики";
-export const MENU_DEBTS = "Долги";
 export const MENU_GROUPS = "Группы";
 
 export function menuKeyboard(): unknown {
   return {
-    keyboard: [
-      [{ text: MENU_TODAY }, { text: MENU_STUDENTS }],
-      [{ text: MENU_DEBTS }, { text: MENU_GROUPS }],
-    ],
+    keyboard: [[{ text: MENU_STUDENTS }, { text: MENU_GROUPS }]],
     resize_keyboard: true,
     is_persistent: true,
   };

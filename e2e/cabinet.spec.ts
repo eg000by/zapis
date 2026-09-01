@@ -370,6 +370,30 @@ test("перенос: текущая неделя открывается из к
   expect(slotUrls.at(-1)).toContain("occ=");
 });
 
+// Действие уходит на сервер не мгновенно (за кабинетом — Google Calendar). Без
+// признака работы кажется, что кнопка не сработала, а результат «случается сам».
+test("отмена: кнопка говорит, что идёт работа, и подтверждает результат", async ({ page }) => {
+  await mockApi(page, { my: MY_FULL });
+  // Держим ответ, чтобы состояние ожидания было видно, а не мелькнуло.
+  await page.route("**/api/cancel", async (route) => {
+    await new Promise((r) => setTimeout(r, 600));
+    await route.fulfill({ json: { ok: true } });
+  });
+  page.on("dialog", (d) => d.accept());
+  await page.goto(tokenUrl());
+
+  // Запись еженедельная, поэтому сначала спрашивается «одно занятие или вся серия».
+  const row = page.locator(".my-card .my-row").first();
+  await row.getByRole("button", { name: "Отменить" }).click();
+  await page.getByRole("button", { name: "Всю серию" }).click();
+
+  await expect(row.getByRole("button", { name: "Отменяем…" })).toBeVisible();
+  const toast = page.locator(".toast.ok");
+  await expect(toast).toContainText("Запись отменена");
+  // И гаснет сама — плашка не остаётся висеть на весь сеанс.
+  await expect(toast).toHaveCount(0, { timeout: 9000 });
+});
+
 test("группа: состав, оплата и «Не смогу прийти» вместо переноса", async ({ page }) => {
   await mockApi(page, { my: MY_GROUP });
   await page.goto(tokenUrl());
