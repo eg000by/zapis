@@ -201,12 +201,12 @@ export function buildWeek(
       });
       continue;
     }
-    const startMin = win.start * 60;
-    const endMin = win.end * 60;
+    const startMin = win.start;
+    const endMin = win.end;
 
     const slots: Slot[] = [];
     // Шаг сетки — SLOT_STEP_MINUTES (занятие + перерыв). Последний урок должен
-    // закончиться не позже WORK_END_HOUR.
+    // закончиться не позже конца окна дня.
     for (let min = startMin; min + SLOT_MINUTES <= endMin; min += SLOT_STEP_MINUTES) {
       const hr = Math.floor(min / 60);
       const mn = min % 60;
@@ -287,12 +287,12 @@ export function validateSlot(
   const weekday = shifted.getUTCDay();
   const win = dayWindow(weekday);
   if (!win) return { ok: false, reason: "Этот день недоступен" };
-  const offset = minutesOfDay - win.start * 60;
+  const offset = minutesOfDay - win.start;
   const span = blockSpanMinutes(lessons);
   if (offset < 0 || offset % SLOT_STEP_MINUTES !== 0) {
     return { ok: false, reason: "Время вне сетки" };
   }
-  if (win.start * 60 + offset + span > win.end * 60) {
+  if (win.start + offset + span > win.end) {
     return { ok: false, reason: "Время вне рабочих часов" };
   }
 
