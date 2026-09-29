@@ -92,38 +92,87 @@ async function emit(
   await sendOwner(text, keyboard);
 }
 
+// Список учеников — сеткой по STUDENT_COLS имени в ряд, по алфавиту. По одному
+// в ряд («Имя · Предмет») он вырастал за экран телефона уже на полутора десятках
+// учеников. Больше STUDENT_PAGE — листается страницами.
+const STUDENT_COLS = 3;
+const STUDENT_PAGE = 21; // 7 рядов по 3
+
+type ListedStudent = { id: string; name: string; subject: string; trial: boolean };
+
+// Кнопки учеников. Предмет дописывается только тёзкам (два «Артёма» — ОГЭ и
+// Питон): иначе кнопку не отличить, а всем остальным он лишь удлиняет кнопку.
+export function studentGrid(list: ListedStudent[]): TgButton[][] {
+  const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  const count = new Map<string, number>();
+  for (const s of sorted) count.set(s.name.toLowerCase(), (count.get(s.name.toLowerCase()) || 0) + 1);
+  const buttons = sorted.map((s) => {
+    const twin = (count.get(s.name.toLowerCase()) || 0) > 1;
+    const subj = twin ? ` · ${s.subject.split(/\s+/)[0]}` : "";
+    return { text: `${s.trial ? "🎯 " : ""}${s.name}${subj}`, data: `stu:${s.id}` };
+  });
+  const rows: TgButton[][] = [];
+  for (let i = 0; i < buttons.length; i += STUDENT_COLS) rows.push(buttons.slice(i, i + STUDENT_COLS));
+  return rows;
+}
+
+// Страница списка и ряд листания (◀ 1/2 ▶). pageData(n) — callback страницы n.
+function pageOf(
+  rows: TgButton[][],
+  page: number,
+  pageData: (n: number) => string
+): { rows: TgButton[][]; page: number } {
+  const perPage = STUDENT_PAGE / STUDENT_COLS;
+  const pages = Math.max(1, Math.ceil(rows.length / perPage));
+  const p = Math.min(Math.max(0, page), pages - 1);
+  const out = rows.slice(p * perPage, (p + 1) * perPage);
+  if (pages > 1) {
+    out.push([
+      { text: p > 0 ? "◀️" : "·", data: p > 0 ? pageData(p - 1) : "noop" },
+      { text: `${p + 1} / ${pages}`, data: "noop" },
+      { text: p < pages - 1 ? "▶️" : "·", data: p < pages - 1 ? pageData(p + 1) : "noop" },
+    ]);
+  }
+  return { rows: out, page: p };
+}
+
 export async function showStudentsList(
   chatId: number | string,
   messageId: number | null,
-  archived = false
+  archived = false,
+  page = 0
 ): Promise<void> {
   const all = await listStudents();
   const active = all.filter((s) => s.active);
   const inArchive = all.filter((s) => !s.active);
 
   if (archived) {
-    const rows: TgButton[][] = inArchive.map((s) => [
-      { text: `🗄 ${s.name} · ${s.subject}`, data: `stu:${s.id}` },
-    ]);
+    const { rows } = pageOf(studentGrid(inArchive), page, (n) => `stusarch:${n}`);
     rows.push([{ text: "⬅️ Активные", data: "stus" }]);
     const text = inArchive.length
-      ? "<b>🗄 Архив</b>\nВыберите ученика, чтобы вернуть его в активные:"
+      ? `<b>🗄 Архив · ${inArchive.length}</b>\nВыберите ученика, чтобы вернуть его в активные:`
       : "<b>🗄 Архив</b>\n\nАрхив пуст.";
     await emit(chatId, messageId, text, inlineKeyboard(rows));
     return;
   }
 
-  const rows: TgButton[][] = [
-    [{ text: "➕ Новый ученик", data: "newstu" }, { text: "👥 Группы", data: "grps" }],
-    [{ text: "📊 Доходы", data: "stats" }, { text: "🗓 Загрузка", data: "load" }],
-    [{ text: "🧾 Долги", data: "debts" }],
+  const menu: TgButton[][] = [
+    [
+      { text: "➕ Новый", data: "newstu" },
+      { text: "📊 Доходы", data: "stats" },
+      { text: "🗓 Загрузка", data: "load" },
+    ],
+    [
+      { text: "🧾 Долги", data: "debts" },
+      { text: "👥 Группы", data: "grps" },
+      ...(inArchive.length ? [{ text: `🗄 Архив ${inArchive.length}`, data: "stusarch" }] : []),
+    ],
   ];
-  for (const s of active) rows.push([{ text: `${s.name} · ${s.subject}`, data: `stu:${s.id}` }]);
-  if (inArchive.length) rows.push([{ text: `🗄 Архив (${inArchive.length})`, data: "stusarch" }]);
+  const { rows } = pageOf(studentGrid(active), page, (n) => `stus:${n}`);
   const text = active.length
-    ? "<b>👥 Ученики</b>\nВыберите ученика или добавьте нового:"
-    : "<b>👥 Ученики</b>\n\nПока пусто. Добавьте первого ученика кнопкой ниже.";
-  await emit(chatId, messageId, text, inlineKeyboard(rows));
+    ? `<b>👥 Ученики · ${active.length}</b>`
+    : "<b>👥 Ученики</b>\n\nПока пусто. Добавьте первого ученика кнопкой «➕ Новый».";
+  await emit(chatId, messageId, text, inlineKeyboard([...menu, ...rows]));
 }
 
 export async function showStudentCard(
@@ -207,19 +256,17 @@ export async function showStats(
       return `${m.label.padEnd(3)} ${"█".repeat(n)}${n === 0 ? "·" : ""} ${rub(m.kopecks)} ₽`;
     })
     .join("\n");
+  // Полученные деньги и прогноз. Неоплаченные счета (аванс, предложения пакета) —
+  // не доход, а их сумма рядом с доходом путала: 118 000 «предложено» выглядело
+  // как деньги, которых никто не обещал платить. Долги — отдельным экраном.
   const text =
     `📊 <b>Доходы</b>\n\n` +
     `За этот месяц: <b>${rub(st.thisMonthKopecks)} ₽</b>\n` +
     (st.expectedMonthKopecks != null
-      ? `Ожидается за месяц: <b>${rub(st.expectedMonthKopecks)} ₽</b> (по расписанию)\n`
+      ? `Прогноз на месяц: ~${rub(st.expectedMonthKopecks)} ₽\n` +
+        `<i>все занятия месяца по расписанию × ставка</i>\n`
       : "") +
     `За прошлый месяц: ${rub(st.prevMonthKopecks)} ₽\n` +
-    `Всего получено: ${rub(st.totalKopecks)} ₽ (${st.paidCount} оплат)\n` +
-    `Долг за проведённые: ${rub(st.debtKopecks)} ₽\n` +
-    `Выставлено вперёд: ${rub(st.advanceKopecks)} ₽\n` +
-    (st.packageOfferKopecks > 0
-      ? `Предложено вперёд одним платежом: ${rub(st.packageOfferKopecks)} ₽\n`
-      : "") +
     `Активных учеников: ${st.activeStudents}\n\n` +
     `<b>Помесячно</b>\n<code>${bars}</code>`;
   await emit(chatId, messageId, text, inlineKeyboard([[{ text: "⬅️ Ученики", data: "stus" }]]));
