@@ -177,7 +177,9 @@ export async function showStudentCard(
   }
   if (s.meetLink) lines.push(`🎥 ${escapeHtml(s.meetLink)}`);
   if (s.boardLink) lines.push(`🧩 ${escapeHtml(s.boardLink)}`);
-  if (s.note) lines.push(`📝 ${escapeHtml(s.note)}`);
+  // Заметка бывает длинной — в карточке только начало, целиком она видна при
+  // правке (⚙️ Ещё → 📝 Заметка об ученике).
+  if (s.note) lines.push(`📝 ${escapeHtml(notePreview(s.note))}`);
 
   const rows: TgButton[][] = [
     [{ text: "💳 Счета", data: `pays:${s.id}` }, { text: "📅 Занятия", data: `les:${s.id}` }],
@@ -370,8 +372,29 @@ export async function showStudentTools(
 const PAID_PREVIEW = 3;
 // Размер страницы в истории оплат.
 const PAID_PAGE = 10;
-// Сколько символов заметки показывать в списке занятий.
+// Сколько символов заметки показывать в карточке и списке занятий.
 const NOTE_PREVIEW = 120;
+
+// Сколько символов (уже экранированного) текста заметки помещаем в приглашение к
+// её правке — с запасом под текст самого приглашения до лимита Telegram в 4096.
+const NOTE_IN_PROMPT = 3800;
+
+// Экранирует текст для HTML и укладывает результат в limit символов. Режем исходный
+// текст, а не экранированный — иначе разрез мог бы пройтись по середине «&amp;».
+function escapedWithin(text: string, limit: number): string {
+  let cut = text;
+  let out = escapeHtml(cut);
+  while (out.length > limit) {
+    cut = cut.slice(0, Math.max(0, cut.length - Math.max(1, out.length - limit))).trimEnd();
+    out = `${escapeHtml(cut)}…`;
+  }
+  return out;
+}
+
+function notePreview(n: string): string {
+  const flat = n.replace(/\s+/g, " ").trim();
+  return flat.length > NOTE_PREVIEW ? `${flat.slice(0, NOTE_PREVIEW).trimEnd()}…` : flat;
+}
 
 function payLine(p: { status: string; amountKopecks: number; note: string }): string {
   return `${PAY_STATUS[p.status] || ""} ${rub(p.amountKopecks)} ₽${
@@ -507,8 +530,7 @@ export async function showLessons(
   const noteLine = (o: (typeof occ)[number]) => {
     const n = notes.get(o.start.getTime());
     if (!n) return "";
-    const short = n.length > NOTE_PREVIEW ? `${n.slice(0, NOTE_PREVIEW).trimEnd()}…` : n;
-    return `\n   📝 ${escapeHtml(short)}`;
+    return `\n   📝 ${escapeHtml(notePreview(n))}`;
   };
   if (past.length) {
     lines.push("\n<b>Прошедшие:</b>");
@@ -637,6 +659,11 @@ export async function toggleStudentArchive(
   }
   const archived = s.active; // был активен → уходит в архив
   const { removed, calendarFailed } = await setStudentArchived(studentId, archived);
+  // Счета «вперёд» и предложение пакета без будущих занятий теряют смысл (а при
+  // возврате из архива — появляются снова). Сверяем сразу, а не при открытии кабинета.
+  await ensureAutoInvoices(studentId, s.name).catch((e) =>
+    console.error("archive: autobill failed", studentId, e)
+  );
   await showStudentCard(chatId, messageId, studentId);
 
   if (!archived) return "Снова активен ♻️";
@@ -1030,7 +1057,17 @@ export async function promptPaymentLink(chatId: number | string, paymentId: stri
 }
 
 export async function promptStudentNote(chatId: number | string, studentId: string): Promise<void> {
-  const prompt = await sendOwner("✍️ Пришлите текст заметки об ученике одним сообщением:", cancelKb());
+  // В карточке заметка обрезана — целиком её видно здесь, чтобы было что дополнить.
+  // Сообщение Telegram ограничено 4096 символами: заметку у самого предела режем
+  // сами, до разметки. Иначе обрезка всего сообщения по строкам могла бы отсечь
+  // закрывающий </i>, Telegram отверг бы HTML — и приглашение не пришло бы вовсе.
+  const current = escapedWithin((await getStudent(studentId))?.note || "", NOTE_IN_PROMPT);
+  const prompt = await sendOwner(
+    `✍️ Пришлите текст заметки об ученике одним сообщением${
+      current ? ` — он заменит нынешний:\n\n<i>${current}</i>` : ":"
+    }`,
+    cancelKb()
+  );
   await setState(String(chatId), "student.note", studentId, prompt?.message_id);
 }
 

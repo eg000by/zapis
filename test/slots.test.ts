@@ -128,6 +128,45 @@ describe("buildWeek — обезличенная неделя с окнами п
     expect(slotOf(buildWeek(near, NOW, { weeks: 1 })).busy).toBe(true);
   });
 
+  // Подсветка «рядом с занятием»: свободные слоты вплотную к уроку (через обычный
+  // перерыв) — чтобы день собирался плотным блоком, а не с дырами.
+  it("слоты вплотную к занятию помечаются near, дальние и соседи личных дел — нет", () => {
+    const lesson = {
+      // Вт 14 июля, 10:10–11:10 МСК — занятие сервиса.
+      start: new Date("2026-07-14T07:10:00.000Z"),
+      end: new Date("2026-07-14T08:10:00.000Z"),
+      lesson: true,
+    };
+    const tue = (busy: Parameters<typeof buildWeek>[0]) =>
+      Object.fromEntries(
+        buildWeek(busy, NOW, { weeks: 1 })
+          .find((d) => d.weekday === "Вт")!
+          .slots.map((s) => [s.time, s])
+      );
+
+    const t = tue([lesson]);
+    expect(t["09:00"].near).toBe(true); // кончается в 10:00, урок в 10:10
+    expect(t["10:10"].busy).toBe(true);
+    expect(t["10:10"].near).toBeUndefined(); // занятый слот не «рекомендуем»
+    expect(t["11:20"].near).toBe(true); // сразу после урока
+    expect(t["12:30"].near).toBeUndefined(); // через слот — уже не рядом
+
+    // Перенос этого самого занятия: его место опустеет, соседей не подсвечиваем.
+    // Совпадение и по id события, и по id серии (у повтора свой id инстанса).
+    const moving = { ...lesson, eventId: "ser_20260714T071000Z", seriesId: "ser" };
+    const own = (id: string) =>
+      buildWeek([moving], NOW, { weeks: 1, ownEventId: id })
+        .find((d) => d.weekday === "Вт")!
+        .slots.find((s) => s.time === "09:00")!;
+    expect(own("ser").near).toBeUndefined();
+    expect(own("other").near).toBe(true);
+
+    // То же время, но личное дело в календаре, а не занятие, — соседей не подсвечиваем.
+    const personal = tue([{ ...lesson, lesson: false }]);
+    expect(personal["09:00"].near).toBeUndefined();
+    expect(personal["11:20"].near).toBeUndefined();
+  });
+
   // Разовый перенос двигает ОДНО занятие: сетка строится на его неделю, и занятость
   // проверяется только на ту дату. Раньше сетка была общей, и слот, свободный в
   // нужную неделю, выглядел занятым из-за соседних недель — перенести было некуда.

@@ -16,6 +16,7 @@ interface Slot {
   start: string;
   time: string;
   busy: boolean;
+  near?: boolean; // рядом с другим занятием — рекомендуем
 }
 interface Day {
   date: string;
@@ -351,6 +352,9 @@ export default function BookingClient({
   // (её перезапрашивают при смене недели), и «четверг» из календаря мог указывать за
   // конец более короткого ответа — экран падал бы целиком.
   const dayIdx = days && days.length ? Math.min(activeDay, days.length - 1) : 0;
+  // Есть ли в дне рекомендуемое время. Только тогда остальные слоты приглушаются:
+  // в пустой день выделять нечего, и все свободные слоты равноценны.
+  const dayHasNear = !!days?.[dayIdx]?.slots.some((s) => !s.busy && s.near);
 
   // Плашка результата гаснет сама: висящее «Запись отменена» через минуту уже
   // непонятно к чему относится. Ошибку держим дольше — её нужно успеть прочитать.
@@ -420,6 +424,9 @@ export default function BookingClient({
   // занятия, поэтому в чипах дней стоят настоящие даты, а start слота — то самое
   // время, которое уйдёт в запрос переноса.
   const gridOcc = rsKind === "move" && rsMode === "once" && rsOcc ? rsOcc : null;
+  // Переносимое событие: его соседей сетка не подсвечивает как «рекомендуем» —
+  // после переноса его место опустеет.
+  const gridOwn = rescheduling && rsEvent ? rsEvent.id : null;
   // Ручная перезагрузка сетки — через счётчик, а не прямым вызовом (см. эффект ниже).
   const [slotsNonce, setSlotsNonce] = useState(0);
   const reloadSlots = () => setSlotsNonce((n) => n + 1);
@@ -433,6 +440,7 @@ export default function BookingClient({
     if (trial) q.push("trial=1");
     if (gridOcc) q.push(`occ=${encodeURIComponent(gridOcc)}`);
     if (weekFrom) q.push(`from=${encodeURIComponent(weekFrom)}`);
+    if (gridOwn) q.push(`own=${encodeURIComponent(gridOwn)}`);
     return q.length ? `/api/slots?${q.join("&")}` : "/api/slots";
   })();
 
@@ -503,7 +511,7 @@ export default function BookingClient({
   useEffect(() => {
     loadSlots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridOcc, weekFrom, slotsNonce]);
+  }, [gridOcc, gridOwn, weekFrom, slotsNonce]);
 
   // ── Календарь «другая дата» ────────────────────────────────────────────────
   // Месяц, открытый в календаре: 0 — текущий, дальше листается до CALENDAR_MONTHS.
@@ -1544,13 +1552,14 @@ export default function BookingClient({
                         key={s.start}
                         className={`slot ${selected.includes(s.start) ? "picked" : ""}${
                           pending === `move:${s.start}` ? " working" : ""
-                        }`}
+                        }${s.near ? " near" : dayHasNear ? " far" : ""}`}
                         disabled={busyAction}
                         onClick={() => onSlotClick(s)}
                       >
                         {/* Перенос уходит на сервер не мгновенно — нажатый слот
                             говорит, что он в работе, а не «клик не сработал». */}
                         {pending === `move:${s.start}` ? "…" : s.time}
+                        {s.near && pending !== `move:${s.start}` && <small>рекомендуем</small>}
                       </button>
                     )
                   )}

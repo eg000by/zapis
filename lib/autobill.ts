@@ -23,7 +23,7 @@ import { createYkPayment, yookassaConfigured } from "./yookassa";
 import { getStudent } from "./students";
 import type { Student } from "./schema";
 import { getPayMethod } from "./settings";
-import { detectExamTariff } from "./config";
+import { detectExamTariff, packagePrice } from "./config";
 
 // Окно автосчёта «вперёд»: занятия ближайших N дней.
 export const AUTO_ADVANCE_DAYS = 30;
@@ -158,6 +158,9 @@ export async function ensureAutoInvoices(
   if (!balance) return null; // нет ставки — автосчета не считаются
 
   const now = new Date();
+  // Ученик в архиве: будущих занятий у него нет (архив снимает их с календаря), и
+  // платить «вперёд» не за что. Остаётся только долг за проведённые — он настоящий.
+  const archived = student?.active === false;
   // У группы пакета со скидкой нет: цена занятия там и так ниже индивидуальной,
   // а «пакет ОГЭ» посчитался бы от индивидуального тарифа предмета.
   const examTariff = student?.groupId ? null : detectExamTariff(student?.subject || "");
@@ -167,7 +170,7 @@ export async function ensureAutoInvoices(
   // маленькая и понятная.
   const actions = planAutoInvoices({
     debtKopecks: balance.debtKopecks,
-    advanceKopecks: nextLessonCostKopecks(balance),
+    advanceKopecks: archived ? 0 : nextLessonCostKopecks(balance),
     openInvoices: open.map((p) => ({ id: p.id, kind: p.kind, amountKopecks: p.amountKopecks })),
   });
 
@@ -202,12 +205,15 @@ export async function ensureAutoInvoices(
   // от показанной в карточке.
   const month = examTariff ? null : monthOffer(balance, now);
   const offer =
-    balance.items.length === 0
+    archived || balance.items.length === 0
       ? null
       : examTariff
         ? {
             lessons: examTariff.packageLessons,
-            kopecks: examTariff.packageKopecks,
+            // Скидка — от ставки САМОГО ученика: ставку можно задать индивидуально
+            // (не 2 500 ₽, а 1 500), и цена пакета из тарифа по умолчанию тогда была
+            // бы дороже поштучной оплаты.
+            kopecks: packagePrice(balance.rateKopecks, examTariff.packageLessons),
             note: `Пакет из ${examTariff.packageLessons} занятий (${examTariff.label})`,
           }
         : month

@@ -85,8 +85,12 @@ import {
 } from "@/lib/crm-bot";
 import { PENDING_PREFIX, TIMEZONE } from "@/lib/config";
 import { ensureAutoInvoices } from "@/lib/autobill";
+import { claimTelegramUpdate } from "@/lib/pings";
 
 export const dynamic = "force-dynamic";
+// Перекраска ученика с долгой историей и правка серии — десятки запросов к Google.
+// Оборванный по таймауту ответ Telegram считает неудачей и шлёт нажатие повторно.
+export const maxDuration = 60;
 
 const ok = () => NextResponse.json({ ok: true });
 
@@ -120,6 +124,16 @@ export async function POST(req: Request) {
     update = await req.json();
   } catch {
     return ok();
+  }
+
+  // Повтор уже принятого апдейта (Telegram не дождался ответа) — не выполняем дважды.
+  // Сбой БД не должен глушить бота: тогда обрабатываем как обычно.
+  if (typeof update?.update_id === "number") {
+    const fresh = await claimTelegramUpdate(update.update_id).catch((e) => {
+      console.error("claimTelegramUpdate failed", e);
+      return true;
+    });
+    if (!fresh) return ok();
   }
 
   try {

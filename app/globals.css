@@ -399,12 +399,24 @@ body {
   cursor: not-allowed;
   text-decoration: line-through;
 }
-.slot.busy small {
+.slot.busy small,
+.slot.near small {
   display: block;
   font-size: 10px;
   font-weight: 500;
   text-decoration: none;
   margin-top: 2px;
+}
+/* Рекомендуемое время — вплотную к другим занятиям. Остальные свободные слоты дня
+   при этом приглушены: выбрать их можно, но взгляд сначала падает на выделенные.
+   Выбранный слот (.picked ниже) перекрывает оба вида. */
+.slot.near {
+  background: var(--accent-soft);
+}
+.slot.far {
+  border-color: var(--border);
+  color: var(--muted);
+  font-weight: 500;
 }
 
 .hint {

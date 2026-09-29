@@ -4,6 +4,7 @@
 import {
   AVAILABILITY_WEEKS,
   BOOKING_WINDOW_DAYS,
+  BREAK_MINUTES,
   MSK_OFFSET_MINUTES,
   SLOT_MINUTES,
   SLOT_STEP_MINUTES,
@@ -33,6 +34,10 @@ export interface Slot {
   start: string; // ISO-момент начала слота
   time: string; // "10:00" в МСК
   busy: boolean;
+  // Свободный слот вплотную к другому занятию (до или после, через обычный
+  // перерыв). Такие ученику предлагаем в первую очередь: день идёт плотным
+  // блоком, а не россыпью занятий с дырами между ними.
+  near?: boolean;
 }
 
 export interface DaySlots {
@@ -52,6 +57,28 @@ function mskWallToInstant(y: number, m: number, d: number, hh: number, mm = 0): 
 function mskNowParts(now: Date): { y: number; m: number; d: number } {
   const shifted = new Date(now.getTime() + MSK_OFFSET_MINUTES * 60000);
   return { y: shifted.getUTCFullYear(), m: shifted.getUTCMonth(), d: shifted.getUTCDate() };
+}
+
+// Сколько может разделять занятия, чтобы они считались идущими подряд: обычный
+// перерыв сетки плюс запас на занятия, записанные не ровно по сетке.
+const ADJACENT_GAP_MS = (BREAK_MINUTES + 10) * 60000;
+
+function adjacentToLesson(
+  slotStart: Date,
+  slotEnd: Date,
+  busy: BusyEvent[],
+  ownEventId?: string
+): boolean {
+  const s = slotStart.getTime();
+  const e = slotEnd.getTime();
+  return busy.some((b) => {
+    if (!b.lesson) return false;
+    // Переносимое занятие освобождает своё место — рядом с ним уже никого не будет.
+    if (ownEventId && (b.eventId === ownEventId || b.seriesId === ownEventId)) return false;
+    const before = s - b.end.getTime(); // занятие закончилось перед слотом
+    const after = b.start.getTime() - e; // занятие начинается после слота
+    return (before >= 0 && before <= ADJACENT_GAP_MS) || (after >= 0 && after <= ADJACENT_GAP_MS);
+  });
 }
 
 function overlaps(slotStart: Date, slotEnd: Date, busy: BusyEvent[]): boolean {
@@ -84,6 +111,9 @@ export interface WeekOptions {
   // вокруг даты» (как occIso): ученик видит недельную сетку и должен получить
   // ровно ту неделю, что выбрал, — иначе воскресенье уезжало бы в прошлую.
   fromIso?: string;
+  // Перенос: id переносимого события (серии или одиночного). Оно пока занимает
+  // своё время, но соседом для подсветки «рекомендуем» не считается.
+  ownEventId?: string;
 }
 
 // Окно занятости для обезличенной недели: нужно покрыть ближайшее наступление
@@ -205,10 +235,22 @@ export function buildWeek(
         }
       }
 
+      // Соседство смотрим по первому наступлению — той дате, что видна в сетке:
+      // занятия идут сериями, и соседи на этой неделе — те же, что и дальше.
+      const near =
+        !isBusy &&
+        adjacentToLesson(
+          start,
+          new Date(start.getTime() + SLOT_MINUTES * 60000),
+          busy,
+          opts.ownEventId
+        );
+
       slots.push({
         start: start.toISOString(),
         time: `${String(hr).padStart(2, "0")}:${String(mn).padStart(2, "0")}`,
         busy: isBusy,
+        ...(near ? { near: true } : {}),
       });
     }
 

@@ -236,6 +236,56 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     });
   });
 
+  // На проде: ЕГЭ с индивидуальной ставкой 1 500 ₽ получал пакет за 17 000 ₽ —
+  // цену брали из тарифа по умолчанию (2 500 ₽), и пакет выходил дороже поштучной.
+  it("пакет ЕГЭ считается от ставки ученика, а не от тарифа по умолчанию", async () => {
+    mockBalance({
+      debtKopecks: 0,
+      debtHours: 0,
+      items: [mk(2, false), mk(9, false)],
+    });
+    const ege = { id: "stu-1", subject: "ЕГЭ информатика", rateKopecks: 150000 } as any;
+    await ensureAutoInvoices("stu-1", "Милена", ege);
+
+    expect(createPayment).toHaveBeenCalledWith({
+      studentId: "stu-1",
+      amountKopecks: 1020000, // 8 × 1 500 ₽ − 15% = 10 200 ₽
+      kind: "package:8",
+      note: "Пакет из 8 занятий (ЕГЭ)",
+    });
+  });
+
+  it("ученик в архиве: «вперёд» и пакет снимаются, долг остаётся", async () => {
+    mockBalance({ debtKopecks: 120000, debtHours: 1, items: [mk(-3, false, true), mk(2, false)] });
+    vi.mocked(outstandingPayments).mockResolvedValue([
+      { id: "a1", kind: "advance", amountKopecks: 120000, payLink: "" },
+      { id: "pk", kind: "package:8", amountKopecks: 816000, payLink: "" },
+    ] as any);
+    const archived = { id: "stu-1", subject: "ОГЭ информатика", rateKopecks: 120000, active: false } as any;
+    await ensureAutoInvoices("stu-1", "Дима", archived);
+
+    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0]).sort()).toEqual(["a1", "pk"]);
+    expect(createPayment).toHaveBeenCalledTimes(1);
+    expect(createPayment).toHaveBeenCalledWith(expect.objectContaining({ kind: "debt", amountKopecks: 120000 }));
+  });
+
+  it("выставленный пакет по старой цене пересчитывается под ставку", async () => {
+    mockBalance({ debtKopecks: 0, debtHours: 0, items: [mk(2, false), mk(9, false)] });
+    vi.mocked(outstandingPayments).mockResolvedValue([
+      { id: "pk", kind: "package:8", amountKopecks: 1700000, payLink: "https://old" },
+    ] as any);
+    const ege = { id: "stu-1", subject: "ЕГЭ информатика", rateKopecks: 150000 } as any;
+    await ensureAutoInvoices("stu-1", "Милена", ege);
+
+    expect(updatePayment).toHaveBeenCalledWith("pk", {
+      amountKopecks: 1020000,
+      kind: "package:8",
+      note: "Пакет из 8 занятий (ЕГЭ)",
+      payLink: "",
+      providerPaymentId: "",
+    });
+  });
+
   it("ближайшее занятие оплачено вперёд — счёт «вперёд» снимается, нового нет", async () => {
     // Именно это ломалось на проде: ученик оплачивал занятие вперёд и в ту же
     // секунду получал счёт на занятие ПОСЛЕ него — состояние «всё оплачено»

@@ -43,11 +43,11 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // цвет на всех врал бы. Долги по группе видно в боте (карточка группы, «Долги»).
   if (s.groupId) return;
 
-  // 1. Сбрасываем цвет самих серий/событий в нейтраль — чтобы будущие неоплаченные
+  // 1. Сбрасываем цвет самих серий в нейтраль — чтобы будущие неоплаченные
   // повторы не наследовали старый цвет мастера (иначе пришлось бы плодить исключения
   // на каждый повтор на 26 недель вперёд).
   for (const m of await listContactMasters(s.contactKey)) {
-    // Серое (пропуск) или Sage (бесплатное) одиночное событие — не сбрасываем.
+    // Серая (пропуск) или Sage (бесплатная) серия целиком — не сбрасываем.
     if (isUntariffed(m.colorId)) continue;
     if (m.colorId != null) {
       try {
@@ -73,6 +73,7 @@ export async function recolorStudent(studentId: string): Promise<void> {
       0,
       new Date()
     ).items;
+  const changes: { id: string; color: string | null }[] = [];
   for (const o of items) {
     const target = o.paid
       ? o.past
@@ -81,14 +82,58 @@ export async function recolorStudent(studentId: string): Promise<void> {
       : o.past
         ? COLOR.unpaidPast
         : null; // будущее неоплаченное — нейтральный (без цвета)
-
-    if (o.colorId === target) continue; // уже верный цвет — не трогаем
+    if (o.colorId !== target) changes.push({ id: o.instanceId, color: target }); // верный — не трогаем
+  }
+  // Каждая правка — отдельный запрос к Google (~0,5 с). По одному они складывались
+  // в десятки секунд, и бот не успевал ответить на кнопку: Telegram слал нажатие
+  // повторно, и перекраска шла по кругу. Несколько запросов разом — в пределах квоты.
+  await forEachLimit(changes, RECOLOR_CONCURRENCY, async ({ id, color }) => {
     try {
-      await setEventColor(o.instanceId, target);
+      await withRateLimitRetry(() => setEventColor(id, color));
     } catch (e) {
-      console.error("recolorStudent set occurrence failed", o.instanceId, e);
+      console.error("recolorStudent set occurrence failed", id, e);
+    }
+  });
+}
+
+const RECOLOR_CONCURRENCY = 6;
+// Паузы перед повторами, когда Google отвечает «слишком часто» (параллельные правки
+// иногда упираются в лимит частоты). Без повтора занятие молча осталось бы не того
+// цвета до следующего пересчёта.
+const RATE_LIMIT_BACKOFF_MS = [400, 1200];
+
+function isRateLimited(e: any): boolean {
+  const code = Number(e?.code ?? e?.status ?? e?.response?.status);
+  if (code === 429) return true;
+  if (code !== 403) return false; // 403 бывает и «нет доступа» — его не повторяем
+  const reasons: string[] = (e?.errors || e?.response?.data?.error?.errors || []).map(
+    (x: any) => String(x?.reason || "")
+  );
+  return reasons.some((r) => /rateLimitExceeded/i.test(r));
+}
+
+async function withRateLimitRetry(fn: () => Promise<void>): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const pause = RATE_LIMIT_BACKOFF_MS[attempt];
+      if (pause == null || !isRateLimited(e)) throw e;
+      await new Promise((r) => setTimeout(r, pause));
     }
   }
+}
+
+async function forEachLimit<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 // Помечает все ПРОШЕДШИЕ занятия ученика бесплатными (Sage) — при переводе пробного
