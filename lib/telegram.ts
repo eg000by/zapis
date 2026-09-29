@@ -13,10 +13,17 @@ async function api(method: string, body: unknown): Promise<any> {
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!data.ok) {
+  if (!data.ok && !isNotModified(data)) {
     console.error("Telegram API error", method, data);
   }
   return data;
+}
+
+// «Текст и кнопки те же» — Telegram отвечает ошибкой, но экран уже такой, как надо.
+// Считать это неудачей нельзя: вызывающий тогда пришлёт копию экрана новым
+// сообщением, и повторное нажатие той же кнопки плодило бы карточки в чате.
+function isNotModified(data: any): boolean {
+  return /message is not modified/i.test(String(data?.description || ""));
 }
 
 // Уведомление о новой заявке с кнопками Подтвердить/Отклонить.
@@ -83,7 +90,7 @@ export async function editMessageText(
     link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return !!data?.ok;
+  return !!data?.ok || isNotModified(data);
 }
 
 // Удаление сообщения. В личном чате бот может удалять и свои, и присланные ему —

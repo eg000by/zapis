@@ -26,6 +26,9 @@ export function calendarClient(): calendar_v3.Calendar {
 export interface BusyEvent {
   start: Date;
   end: Date;
+  // Занятие сервиса (а не личное дело в календаре). К занятиям выгодно ставить
+  // новые вплотную — сетка подсвечивает соседние с ними слоты.
+  lesson?: boolean;
 }
 
 // Ставит (или снимает при colorId=null) цвет события/инстанса Google Calendar.
@@ -161,7 +164,11 @@ export interface ColorOccurrence {
   colorId: string | null; // текущий цвет (чтобы не патчить лишний раз)
 }
 
-// Мастер-события ученика (повторяющиеся — одной строкой) для сброса цвета серии.
+// Мастера серий ученика — для сброса цвета самой серии. Только события с правилом
+// повтора: в выдаче singleEvents=false рядом с ними лежат и исключения (каждое уже
+// покрашенное занятие — исключение), и одиночные события. Их цвет — это цвет
+// конкретного занятия, его ставит поштучная покраска; сбрасывать его здесь значило
+// бы на каждом пересчёте стирать всю раскраску и тут же рисовать её заново.
 export async function listContactMasters(
   key: string
 ): Promise<{ id: string; colorId: string | null }[]> {
@@ -178,6 +185,7 @@ export async function listContactMasters(
   const out: { id: string; colorId: string | null }[] = [];
   for (const ev of res.data.items || []) {
     if (ev.status === "cancelled" || !ev.id) continue;
+    if (ev.recurringEventId || !ev.recurrence?.length) continue;
     if ((ev.extendedProperties?.private?.status || "pending") !== "confirmed") continue;
     out.push({ id: ev.id, colorId: ev.colorId ?? null });
   }
@@ -348,7 +356,11 @@ export async function fetchBusy(
     const s = ev.start?.dateTime || ev.start?.date;
     const e = ev.end?.dateTime || ev.end?.date;
     if (!s || !e) continue;
-    busy.push({ start: new Date(s), end: new Date(e) });
+    busy.push({
+      start: new Date(s),
+      end: new Date(e),
+      lesson: ev.extendedProperties?.private?.app === "zapis",
+    });
   }
   return busy;
 }

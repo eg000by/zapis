@@ -16,6 +16,7 @@ interface Slot {
   start: string;
   time: string;
   busy: boolean;
+  near?: boolean; // рядом с другим занятием — рекомендуем
 }
 interface Day {
   date: string;
@@ -351,6 +352,9 @@ export default function BookingClient({
   // (её перезапрашивают при смене недели), и «четверг» из календаря мог указывать за
   // конец более короткого ответа — экран падал бы целиком.
   const dayIdx = days && days.length ? Math.min(activeDay, days.length - 1) : 0;
+  // Есть ли в дне рекомендуемое время. Только тогда остальные слоты приглушаются:
+  // в пустой день выделять нечего, и все свободные слоты равноценны.
+  const dayHasNear = !!days?.[dayIdx]?.slots.some((s) => !s.busy && s.near);
 
   // Плашка результата гаснет сама: висящее «Запись отменена» через минуту уже
   // непонятно к чему относится. Ошибку держим дольше — её нужно успеть прочитать.
@@ -1544,13 +1548,14 @@ export default function BookingClient({
                         key={s.start}
                         className={`slot ${selected.includes(s.start) ? "picked" : ""}${
                           pending === `move:${s.start}` ? " working" : ""
-                        }`}
+                        }${s.near ? " near" : dayHasNear ? " far" : ""}`}
                         disabled={busyAction}
                         onClick={() => onSlotClick(s)}
                       >
                         {/* Перенос уходит на сервер не мгновенно — нажатый слот
                             говорит, что он в работе, а не «клик не сработал». */}
                         {pending === `move:${s.start}` ? "…" : s.time}
+                        {s.near && pending !== `move:${s.start}` && <small>рекомендуем</small>}
                       </button>
                     )
                   )}

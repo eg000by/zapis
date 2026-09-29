@@ -1,6 +1,6 @@
 // Поток записи: сетка → выбор слотов → форма подтверждения → успех.
 import { expect, test } from "@playwright/test";
-import { mockApi, SLOTS_WEEK, tokenUrl } from "./helpers";
+import { mockApi, SLOTS, SLOTS_WEEK, tokenUrl } from "./helpers";
 
 test("битая ссылка — вежливый экран без сетки, но со связью с преподавателем", async ({ page }) => {
   await mockApi(page);
@@ -66,6 +66,33 @@ test("выходной день: чип серый, слотов нет, вме�
   await friday.click();
   await expect(page.getByText("Выходной — в этот день занятий нет")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
+});
+
+// Время рядом с другими занятиями выделено, остальное свободное — приглушено:
+// так день собирается плотным блоком, а не россыпью с дырами.
+test("сетка: рекомендуемое время выделено, остальные слоты дня приглушены", async ({ page }) => {
+  const tue = SLOTS.days[0];
+  const slots = {
+    days: [
+      { ...tue, slots: tue.slots.map((s) => (s.time === "12:20" ? { ...s, near: true } : s)) },
+      ...SLOTS.days.slice(1),
+    ],
+  };
+  await mockApi(page, { slots });
+  await page.goto(tokenUrl());
+
+  const near = page.locator(".slot", { hasText: "12:20" });
+  await expect(near).toHaveClass(/\bnear\b/);
+  await expect(near).toContainText("рекомендуем");
+  await expect(page.locator(".slot", { hasText: "10:00" })).toHaveClass(/\bfar\b/);
+
+  // Приглушённый слот остаётся рабочим — выбрать его можно.
+  await page.locator(".slot", { hasText: "10:00" }).click();
+  await expect(page.locator(".slot", { hasText: "10:00" })).toHaveClass(/picked/);
+
+  // В дне без рекомендаций ничего не приглушаем.
+  await page.locator(".day-chip", { hasText: "Ср" }).click();
+  await expect(page.locator(".slot.far")).toHaveCount(0);
 });
 
 test("мобилка: все 7 дней недели видны и помещаются по ширине", async ({ page }) => {
