@@ -2,7 +2,7 @@
 // (payments.paid_at), группировка по месяцам — в МСК. Деньги — копейки.
 import { eq } from "drizzle-orm";
 import { db } from "./db";
-import { payments, students } from "./schema";
+import { groups, payments, students } from "./schema";
 import { FREE_COLOR_ID, MISSED_COLOR_ID, MSK_OFFSET_MINUTES } from "./config";
 import { isPackageKind, summarizeOutstanding } from "./payments";
 import { fetchBusy, listDayOccurrences } from "./google";
@@ -44,16 +44,21 @@ function mskMonthStart(now: Date, offsetMonths = 0): Date {
 }
 
 // Ожидаемый доход за месяц: занятия месяца из календаря × ставка ученика.
-// Пропуски (серые) и бесплатные (Sage) не тарифицируются — не считаются.
+// Групповое занятие — одно событие на всех: оно приносит цену группы с каждого
+// участника (perHourByGroup = цена × число участников). Пропуски (серые) и
+// бесплатные (Sage) не тарифицируются — не считаются.
 // Чистая часть — для тестов (без календаря и БД).
 export function expectedIncome(
-  occurrences: { hours: number; colorId: string | null; studentId: string }[],
-  rateByStudent: Map<string, number>
+  occurrences: { hours: number; colorId: string | null; studentId: string; groupId?: string }[],
+  rateByStudent: Map<string, number>,
+  perHourByGroup: Map<string, number> = new Map()
 ): number {
   let total = 0;
   for (const o of occurrences) {
     if (o.colorId === MISSED_COLOR_ID || o.colorId === FREE_COLOR_ID) continue;
-    const rate = rateByStudent.get(o.studentId) || 0;
+    const rate = o.groupId
+      ? perHourByGroup.get(o.groupId) || 0
+      : rateByStudent.get(o.studentId) || 0;
     total += o.hours * rate;
   }
   return total;
@@ -119,15 +124,30 @@ export async function computeIncomeStats(now = new Date()): Promise<IncomeStats>
     .from(payments)
     .where(eq(payments.status, "unpaid"));
   const studentRows = await db()
-    .select({ id: students.id, active: students.active, rate: students.rateKopecks })
+    .select({
+      id: students.id,
+      active: students.active,
+      trial: students.trial,
+      rate: students.rateKopecks,
+      groupId: students.groupId,
+    })
     .from(students);
 
   // Ожидаемый доход за месяц (best-effort: календарь может быть недоступен).
   let expected: number | null = null;
   try {
     const occ = await listDayOccurrences(mskMonthStart(now, 0), mskMonthStart(now, 1));
-    const rates = new Map(studentRows.map((s) => [s.id, s.rate]));
-    expected = expectedIncome(occ, rates);
+    // Пробное занятие бесплатное — в прогноз оно не идёт.
+    const rates = new Map(studentRows.map((s) => [s.id, s.trial ? 0 : s.rate]));
+    const members = new Map<string, number>();
+    for (const s of studentRows) {
+      if (s.groupId && s.active) members.set(s.groupId, (members.get(s.groupId) || 0) + 1);
+    }
+    const groupRows = await db()
+      .select({ id: groups.id, rate: groups.rateKopecks })
+      .from(groups);
+    const perHourByGroup = new Map(groupRows.map((g) => [g.id, g.rate * (members.get(g.id) || 0)]));
+    expected = expectedIncome(occ, rates, perHourByGroup);
   } catch (e) {
     console.error("expected income failed", e);
   }

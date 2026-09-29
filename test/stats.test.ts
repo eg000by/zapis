@@ -108,6 +108,19 @@ describe("expectedIncome — ожидаемый доход за месяц по 
     expect(total).toBe(150000);
   });
 
+  it("групповое занятие — цена группы с каждого участника", () => {
+    const perGroup = new Map([["g1", 70000 * 4]]); // 700 ₽ × 4 участника
+    const total = expectedIncome(
+      [
+        { hours: 1, colorId: null, studentId: "", groupId: "g1" },
+        { hours: 1, colorId: "8", studentId: "", groupId: "g1" }, // отменённое/пропуск
+      ],
+      rates,
+      perGroup
+    );
+    expect(total).toBe(280000);
+  });
+
   it("ученик без ставки даёт 0 (не ломает подсчёт)", () => {
     const total = expectedIncome([{ hours: 3, colorId: null, studentId: "нет-такого" }], rates);
     expect(total).toBe(0);

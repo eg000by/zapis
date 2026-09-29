@@ -3,14 +3,20 @@
 // проверяется, что результат ввода рисуется ПОВЕРХ приглашения, а панель дня живёт
 // одним переписываемым сообщением.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyPendingInput, promptStudentNote } from "@/lib/crm-bot";
+import {
+  applyPendingInput,
+  promptStudentNote,
+  showStats,
+  showStudentsList,
+  studentGrid,
+} from "@/lib/crm-bot";
 import { refreshPanel, renderPanel } from "@/lib/panel";
 import { deleteMessage, editMessageText, pinChatMessage, sendOwner } from "@/lib/telegram";
 import { getState, setState } from "@/lib/botstate";
 import { getSetting, setSetting } from "@/lib/settings";
 import { listDayOccurrences } from "@/lib/google";
-import { listDebtors } from "@/lib/stats";
-import { getStudent } from "@/lib/students";
+import { computeIncomeStats, listDebtors } from "@/lib/stats";
+import { getStudent, listStudents } from "@/lib/students";
 import { updateStudent } from "@/lib/students";
 
 vi.mock("@/lib/telegram", async (importOriginal) => {
@@ -211,5 +217,89 @@ describe("панель дня", () => {
     // отправил бы ещё одну.
     expect(vi.mocked(pinChatMessage)).toHaveBeenCalledWith("1", 77);
     expect(vi.mocked(setSetting)).toHaveBeenCalledWith("panelMessageId", "77");
+  });
+});
+
+// «Доходы» — полученные деньги и прогноз. Долг, «всего получено» и суммы
+// неоплаченных счетов рядом с доходом путали: 118 000 «предложено одним платежом»
+// читалось как деньги, хотя это лишь необязательные предложения ученикам.
+describe("экран «Доходы»", () => {
+  it("этот и прошлый месяц, прогноз, ученики и график — без долгов и неоплаченных счетов", async () => {
+    vi.mocked(computeIncomeStats).mockResolvedValue({
+      totalKopecks: 10750000,
+      thisMonthKopecks: 4650000,
+      prevMonthKopecks: 4240000,
+      outstandingKopecks: 0,
+      debtKopecks: 390000,
+      advanceKopecks: 1770000,
+      packageOfferKopecks: 11812000,
+      activeStudents: 16,
+      paidCount: 85,
+      expectedMonthKopecks: 5340000,
+      byMonth: [{ label: "сен", kopecks: 4650000 }],
+    });
+
+    await showStats(1, 5);
+
+    const text = vi.mocked(editMessageText).mock.calls.at(-1)![2] as string;
+    // Разряды rub() разделяет неразрывным пробелом.
+    expect(text).toMatch(/За этот месяц: <b>46\s500 ₽<\/b>/);
+    expect(text).toMatch(/За прошлый месяц: 42\s400 ₽/);
+    expect(text).toMatch(/Прогноз на месяц: ~53\s400 ₽/);
+    expect(text).toContain("Активных учеников: 16");
+    for (const gone of ["Долг", "Всего получено", "Выставлено", "Предложено"]) {
+      expect(text).not.toContain(gone);
+    }
+  });
+});
+
+// Список учеников должен помещаться на экран телефона: по одному в ряд
+// («Имя · Предмет») он уходил за край уже на 16 учениках.
+describe("список учеников", () => {
+  const stu = (i: number, over: Record<string, unknown> = {}) => ({
+    id: `s${i}`,
+    name: `Ученик${String(i).padStart(2, "0")}`,
+    subject: "Питон",
+    trial: false,
+    active: true,
+    ...over,
+  });
+
+  it("по три в ряд, по алфавиту; предмет — только у тёзок", () => {
+    const rows = studentGrid([
+      stu(1, { name: "Вася" }),
+      stu(2, { name: "Артем", subject: "ОГЭ информатика" }),
+      stu(3, { name: "Артем", subject: "Питон" }),
+      stu(4, { name: "Амина", trial: true }),
+    ] as never);
+    expect(rows.map((r) => r.map((b) => b.text))).toEqual([
+      ["🎯 Амина", "Артем · ОГЭ", "Артем · Питон"],
+      ["Вася"],
+    ]);
+  });
+
+  it("16 учеников — 2 ряда меню и 6 рядов имён, без листания", async () => {
+    vi.mocked(listStudents).mockResolvedValueOnce(
+      Array.from({ length: 16 }, (_, i) => stu(i)) as never
+    );
+    await showStudentsList(1, 5);
+    const kb = vi.mocked(editMessageText).mock.calls.at(-1)![3] as any;
+    expect(kb.inline_keyboard).toHaveLength(2 + 6);
+    expect(JSON.stringify(kb)).not.toContain("noop");
+  });
+
+  it("больше 21 — листается страницами", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => stu(i));
+    vi.mocked(listStudents).mockResolvedValue(many as never);
+
+    await showStudentsList(1, 5, false, 1);
+    const kb = vi.mocked(editMessageText).mock.calls.at(-1)![3] as any;
+    const rows = kb.inline_keyboard as { text: string; callback_data: string }[][];
+    const nav = rows.at(-1)!;
+    expect(nav.map((b) => b.text)).toEqual(["◀️", "2 / 2", "·"]);
+    expect(nav[0].callback_data).toBe("stus:0");
+    // На второй странице — оставшиеся 9 учеников (3 ряда) под меню.
+    expect(rows.length).toBe(2 + 3 + 1);
+    vi.mocked(listStudents).mockResolvedValue([]);
   });
 });

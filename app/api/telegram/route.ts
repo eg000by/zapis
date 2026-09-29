@@ -163,13 +163,19 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
 
   // Навигация CRM.
-  if (data === "stus") {
-    await showStudentsList(chatId, messageId);
+  // Список учеников и архив; «:N» — страница (листание длинного списка).
+  if (data === "stus" || data.startsWith("stus:")) {
+    await showStudentsList(chatId, messageId, false, Number(data.slice(5)) || 0);
     await answerCallback(cq.id);
     return ok();
   }
-  if (data === "stusarch") {
-    await showStudentsList(chatId, messageId, true);
+  if (data === "stusarch" || data.startsWith("stusarch:")) {
+    await showStudentsList(chatId, messageId, true, Number(data.slice(9)) || 0);
+    await answerCallback(cq.id);
+    return ok();
+  }
+  // Некликабельные кнопки (номер страницы, пустое место у крайней стрелки).
+  if (data === "noop") {
     await answerCallback(cq.id);
     return ok();
   }
