@@ -63,11 +63,18 @@ function mskNowParts(now: Date): { y: number; m: number; d: number } {
 // перерыв сетки плюс запас на занятия, записанные не ровно по сетке.
 const ADJACENT_GAP_MS = (BREAK_MINUTES + 10) * 60000;
 
-function adjacentToLesson(slotStart: Date, slotEnd: Date, busy: BusyEvent[]): boolean {
+function adjacentToLesson(
+  slotStart: Date,
+  slotEnd: Date,
+  busy: BusyEvent[],
+  ownEventId?: string
+): boolean {
   const s = slotStart.getTime();
   const e = slotEnd.getTime();
   return busy.some((b) => {
     if (!b.lesson) return false;
+    // Переносимое занятие освобождает своё место — рядом с ним уже никого не будет.
+    if (ownEventId && (b.eventId === ownEventId || b.seriesId === ownEventId)) return false;
     const before = s - b.end.getTime(); // занятие закончилось перед слотом
     const after = b.start.getTime() - e; // занятие начинается после слота
     return (before >= 0 && before <= ADJACENT_GAP_MS) || (after >= 0 && after <= ADJACENT_GAP_MS);
@@ -104,6 +111,9 @@ export interface WeekOptions {
   // вокруг даты» (как occIso): ученик видит недельную сетку и должен получить
   // ровно ту неделю, что выбрал, — иначе воскресенье уезжало бы в прошлую.
   fromIso?: string;
+  // Перенос: id переносимого события (серии или одиночного). Оно пока занимает
+  // своё время, но соседом для подсветки «рекомендуем» не считается.
+  ownEventId?: string;
 }
 
 // Окно занятости для обезличенной недели: нужно покрыть ближайшее наступление
@@ -229,7 +239,12 @@ export function buildWeek(
       // занятия идут сериями, и соседи на этой неделе — те же, что и дальше.
       const near =
         !isBusy &&
-        adjacentToLesson(start, new Date(start.getTime() + SLOT_MINUTES * 60000), busy);
+        adjacentToLesson(
+          start,
+          new Date(start.getTime() + SLOT_MINUTES * 60000),
+          busy,
+          opts.ownEventId
+        );
 
       slots.push({
         start: start.toISOString(),

@@ -29,6 +29,10 @@ export interface BusyEvent {
   // Занятие сервиса (а не личное дело в календаре). К занятиям выгодно ставить
   // новые вплотную — сетка подсвечивает соседние с ними слоты.
   lesson?: boolean;
+  // Чьё это событие: id и id серии (у повтора). Нужны, чтобы при переносе не
+  // считать соседом само переносимое занятие.
+  eventId?: string;
+  seriesId?: string;
 }
 
 // Ставит (или снимает при colorId=null) цвет события/инстанса Google Calendar.
@@ -360,6 +364,8 @@ export async function fetchBusy(
       start: new Date(s),
       end: new Date(e),
       lesson: ev.extendedProperties?.private?.app === "zapis",
+      eventId: ev.id || undefined,
+      seriesId: ev.recurringEventId || undefined,
     });
   }
   return busy;

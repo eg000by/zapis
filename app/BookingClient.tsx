@@ -424,6 +424,9 @@ export default function BookingClient({
   // занятия, поэтому в чипах дней стоят настоящие даты, а start слота — то самое
   // время, которое уйдёт в запрос переноса.
   const gridOcc = rsKind === "move" && rsMode === "once" && rsOcc ? rsOcc : null;
+  // Переносимое событие: его соседей сетка не подсвечивает как «рекомендуем» —
+  // после переноса его место опустеет.
+  const gridOwn = rescheduling && rsEvent ? rsEvent.id : null;
   // Ручная перезагрузка сетки — через счётчик, а не прямым вызовом (см. эффект ниже).
   const [slotsNonce, setSlotsNonce] = useState(0);
   const reloadSlots = () => setSlotsNonce((n) => n + 1);
@@ -437,6 +440,7 @@ export default function BookingClient({
     if (trial) q.push("trial=1");
     if (gridOcc) q.push(`occ=${encodeURIComponent(gridOcc)}`);
     if (weekFrom) q.push(`from=${encodeURIComponent(weekFrom)}`);
+    if (gridOwn) q.push(`own=${encodeURIComponent(gridOwn)}`);
     return q.length ? `/api/slots?${q.join("&")}` : "/api/slots";
   })();
 
@@ -507,7 +511,7 @@ export default function BookingClient({
   useEffect(() => {
     loadSlots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridOcc, weekFrom, slotsNonce]);
+  }, [gridOcc, gridOwn, weekFrom, slotsNonce]);
 
   // ── Календарь «другая дата» ────────────────────────────────────────────────
   // Месяц, открытый в календаре: 0 — текущий, дальше листается до CALENDAR_MONTHS.

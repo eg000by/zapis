@@ -10,6 +10,7 @@ import { getState, setState } from "@/lib/botstate";
 import { getSetting, setSetting } from "@/lib/settings";
 import { listDayOccurrences } from "@/lib/google";
 import { listDebtors } from "@/lib/stats";
+import { getStudent } from "@/lib/students";
 import { updateStudent } from "@/lib/students";
 
 vi.mock("@/lib/telegram", async (importOriginal) => {
@@ -120,6 +121,19 @@ describe("ввод текста не плодит сообщений", () => {
   it("приглашение запоминает свой id — поверх него потом рисуется экран", async () => {
     await promptStudentNote(1, "stu-1");
     expect(vi.mocked(setState)).toHaveBeenCalledWith("1", "student.note", "stu-1", 77);
+  });
+
+  it("длинная заметка в приглашении укладывается в лимит Telegram и не рвёт разметку", async () => {
+    // «&» при экранировании впятеро длиннее: 3 000 символов превращаются в 15 000.
+    const note = "R&D ".repeat(1500);
+    vi.mocked(getStudent).mockResolvedValueOnce({ id: "stu-1", note } as never);
+
+    await promptStudentNote(1, "stu-1");
+
+    const text = vi.mocked(sendOwner).mock.calls.at(-1)![0] as string;
+    expect(text.length).toBeLessThanOrEqual(4096);
+    expect(text).toMatch(/…<\/i>$/);
+    expect(text).not.toMatch(/&(?!amp;|lt;|gt;|quot;|#39;)/); // сущности не разрезаны
   });
 
   it("заметка сохранена: карточка переписывает приглашение, новых сообщений нет", async () => {

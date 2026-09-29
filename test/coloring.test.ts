@@ -153,6 +153,34 @@ describe("recolorStudent — балансовая покраска", () => {
     expect(applied()).toEqual({ "master-1": null });
   });
 
+  it("упёрлись в лимит частоты Google — правка повторяется, а не теряется", async () => {
+    vi.mocked(sumPaidKopecks).mockResolvedValue(150000);
+    vi.mocked(listContactOccurrences).mockResolvedValue([occ("2026-07-01T15:10:00.000Z")] as any);
+    vi.mocked(setEventColor).mockRejectedValueOnce(
+      Object.assign(new Error("Rate Limit Exceeded"), {
+        code: 403,
+        errors: [{ reason: "rateLimitExceeded" }],
+      })
+    );
+
+    await recolorStudent("stu-1");
+
+    expect(setEventColor).toHaveBeenCalledTimes(2);
+    expect(applied()).toEqual({ "i-2026-07-01T15:10:00.000Z": "10" });
+  });
+
+  it("403 «нет доступа» не повторяется", async () => {
+    vi.mocked(sumPaidKopecks).mockResolvedValue(150000);
+    vi.mocked(listContactOccurrences).mockResolvedValue([occ("2026-07-01T15:10:00.000Z")] as any);
+    vi.mocked(setEventColor).mockRejectedValueOnce(
+      Object.assign(new Error("Forbidden"), { code: 403, errors: [{ reason: "forbidden" }] })
+    );
+
+    await recolorStudent("stu-1");
+
+    expect(setEventColor).toHaveBeenCalledTimes(1);
+  });
+
   it("верный цвет не перепатчивается (бережём квоту API)", async () => {
     vi.mocked(sumPaidKopecks).mockResolvedValue(150000);
     vi.mocked(listContactOccurrences).mockResolvedValue([

@@ -375,6 +375,22 @@ const PAID_PAGE = 10;
 // Сколько символов заметки показывать в карточке и списке занятий.
 const NOTE_PREVIEW = 120;
 
+// Сколько символов (уже экранированного) текста заметки помещаем в приглашение к
+// её правке — с запасом под текст самого приглашения до лимита Telegram в 4096.
+const NOTE_IN_PROMPT = 3800;
+
+// Экранирует текст для HTML и укладывает результат в limit символов. Режем исходный
+// текст, а не экранированный — иначе разрез мог бы пройтись по середине «&amp;».
+function escapedWithin(text: string, limit: number): string {
+  let cut = text;
+  let out = escapeHtml(cut);
+  while (out.length > limit) {
+    cut = cut.slice(0, Math.max(0, cut.length - Math.max(1, out.length - limit))).trimEnd();
+    out = `${escapeHtml(cut)}…`;
+  }
+  return out;
+}
+
 function notePreview(n: string): string {
   const flat = n.replace(/\s+/g, " ").trim();
   return flat.length > NOTE_PREVIEW ? `${flat.slice(0, NOTE_PREVIEW).trimEnd()}…` : flat;
@@ -1042,10 +1058,13 @@ export async function promptPaymentLink(chatId: number | string, paymentId: stri
 
 export async function promptStudentNote(chatId: number | string, studentId: string): Promise<void> {
   // В карточке заметка обрезана — целиком её видно здесь, чтобы было что дополнить.
-  const current = (await getStudent(studentId))?.note || "";
+  // Сообщение Telegram ограничено 4096 символами: заметку у самого предела режем
+  // сами, до разметки. Иначе обрезка всего сообщения по строкам могла бы отсечь
+  // закрывающий </i>, Telegram отверг бы HTML — и приглашение не пришло бы вовсе.
+  const current = escapedWithin((await getStudent(studentId))?.note || "", NOTE_IN_PROMPT);
   const prompt = await sendOwner(
     `✍️ Пришлите текст заметки об ученике одним сообщением${
-      current ? ` — он заменит нынешний:\n\n<i>${escapeHtml(current)}</i>` : ":"
+      current ? ` — он заменит нынешний:\n\n<i>${current}</i>` : ":"
     }`,
     cancelKb()
   );

@@ -23,12 +23,13 @@ function withinHorizon(iso: string, now: Date): boolean {
 
 // Сетка слотов. По умолчанию — ближайшая неделя под еженедельную серию: слот должен
 // быть свободен AVAILABILITY_WEEKS недель подряд, ведь время закрепляется за учеником
-// надолго. Параметры меняют ровно две вещи — какую неделю показать и сколько
-// наступлений проверять:
+// надолго. Параметры меняют две вещи — какую неделю показать и сколько
+// наступлений проверять (own — только подсветку):
 //
 //   ?trial=1     — пробное занятие (разовая запись): проверяем один раз;
 //   ?occ=<ISO>   — разовый перенос занятия серии: неделя этого занятия, один раз;
-//   ?from=<ISO>  — «другая дата»: календарная неделя (Пн–Вс) выбранной даты.
+//   ?from=<ISO>  — «другая дата»: календарная неделя (Пн–Вс) выбранной даты;
+//   ?own=<id>    — перенос: переносимое событие не считается соседом для «рекомендуем».
 //
 // Двойной брони это не открывает: занятость выбранного времени всё равно
 // перепроверяется на сервере при самой записи (/api/book, /api/reschedule).
@@ -41,11 +42,14 @@ export async function GET(req: Request) {
     const from = params.get("from") || "";
     const occIso = occ && !isNaN(new Date(occ).getTime()) ? occ : undefined;
     const fromIso = from && withinHorizon(from, now) ? from : undefined;
+    // Влияет только на подсветку, не на занятость — подставить чужой id ничего не даёт.
+    const own = (params.get("own") || "").slice(0, 200);
 
     const opts: WeekOptions = {
       weeks: occIso || params.get("trial") === "1" ? 1 : AVAILABILITY_WEEKS,
       ...(occIso ? { occIso } : {}),
       ...(fromIso ? { fromIso } : {}),
+      ...(own ? { ownEventId: own } : {}),
     };
 
     const { timeMin, timeMax } = weekWindowBounds(now, opts);

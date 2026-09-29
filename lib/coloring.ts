@@ -89,7 +89,7 @@ export async function recolorStudent(studentId: string): Promise<void> {
   // повторно, и перекраска шла по кругу. Несколько запросов разом — в пределах квоты.
   await forEachLimit(changes, RECOLOR_CONCURRENCY, async ({ id, color }) => {
     try {
-      await setEventColor(id, color);
+      await withRateLimitRetry(() => setEventColor(id, color));
     } catch (e) {
       console.error("recolorStudent set occurrence failed", id, e);
     }
@@ -97,6 +97,32 @@ export async function recolorStudent(studentId: string): Promise<void> {
 }
 
 const RECOLOR_CONCURRENCY = 6;
+// Паузы перед повторами, когда Google отвечает «слишком часто» (параллельные правки
+// иногда упираются в лимит частоты). Без повтора занятие молча осталось бы не того
+// цвета до следующего пересчёта.
+const RATE_LIMIT_BACKOFF_MS = [400, 1200];
+
+function isRateLimited(e: any): boolean {
+  const code = Number(e?.code ?? e?.status ?? e?.response?.status);
+  if (code === 429) return true;
+  if (code !== 403) return false; // 403 бывает и «нет доступа» — его не повторяем
+  const reasons: string[] = (e?.errors || e?.response?.data?.error?.errors || []).map(
+    (x: any) => String(x?.reason || "")
+  );
+  return reasons.some((r) => /rateLimitExceeded/i.test(r));
+}
+
+async function withRateLimitRetry(fn: () => Promise<void>): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const pause = RATE_LIMIT_BACKOFF_MS[attempt];
+      if (pause == null || !isRateLimited(e)) throw e;
+      await new Promise((r) => setTimeout(r, pause));
+    }
+  }
+}
 
 async function forEachLimit<T>(
   items: T[],

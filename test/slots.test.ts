@@ -151,10 +151,20 @@ describe("buildWeek — обезличенная неделя с окнами п
     expect(t["11:20"].near).toBe(true); // сразу после урока
     expect(t["12:30"].near).toBeUndefined(); // через слот — уже не рядом
 
+    // Перенос этого самого занятия: его место опустеет, соседей не подсвечиваем.
+    // Совпадение и по id события, и по id серии (у повтора свой id инстанса).
+    const moving = { ...lesson, eventId: "ser_20260714T071000Z", seriesId: "ser" };
+    const own = (id: string) =>
+      buildWeek([moving], NOW, { weeks: 1, ownEventId: id })
+        .find((d) => d.weekday === "Вт")!
+        .slots.find((s) => s.time === "09:00")!;
+    expect(own("ser").near).toBeUndefined();
+    expect(own("other").near).toBe(true);
+
     // То же время, но личное дело в календаре, а не занятие, — соседей не подсвечиваем.
-    const own = tue([{ ...lesson, lesson: false }]);
-    expect(own["09:00"].near).toBeUndefined();
-    expect(own["11:20"].near).toBeUndefined();
+    const personal = tue([{ ...lesson, lesson: false }]);
+    expect(personal["09:00"].near).toBeUndefined();
+    expect(personal["11:20"].near).toBeUndefined();
   });
 
   // Разовый перенос двигает ОДНО занятие: сетка строится на его неделю, и занятость
