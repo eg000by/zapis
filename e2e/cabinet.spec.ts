@@ -279,10 +279,14 @@ test("раскрытие «Оплачено ранее» не сдвигает �
   await mockApi(page, { my: { ...MY_FULL, paidHistory: history } });
   await page.goto(tokenUrl());
 
+  // Замеряем настоящий кабинет, а не скелетон: у заглушки тот же класс
+  // .panel-grid, и на медленной машине замер попадал на неё.
+  const summary = page.getByText("Оплачено ранее (10)");
+  await expect(summary).toBeVisible();
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   const grid = page.locator(".panel-grid");
-  await expect(grid).toBeVisible();
   const before = (await grid.boundingBox())!;
-  await page.getByText("Оплачено ранее (10)").click();
+  await summary.click();
   await expect(page.locator(".pay-hist-row").first()).toBeVisible();
   const after = (await grid.boundingBox())!;
   expect(after.x).toBe(before.x);
