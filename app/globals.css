@@ -983,12 +983,15 @@ a.meet-link:hover {
   font-weight: 600;
   color: var(--muted);
 }
-/* Длинная история оплат не растягивает карточку на полэкрана: кабинет на
-   десктопе должен оставаться целиком видимым — листается сам список. */
-.pay-history[open] .pay-hist-list {
-  max-height: 176px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+/* Длинная история оплат не растягивает карточку на полэкрана: кабинет в две
+   колонки должен оставаться целиком видимым — листается сам список. На телефоне
+   (одна колонка) страницу и так листают, и прокрутка внутри прокрутки мешала бы. */
+@media (min-width: 660px) {
+  .pay-hist-list {
+    max-height: 176px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 .pay-hist-row {
   display: flex;
@@ -1272,16 +1275,45 @@ a.panel-tg {
   width: 40%;
   margin-bottom: 16px;
 }
+.skel-slots-card .skel-title {
+  height: 20px;
+  margin: 4px 2px 16px;
+}
+/* Строки над сеткой: плашка МСК и «Ближайшие дни / Другая дата». В скелетоне
+   они нужны той же высоты, иначе с приходом слотов сетка съезжала бы вниз. */
+.skel.skel-pill {
+  width: 230px;
+  max-width: 70%;
+  height: 31px;
+  border-radius: 999px;
+  margin-top: 14px;
+}
+.skel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 2px 0;
+}
+.skel-bar .skel {
+  margin: 0;
+}
+/* Размеры повторяют .day-nav / .day-chip / .slot, чтобы слоты встали точно на
+   место заглушек. */
 .skel-chips {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 6px;
-  margin-top: 16px;
+  padding: 6px 0;
 }
 .skel-chips .skel {
-  height: 52px;
-  border-radius: 12px;
+  height: 64px;
+  border-radius: 14px;
   margin: 0;
+}
+@media (min-width: 520px) {
+  .skel-chips {
+    gap: 8px;
+  }
 }
 .skel-slots {
   display: grid;
@@ -1289,7 +1321,7 @@ a.panel-tg {
   gap: 10px;
 }
 .skel-slots .skel {
-  height: 50px;
+  height: 54px;
   border-radius: 12px;
   margin: 0;
 }

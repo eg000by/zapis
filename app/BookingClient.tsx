@@ -1444,12 +1444,17 @@ export default function BookingClient({
   const skelGrid = (
     <div role="status" aria-busy="true">
       <span className="sr-only">Загружаем свободное время…</span>
+      <span className="skel skel-pill" />
+      <div className="skel-bar">
+        <span className="skel" style={{ width: 110 }} />
+        <span className="skel" style={{ width: 128, height: 36, borderRadius: 10 }} />
+      </div>
       <div className="skel-chips">
         {Array.from({ length: 7 }, (_, i) => (
           <span key={i} className="skel" />
         ))}
       </div>
-      <div className="card skel-card">
+      <div className="card skel-card skel-slots-card">
         <span className="skel skel-title" />
         <div className="skel-slots">
           {Array.from({ length: 8 }, (_, i) => (

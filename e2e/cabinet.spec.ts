@@ -290,6 +290,12 @@ test("раскрытие «Оплачено ранее» не сдвигает �
   // Список ограничен по высоте — дальше листается внутри.
   const list = (await page.locator(".pay-hist-list").boundingBox())!;
   expect(list.height).toBeLessThanOrEqual(176);
+
+  // На телефоне (одна колонка) ограничения нет: прокрутка внутри прокручиваемой
+  // страницы только мешала бы — список просто продолжает страницу.
+  await page.setViewportSize({ width: 375, height: 800 });
+  const phone = (await page.locator(".pay-hist-list").boundingBox())!;
+  expect(phone.height).toBeGreaterThan(176);
 });
 
 test("на телефоне записи показываются выше блока оплаты", async ({ page }) => {
