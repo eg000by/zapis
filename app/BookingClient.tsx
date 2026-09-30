@@ -1122,13 +1122,15 @@ export default function BookingClient({
       {paidHistory.length > 0 && (
         <details className="pay-history">
           <summary>Оплачено ранее ({paidHistory.length})</summary>
-          {paidHistory.map((h) => (
-            <div key={h.id} className="pay-hist-row">
-              <span className="my-when">{h.paidAt ? fmtDateMsk(h.paidAt) : "—"}</span>
-              <b>{fmtRub(h.amountKopecks)}</b>
-              {h.note && <span className="my-when">{h.note}</span>}
-            </div>
-          ))}
+          <div className="pay-hist-list">
+            {paidHistory.map((h) => (
+              <div key={h.id} className="pay-hist-row">
+                <span className="my-when">{h.paidAt ? fmtDateMsk(h.paidAt) : "—"}</span>
+                <b>{fmtRub(h.amountKopecks)}</b>
+                {h.note && <span className="my-when">{h.note}</span>}
+              </div>
+            ))}
+          </div>
         </details>
       )}
     </div>
@@ -1396,11 +1398,75 @@ export default function BookingClient({
 
   const listCard = group ? groupScheduleCard : myCard;
 
+  // ── Скелетоны загрузки ─────────────────────────────────────────────────────
+  // Вместо спиннера — сама раскладка страницы с заглушками. Какую показать, пока
+  // /api/my в пути: пробному — сетку (записей у него почти наверняка нет), всем
+  // остальным — кабинет (по личной ссылке чаще всего заходят, у кого уже есть
+  // занятия). Не угадали — содержимое просто встаёт на место заглушек.
+  const skelPanel = (
+    <div className="panel-grid" role="status" aria-busy="true">
+      <span className="sr-only">Загружаем ваши записи…</span>
+      <div className="panel-col">
+        <div className="card panel-head">
+          <h1>Здравствуйте, {greetName}!</h1>
+          <span className="skel" style={{ width: "55%" }} />
+        </div>
+        <div className="card skel-card">
+          <span className="skel skel-title" />
+          <span className="skel lg" style={{ width: "70%" }} />
+          <span className="skel" style={{ width: "45%" }} />
+          <span className="skel btn" style={{ marginTop: 16 }} />
+        </div>
+        <div className="card skel-card">
+          <span className="skel skel-title" />
+          <span className="skel" style={{ width: "80%" }} />
+          <span className="skel" style={{ width: "60%" }} />
+          <span className="skel" style={{ width: "72%" }} />
+        </div>
+      </div>
+      <div className="panel-col">
+        <div className="card skel-card">
+          <span className="skel skel-title" />
+          <span className="skel lg" style={{ width: "50%" }} />
+          <div className="skel-row">
+            <span className="skel btn" />
+            <span className="skel btn" />
+          </div>
+          <span className="skel" style={{ width: "35%", marginTop: 16 }} />
+        </div>
+        <div className="card skel-card">
+          <span className="skel" style={{ width: "65%" }} />
+          <span className="skel" style={{ width: "45%" }} />
+        </div>
+      </div>
+    </div>
+  );
+  const skelGrid = (
+    <div role="status" aria-busy="true">
+      <span className="sr-only">Загружаем свободное время…</span>
+      <div className="skel-chips">
+        {Array.from({ length: 7 }, (_, i) => (
+          <span key={i} className="skel" />
+        ))}
+      </div>
+      <div className="card skel-card">
+        <span className="skel skel-title" />
+        <div className="skel-slots">
+          {Array.from({ length: 8 }, (_, i) => (
+            <span key={i} className="skel" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+  // Пока /api/my в пути, кабинет-заглушка занимает ту же ширину, что и настоящий.
+  const skelAsPanel = myLoading && !trial;
+
   return (
-    <div className={`wrap${panelMode ? " wrap-wide" : ""}`}>
+    <div className={`wrap${panelMode || skelAsPanel ? " wrap-wide" : ""}`}>
       {/* В режиме панели приветствие живёт в карточке-шапке; над сеткой оно нужнее
           обычной строкой — там оно объясняет, что вообще делать на странице. */}
-      {!panelMode && (
+      {!panelMode && !skelAsPanel && (
         <div className="hero">
           <h1>Здравствуйте, {greetName}!</h1>
           <p>
@@ -1427,8 +1493,8 @@ export default function BookingClient({
         </div>
       )}
 
-      {/* Пока не знаем, есть ли записи, — спиннер вместо сетки (без «25-го кадра»). */}
-      {myLoading && <div className="spinner" />}
+      {/* Пока не знаем, есть ли записи, — скелетон вместо сетки (без «25-го кадра»). */}
+      {myLoading && (skelAsPanel ? skelPanel : skelGrid)}
 
       {panelMode ? (
         <div className="panel-grid">
@@ -1473,7 +1539,7 @@ export default function BookingClient({
         </div>
       )}
 
-      {showGrid && !loadError && days === null && <div className="spinner" />}
+      {showGrid && !loadError && days === null && skelGrid}
 
       {showGrid && !loadError && days !== null && days.length === 0 && (
         <div className="center-note">

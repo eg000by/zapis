@@ -23,6 +23,9 @@
   /* Фон наведения. Намеренно нейтральный: акцентная заливка занята выбранным
      состоянием, и если ховер красить тем же цветом, «навёл» и «выбрал» сливаются. */
   --hover-bg: #e3e8f2;
+  /* Скелетон загрузки: заглушка и блик, пробегающий по ней. */
+  --skel: #e9edf3;
+  --skel-hi: #f5f7fa;
   --success: #16a34a;
   --danger: #dc2626;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(16, 24, 40, 0.06);
@@ -48,6 +51,8 @@
     --busy-bg: #1e222c;
     --busy-text: #5b6270;
     --hover-bg: #262c3a;
+    --skel: #20242f;
+    --skel-hi: #2a2f3c;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
   }
 }
@@ -60,6 +65,13 @@ html,
 body {
   margin: 0;
   padding: 0;
+}
+
+/* Место под полосу прокрутки держим всегда. Иначе кабинет, который целиком влезал
+   в экран, при раскрытии «Оплачено ранее» получал полосу — и вся разметка
+   сдвигалась влево на её ширину. */
+html {
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -627,21 +639,6 @@ select:focus {
   color: var(--muted);
 }
 
-.spinner {
-  width: 34px;
-  height: 34px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin: 60px auto;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Выбранный слот (мультивыбор). Кольцо вокруг — второй признак поверх цвета: выбор
    должен читаться и тогда, когда цвет плохо различим. */
 .slot.picked {
@@ -986,6 +983,13 @@ a.meet-link:hover {
   font-weight: 600;
   color: var(--muted);
 }
+/* Длинная история оплат не растягивает карточку на полэкрана: кабинет на
+   десктопе должен оставаться целиком видимым — листается сам список. */
+.pay-history[open] .pay-hist-list {
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .pay-hist-row {
   display: flex;
   align-items: baseline;
@@ -1231,4 +1235,82 @@ a.panel-tg {
 .panel-tg.on {
   color: var(--success);
   font-weight: 600;
+}
+
+/* ── Скелетон загрузки ──────────────────────────────────────────────────────
+   Пока данные в пути, видна сама раскладка страницы: карточки и строки на своих
+   местах, по ним пробегает блик. Ответ приходит — заглушки заменяются
+   содержимым без скачка, потому что места под него уже отведены. */
+.skel {
+  display: block;
+  height: 12px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--skel) 0%, var(--skel-hi) 50%, var(--skel) 100%);
+  background-size: 200% 100%;
+  animation: skel-shine 1.4s ease-in-out infinite;
+}
+.skel + .skel {
+  margin-top: 10px;
+}
+.skel.lg {
+  height: 20px;
+}
+.skel.btn {
+  height: 44px;
+  border-radius: 12px;
+}
+.skel-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.skel-row .skel {
+  flex: 1;
+  margin: 0;
+}
+.skel-card .skel-title {
+  width: 40%;
+  margin-bottom: 16px;
+}
+.skel-chips {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 16px;
+}
+.skel-chips .skel {
+  height: 52px;
+  border-radius: 12px;
+  margin: 0;
+}
+.skel-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+}
+.skel-slots .skel {
+  height: 50px;
+  border-radius: 12px;
+  margin: 0;
+}
+@keyframes skel-shine {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel {
+    animation: none;
+  }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

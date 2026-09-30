@@ -249,17 +249,47 @@ test("уведомления уже подключены — вместо кно
   await expect(page.locator("a.panel-tg")).toHaveCount(0);
 });
 
-test("нет «25-го кадра»: пока /api/my грузится — спиннер, сетка не мелькает", async ({ page }) => {
+test("нет «25-го кадра»: пока /api/my грузится — скелетон кабинета, сетка не мелькает", async ({ page }) => {
   await mockApi(page, { my: MY_FULL, myDelayMs: 800 });
   await page.goto(tokenUrl());
 
-  // Пока ответа нет: спиннер есть, сетки нет.
-  await expect(page.locator(".spinner")).toBeVisible();
+  // Пока ответа нет: раскладка кабинета с заглушками, приветствие уже на месте,
+  // сетки нет.
+  await expect(page.locator('[aria-busy="true"] .skel').first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Здравствуйте, Егор!" })).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
 
-  // После ответа — кабинет (и по-прежнему без сетки).
+  // После ответа — кабинет (и по-прежнему без сетки), заглушки ушли.
   await expect(page.getByText("Расписание")).toBeVisible();
   await expect(page.locator(".slots-grid")).toHaveCount(0);
+  await expect(page.locator(".skel")).toHaveCount(0);
+});
+
+// «Оплачено ранее» раскрывается внутри карточки и не растягивает кабинет:
+// длинный список листается сам, а место под полосу прокрутки страницы
+// зарезервировано — разметка не прыгает вбок.
+test("раскрытие «Оплачено ранее» не сдвигает разметку", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const history = Array.from({ length: 10 }, (_, i) => ({
+    id: `h${i}`,
+    amountKopecks: 150000,
+    paidAt: `2026-07-0${(i % 9) + 1}T10:00:00.000Z`,
+    note: "",
+  }));
+  await mockApi(page, { my: { ...MY_FULL, paidHistory: history } });
+  await page.goto(tokenUrl());
+
+  const grid = page.locator(".panel-grid");
+  await expect(grid).toBeVisible();
+  const before = (await grid.boundingBox())!;
+  await page.getByText("Оплачено ранее (10)").click();
+  await expect(page.locator(".pay-hist-row").first()).toBeVisible();
+  const after = (await grid.boundingBox())!;
+  expect(after.x).toBe(before.x);
+  expect(after.width).toBe(before.width);
+  // Список ограничен по высоте — дальше листается внутри.
+  const list = (await page.locator(".pay-hist-list").boundingBox())!;
+  expect(list.height).toBeLessThanOrEqual(176);
 });
 
 test("на телефоне записи показываются выше блока оплаты", async ({ page }) => {
