@@ -35,6 +35,7 @@ import { refreshPanel, showToday } from "@/lib/panel";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { notifyStudentById, pinStudentLinks } from "@/lib/notify";
 import { applyAttendance, toggleAttendance } from "@/lib/attendance";
+import { parseReport, reopenReport, resolveReport } from "@/lib/report-msg";
 import {
   confirmDeleteGroup,
   joinGroup,
@@ -482,28 +483,47 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   }
   // Утренний отчёт: «Прошло» — подтверждение (и откат ошибочного «Не прошло»),
   // «Не прошло» — серый цвет (пропуск, не тарифицируется).
+  // Ответ на кнопку меняет само сообщение «🏁 Занятие завершилось»: вопрос уходит,
+  // на его месте итог и «↩️ Изменить» (resolveReport — только для таких сообщений).
   if (data.startsWith("ldone:")) {
-    const res = await unmarkLessonMissed(data.slice(6));
+    const id = data.slice(6);
+    const res = await unmarkLessonMissed(id);
     // Занятие состоялось — сверяем счета: неоплаченное прошедшее становится долгом.
     await syncInvoices(res.studentId);
+    if (res.found) await resolveReport(chatId, messageId, cq.message?.text, id, "done");
     await answerCallback(cq.id, res.found ? "Занятие учтено ✅" : "Занятие не найдено");
     return ok();
   }
-  // Заметка к занятию прямо из утреннего отчёта (📝).
+  // Заметка к занятию прямо из отчёта (📝). Заметка = занятие состоялось (так и
+  // учитывается), поэтому висящий вопрос в отчёте сразу закрываем «Проведено».
   if (data.startsWith("lrep:")) {
-    await promptReportLessonNote(chatId, data.slice(5));
+    const id = data.slice(5);
+    const started = await promptReportLessonNote(chatId, id);
+    const report = parseReport(cq.message?.text);
+    if (started && report?.open && !report.group) {
+      await resolveReport(chatId, messageId, cq.message?.text, id, "done");
+    }
     await answerCallback(cq.id);
     return ok();
   }
   if (data.startsWith("lmiss:")) {
-    const res = await markLessonMissed(data.slice(6));
+    const id = data.slice(6);
+    const res = await markLessonMissed(id);
     // Пропуск не тарифицируется — счёт за него (выставленный сразу после занятия)
     // должен уйти, не дожидаясь, пока ученик откроет кабинет.
     await syncInvoices(res.studentId);
+    if (res.found) await resolveReport(chatId, messageId, cq.message?.text, id, "missed");
     await answerCallback(
       cq.id,
       res.found ? "Пропуск 🚫 — занятие не тарифицируется" : "Занятие не найдено"
     );
+    return ok();
+  }
+  // «↩️ Изменить» в отвеченном отчёте: возвращаем вопрос и кнопки. Сам статус занятия
+  // не трогаем — он поменяется следующим нажатием.
+  if (data.startsWith("lchg:")) {
+    const reopened = await reopenReport(chatId, messageId, cq.message?.text, data.slice(5));
+    await answerCallback(cq.id, reopened ? undefined : "Не получилось — занятие не найдено");
     return ok();
   }
   if (data.startsWith("delstuok:")) {

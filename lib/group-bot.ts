@@ -42,7 +42,7 @@ import { buildRecurrence, buildWeek, formatMsk, weekWindowBounds } from "./slots
 import { RECURRENCE_WEEKS, SUBJECTS, TIMEZONE } from "./config";
 import { getOrCreateStudentLinkCode } from "./shortlink";
 import { contactKey } from "./link";
-import { emit } from "./screen";
+import { cabinetLink, emit } from "./screen";
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -131,7 +131,7 @@ export async function showGroupMembers(
     let link = "";
     try {
       const code = await getOrCreateStudentLinkCode(m.id, false);
-      link = base ? `\n   <code>${escapeHtml(`${base}/z/${code}`)}</code>` : "";
+      link = base ? `\n   ${cabinetLink(`${base}/z/${code}`)}` : "";
     } catch (e) {
       console.error("group member link failed", m.id, e);
     }

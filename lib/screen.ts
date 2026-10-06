@@ -5,7 +5,13 @@
 //
 // Отдельный модуль, а не lib/telegram.ts: тесты подменяют функции telegram.ts, а
 // вызов изнутри того же модуля подмену бы обходил.
-import { editMessageText, sendOwner } from "./telegram";
+import { editMessageText, escapeHtml, sendOwner } from "./telegram";
+
+// Ссылка на кабинет ученика в тексте бота: по тапу открывает сайт (в <code> она бы
+// копировалась), скопировать — долгим нажатием. Без «https://» — короче.
+export function cabinetLink(url: string): string {
+  return `<a href="${escapeHtml(url).replace(/"/g, "&quot;")}">${escapeHtml(url.replace(/^https?:\/\//, ""))}</a>`;
+}
 
 export async function emit(
   chatId: number | string,

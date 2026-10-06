@@ -8,6 +8,7 @@ import {
   promptStudentNote,
   settleDebtBot,
   showDebtors,
+  showStudentCard,
   showStats,
   showStudentsList,
   studentGrid,
@@ -474,5 +475,19 @@ describe("planSettle", () => {
   it("сумма не совпала с показанной — changed; гасить нечего — none", () => {
     expect(planSettle([p("a", "debt", 100000)], 50000)).toEqual({ reason: "changed" });
     expect(planSettle([p("a", "debt", 100000, "paid"), p("c", "advance", 1)], 100000)).toEqual({ reason: "none" });
+  });
+});
+
+describe("карточка ученика", () => {
+  const lastText = () => vi.mocked(editMessageText).mock.calls.at(-1)![2] as string;
+  it("без денег (долг, «вперёд»), ссылка на кабинет открывает сайт, а не копируется", async () => {
+    process.env.NEXT_PUBLIC_BASE_URL = "https://zapis.example";
+    await showStudentCard(1, 5, "stu-1");
+    const text = lastText();
+    expect(text).not.toMatch(/вперёд|долг/i);
+    expect(text).toContain("💰 1\u00a0000 ₽/час");
+    expect(text).toContain('🔗 <a href="https://zapis.example/z/abc123">zapis.example/z/abc123</a>');
+    expect(text).not.toMatch(/<code>https?:/);
+    delete process.env.NEXT_PUBLIC_BASE_URL;
   });
 });
