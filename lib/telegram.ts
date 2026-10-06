@@ -212,10 +212,11 @@ export async function botUsername(): Promise<string> {
 // остаются для действий внутри экранов, где важен контекст конкретной карточки.
 export const MENU_STUDENTS = "Ученики";
 export const MENU_GROUPS = "Группы";
+export const MENU_TRIAL = "🎯 Пробное";
 
 export function menuKeyboard(): unknown {
   return {
-    keyboard: [[{ text: MENU_STUDENTS }, { text: MENU_GROUPS }]],
+    keyboard: [[{ text: MENU_STUDENTS }, { text: MENU_GROUPS }, { text: MENU_TRIAL }]],
     resize_keyboard: true,
     is_persistent: true,
   };
