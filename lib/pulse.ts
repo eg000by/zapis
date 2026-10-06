@@ -10,6 +10,7 @@ import { escapeHtml, inlineKeyboard, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
 import { ensureAutoInvoices } from "./autobill";
 import { refreshPanel } from "./panel";
+import { GROUP_QUESTION, REPORT_QUESTION, reportKeyboard } from "./report-msg";
 import { activeMembers } from "./groups";
 import { attendanceKeyboard } from "./attendance";
 
@@ -48,7 +49,7 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
           `🏁 <b>Занятие группы завершилось</b>\n\n👥 ${escapeHtml(o.student || "")} · ${escapeHtml(
             o.subject
           )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n` +
-            `Кто был? Нажмите на того, кого не было, — и «Готово».`,
+            GROUP_QUESTION,
           inlineKeyboard(attendanceKeyboard(members, o.instanceId))
         );
         await recordPing(o.instanceId);
@@ -59,14 +60,8 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
       await sendOwner(
         `🏁 <b>Занятие завершилось</b>\n\n🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(
           o.subject
-        )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\nКак прошло?`,
-        inlineKeyboard([
-          [
-            { text: "✅ Прошло", data: `ldone:${o.instanceId}` },
-            { text: "❌ Не прошло", data: `lmiss:${o.instanceId}` },
-            { text: "📝", data: `lrep:${o.instanceId}` },
-          ],
-        ])
+        )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n${REPORT_QUESTION}`,
+        inlineKeyboard(reportKeyboard(o.instanceId))
       );
       await recordPing(o.instanceId);
       sent++;

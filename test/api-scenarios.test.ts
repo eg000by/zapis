@@ -140,7 +140,10 @@ async function getMy(token: string): Promise<any> {
 }
 
 // Крафтовый апдейт Telegram-вебхука от владельца.
-async function tgCallback(data: string, opts: { secret?: string; chatId?: string } = {}) {
+async function tgCallback(
+  data: string,
+  opts: { secret?: string; chatId?: string; text?: string } = {}
+) {
   const mod = await import("@/app/api/telegram/route");
   const res = await mod.POST(
     new Request("http://test/api/telegram", {
@@ -153,7 +156,11 @@ async function tgCallback(data: string, opts: { secret?: string; chatId?: string
         callback_query: {
           id: "cb-1",
           data,
-          message: { chat: { id: Number(opts.chatId ?? "111222333") }, message_id: 42 },
+          message: {
+            chat: { id: Number(opts.chatId ?? "111222333") },
+            message_id: 42,
+            ...(opts.text ? { text: opts.text } : {}),
+          },
         },
       }),
     })
@@ -1183,5 +1190,50 @@ describe("«Долги»: тап «✅ Оплатил» через вебхук"
     expect(await tgCallback("dund:AAAAAAAAAAAAAAAAAAAAAA:1")).toBe(200);
     expect(answerCallback).toHaveBeenCalledWith("cb-1", "Уже отменено");
     expect(crm.recolorAfterPayment).not.toHaveBeenCalled();
+  });
+});
+
+describe("отчёт «🏁 Занятие завершилось» меняется после нажатия", () => {
+  const REPORT = "🏁 Занятие завершилось\n\n🧑‍🎓 Стас · Питон\n🕒 Вт, 14 июля, 09:00–10:00\n\nКак прошло?";
+  const lastEdit = () => vi.mocked(editMessageText).mock.calls.at(-1)!;
+
+  it("«Прошло» — вопрос заменён на «✅ Проведено»", async () => {
+    expect(await tgCallback("ldone:ev_1", { text: REPORT })).toBe(200);
+    const [, msgId, text, kb] = lastEdit();
+    expect(msgId).toBe(42);
+    expect(text).toMatch(/✅ Проведено$/);
+    expect(text).not.toContain("Как прошло?");
+    expect(JSON.stringify(kb)).toContain("lchg:ev_1");
+  });
+
+  it("«Не прошло» — «🚫 Не состоялось»", async () => {
+    await tgCallback("lmiss:ev_1", { text: REPORT });
+    expect(lastEdit()[2]).toMatch(/🚫 Не состоялось/);
+  });
+
+  it("📝 из отчёта — вопрос сразу закрыт «Проведено», заметка просится отдельно", async () => {
+    const crm = await import("@/lib/crm-bot");
+    vi.mocked(crm.promptReportLessonNote).mockResolvedValueOnce(true as never);
+    await tgCallback("lrep:ev_1", { text: REPORT });
+    expect(crm.promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_1");
+    expect(lastEdit()[2]).toMatch(/✅ Проведено$/);
+  });
+
+  it("📝 с экрана «Занятия» — сам экран не трогаем", async () => {
+    const crm = await import("@/lib/crm-bot");
+    vi.mocked(crm.promptReportLessonNote).mockResolvedValueOnce(true as never);
+    vi.mocked(editMessageText).mockClear();
+    await tgCallback("lrep:ev_1", { text: "📅 Занятия — Стас\n\n…" });
+    expect(editMessageText).not.toHaveBeenCalled();
+  });
+
+  it("«↩️ Изменить» возвращает вопрос и кнопки", async () => {
+    await tgCallback("lchg:ev_1", {
+      text: "🏁 Занятие завершилось\n\n🧑‍🎓 Стас · Питон\n🕒 Вт, 14 июля, 09:00–10:00\n\n✅ Проведено",
+    });
+    const [, , text, kb] = lastEdit();
+    expect(text).toMatch(/\n\nКак прошло\?$/);
+    expect(JSON.stringify(kb)).toContain("ldone:ev_1");
+    expect(JSON.stringify(kb)).toContain("lmiss:ev_1");
   });
 });

@@ -8,6 +8,7 @@ import {
   promptStudentNote,
   settleDebtBot,
   showDebtors,
+  showStudentCard,
   showStats,
   showStudentsList,
   studentGrid,
@@ -22,7 +23,12 @@ import { computeIncomeStats, listDebtors } from "@/lib/stats";
 import { getStudent, listStudents } from "@/lib/students";
 import { getLesson, setLessonNote } from "@/lib/lessons";
 import { updateStudent } from "@/lib/students";
-import { planSettle, settleStudentDebts, unsettleStudentDebts } from "@/lib/payments";
+import {
+  outstandingPayments,
+  planSettle,
+  settleStudentDebts,
+  unsettleStudentDebts,
+} from "@/lib/payments";
 import { recolorStudent } from "@/lib/coloring";
 import { packUuid } from "@/lib/telegram";
 
@@ -474,5 +480,24 @@ describe("planSettle", () => {
   it("сумма не совпала с показанной — changed; гасить нечего — none", () => {
     expect(planSettle([p("a", "debt", 100000)], 50000)).toEqual({ reason: "changed" });
     expect(planSettle([p("a", "debt", 100000, "paid"), p("c", "advance", 1)], 100000)).toEqual({ reason: "none" });
+  });
+});
+
+describe("карточка ученика", () => {
+  const lastText = () => vi.mocked(editMessageText).mock.calls.at(-1)![2] as string;
+  it("без строк «вперёд», ссылка на кабинет открывает сайт, а не копируется", async () => {
+    process.env.NEXT_PUBLIC_BASE_URL = "https://zapis.example";
+    vi.mocked(outstandingPayments).mockResolvedValueOnce([
+      { id: "p1", kind: "debt", amountKopecks: 100000, status: "unpaid" },
+      { id: "p2", kind: "advance", amountKopecks: 100000, status: "unpaid" },
+      { id: "p3", kind: "package:8", amountKopecks: 1200000, status: "unpaid" },
+    ] as never);
+    await showStudentCard(1, 5, "stu-1");
+    const text = lastText();
+    expect(text).not.toMatch(/вперёд/);
+    expect(text).toMatch(/долг: <b>1\s000 ₽<\/b>/);
+    expect(text).toContain('🔗 <a href="https://zapis.example/z/abc123">zapis.example/z/abc123</a>');
+    expect(text).not.toMatch(/<code>https?:/);
+    delete process.env.NEXT_PUBLIC_BASE_URL;
   });
 });

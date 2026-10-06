@@ -48,7 +48,7 @@ import {
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { applyGroupInput } from "./group-bot";
-import { emit } from "./screen";
+import { cabinetLink, emit } from "./screen";
 import { applyTrialInput, showTrialWindows } from "./trial-bot";
 import { getGroup } from "./groups";
 import { ensureAutoInvoices } from "./autobill";
@@ -205,15 +205,14 @@ export async function showStudentCard(
           : "ставка не задана"
     } · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
   ];
-  if (out.advanceKopecks > 0) lines.push(`⏭ Выставлено вперёд: ${rub(out.advanceKopecks)} ₽`);
-  if (out.packageKopecks > 0)
-    lines.push(`📦 Предложено вперёд одним платежом: ${rub(out.packageKopecks)} ₽`);
-  // Ссылка на запись — прямо в тексте карточки (в <code> копируется одним тапом).
+  // Аванс и предложенный пакет в карточке не пишем: это не долг, а их разницу никто
+  // не держит в голове. Счета целиком — в «💳 Счета».
+  // Ссылка на кабинет — по тапу открывает сайт (скопировать — долгим нажатием).
   const base = botBaseUrl();
   if (base) {
     try {
       const code = await getOrCreateStudentLinkCode(s.id, s.trial);
-      lines.push(`🔗 <code>${escapeHtml(`${base}/z/${code}`)}</code>`);
+      lines.push(`🔗 ${cabinetLink(`${base}/z/${code}`)}`);
     } catch (e) {
       console.error("student card link failed", e);
     }
@@ -1259,20 +1258,20 @@ export async function promptLessonNote(chatId: number | string, lessonId: string
 export async function promptReportLessonNote(
   chatId: number | string,
   instanceId: string
-): Promise<void> {
+): Promise<boolean> {
   const cal = calendarClient();
   let ev;
   try {
     ev = (await cal.events.get({ calendarId: CALENDAR_ID, eventId: instanceId })).data;
   } catch {
     await sendOwner("Занятие не найдено в календаре (возможно, удалено).");
-    return;
+    return false;
   }
   const priv = ev.extendedProperties?.private || {};
   const start = ev.start?.dateTime || ev.start?.date;
   if (!priv.studentId || !start) {
     await sendOwner("У занятия нет привязки к ученику — добавьте заметку из карточки: /students.");
-    return;
+    return false;
   }
   const lesson = await findOrCreateOccurrenceLesson({
     studentId: priv.studentId,
@@ -1300,6 +1299,7 @@ export async function promptReportLessonNote(
     cancelKb()
   );
   await setState(String(chatId), "lesson.note", lesson.id, prompt?.message_id);
+  return true;
 }
 
 // Если бот ждёт ввод (заметку) — сохраняет и подтверждает. Возвращает true, если обработал.
