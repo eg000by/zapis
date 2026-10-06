@@ -7,6 +7,8 @@ import {
   inlineKeyboard,
   sendOwner,
   escapeHtml,
+  packUuid,
+  unpackUuid,
   type TgButton,
 } from "./telegram";
 import {
@@ -40,7 +42,9 @@ import {
   outstandingPayments,
   setPayLink,
   setPaymentStatus,
+  settleStudentDebts,
   summarizeOutstanding,
+  unsettleStudentDebts,
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { applyGroupInput } from "./group-bot";
@@ -288,13 +292,20 @@ export async function showWeekLoad(
 
 // Долги одним экраном: кто, сколько и как давно. Долгом считаются только счета за
 // проведённые занятия и ручные — аванс и предложенный пакет сюда не идут.
+// У каждого должника — «✅ Оплатил»: вечером оплаты отмечаются подряд прямо отсюда,
+// без захода в карточку. notice — строка итога сверху и кнопка отмены промаха.
 export async function showDebtors(
   chatId: number | string,
-  messageId: number | null
+  messageId: number | null,
+  notice?: { text: string; undo?: TgButton }
 ): Promise<void> {
   const rows = await listDebtors();
   const lines = ["🧾 <b>Долги</b>"];
   const kb: TgButton[][] = [];
+  if (notice) {
+    lines.push(notice.text);
+    if (notice.undo) kb.push([notice.undo]);
+  }
   if (!rows.length) {
     lines.push("\nДолгов нет 🎉");
   } else {
@@ -311,13 +322,84 @@ export async function showDebtors(
           (r.active ? "" : " · 🗄 архив")
       );
     }
+    lines.push("\n<i>✅ — ученик оплатил весь долг. Имя — открыть карточку.</i>");
     // Кнопки — на первых 10 должников (Telegram не любит длинные клавиатуры).
+    // Сумма в кнопке оплаты — та, что видна на экране: изменится — гасить не будем.
     for (const r of rows.slice(0, 10)) {
-      kb.push([{ text: `${r.name} · ${rub(r.debtKopecks)} ₽`, data: `stu:${r.studentId}` }]);
+      kb.push([
+        { text: `${r.name} · ${rub(r.debtKopecks)} ₽`, data: `stu:${r.studentId}` },
+        { text: "✅ Оплатил", data: `dpay:${packUuid(r.studentId)}:${r.debtKopecks.toString(36)}` },
+      ]);
     }
   }
   kb.push([{ text: "⬅️ Ученики", data: "stus" }]);
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(kb));
+}
+
+async function recolorAfterPayment(studentId: string): Promise<void> {
+  try {
+    await recolorStudent(studentId);
+  } catch (e) {
+    console.error("bot debts recolor failed", e);
+  }
+}
+
+// «✅ Оплатил» в «Долгах»: гасит весь долг ученика и перерисовывает экран на месте.
+// Возвращает текст всплывашки — отдельных сообщений не шлём, их было бы по одному
+// на каждого отмеченного.
+export async function settleDebtBot(
+  chatId: number | string,
+  messageId: number | null,
+  arg: string
+): Promise<string> {
+  const [packed, amount] = arg.split(":");
+  const studentId = unpackUuid(packed ?? "");
+  const expected = parseInt(amount ?? "", 36);
+  if (!studentId || !Number.isFinite(expected)) {
+    await showDebtors(chatId, messageId);
+    return "Кнопка устарела — список обновлён";
+  }
+  const at = new Date();
+  const res = await settleStudentDebts(studentId, expected, at);
+  if (!res.ok) {
+    await showDebtors(chatId, messageId);
+    return res.reason === "changed"
+      ? "Долг изменился — проверь сумму и нажми ещё раз"
+      : "Уже отмечено";
+  }
+  await recolorAfterPayment(studentId);
+  const s = await getStudent(studentId);
+  const name = s?.name ?? "Ученик";
+  const undo = `dund:${packed}:${at.getTime().toString(36)}`;
+  await showDebtors(chatId, messageId, {
+    text: `✅ ${escapeHtml(name)}: оплачено ${rub(res.kopecks)} ₽`,
+    undo: { text: `↩️ Отменить: ${name}`, data: undo },
+  });
+  return s && s.rateKopecks <= 0
+    ? "Оплата отмечена. Цвета не расставлены: нет ставки ₽/час"
+    : `✅ ${name} — ${rub(res.kopecks)} ₽`;
+}
+
+// «↩️ Отменить» после промаха: возвращает долг, погашенный тем же тапом.
+export async function unsettleDebtBot(
+  chatId: number | string,
+  messageId: number | null,
+  arg: string
+): Promise<string> {
+  const [packed, t] = arg.split(":");
+  const studentId = unpackUuid(packed ?? "");
+  const ms = parseInt(t ?? "", 36);
+  const n = studentId && Number.isFinite(ms) ? await unsettleStudentDebts(studentId, new Date(ms)) : 0;
+  if (!n) {
+    await showDebtors(chatId, messageId);
+    return "Уже отменено";
+  }
+  await recolorAfterPayment(studentId);
+  const s = await getStudent(studentId);
+  await showDebtors(chatId, messageId, {
+    text: `↩️ ${escapeHtml(s?.name ?? "Ученик")}: долг возвращён`,
+  });
+  return "Долг возвращён";
 }
 
 // Продление серии занятий из кнопки в напоминании «занятия скоро закончатся».

@@ -6,9 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyPendingInput,
   promptStudentNote,
+  settleDebtBot,
+  showDebtors,
   showStats,
   showStudentsList,
   studentGrid,
+  unsettleDebtBot,
 } from "@/lib/crm-bot";
 import { refreshPanel, renderPanel } from "@/lib/panel";
 import { deleteMessage, editMessageText, pinChatMessage, sendOwner } from "@/lib/telegram";
@@ -19,6 +22,9 @@ import { computeIncomeStats, listDebtors } from "@/lib/stats";
 import { getStudent, listStudents } from "@/lib/students";
 import { getLesson, setLessonNote } from "@/lib/lessons";
 import { updateStudent } from "@/lib/students";
+import { planSettle, settleStudentDebts, unsettleStudentDebts } from "@/lib/payments";
+import { recolorStudent } from "@/lib/coloring";
+import { packUuid } from "@/lib/telegram";
 
 vi.mock("@/lib/telegram", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/telegram")>();
@@ -68,6 +74,8 @@ vi.mock("@/lib/payments", async (importOriginal) => {
     deletePayment: vi.fn(),
     createPayment: vi.fn(),
     setPayLink: vi.fn(),
+    settleStudentDebts: vi.fn(),
+    unsettleStudentDebts: vi.fn(),
   };
 });
 vi.mock("@/lib/google", () => ({
@@ -328,5 +336,101 @@ describe("список учеников", () => {
     // На второй странице — оставшиеся 9 учеников (3 ряда) под меню.
     expect(rows.length).toBe(2 + 3 + 1);
     vi.mocked(listStudents).mockResolvedValue([]);
+  });
+});
+
+describe("«Долги»: оплата в один тап", () => {
+  const SID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const debtor = (over: Record<string, unknown> = {}) => ({
+    studentId: SID,
+    name: "Милена",
+    subject: "ЕГЭ информатика",
+    active: true,
+    debtKopecks: 300000,
+    advanceKopecks: 0,
+    packageKopecks: 0,
+    oldestAt: new Date(Date.now() - 3 * 86400000),
+    invoices: 2,
+    ...over,
+  });
+  type Kb = { inline_keyboard: { text: string; callback_data: string }[][] };
+  const lastKb = () => vi.mocked(editMessageText).mock.calls.at(-1)![3] as Kb;
+  const lastText = () => vi.mocked(editMessageText).mock.calls.at(-1)![2] as string;
+
+  it("у каждого должника рядом с именем — «✅ Оплатил» с видимой суммой", async () => {
+    vi.mocked(listDebtors).mockResolvedValue([debtor()]);
+    await showDebtors(1, 5);
+    const row = lastKb().inline_keyboard[0];
+    expect(row[0].callback_data).toBe(`stu:${SID}`);
+    expect(row[1].text).toBe("✅ Оплатил");
+    expect(row[1].callback_data).toBe(`dpay:${packUuid(SID)}:${(300000).toString(36)}`);
+    for (const r of lastKb().inline_keyboard)
+      for (const b of r) expect(Buffer.byteLength(b.callback_data)).toBeLessThanOrEqual(64);
+    expect(vi.mocked(sendOwner)).not.toHaveBeenCalled(); // экран правится на месте
+  });
+
+  it("тап гасит ровно показанную сумму, экран перерисован с кнопкой отмены", async () => {
+    vi.mocked(settleStudentDebts).mockResolvedValue({ ok: true, kopecks: 300000, count: 2 });
+    vi.mocked(listDebtors).mockResolvedValue([]);
+    const toast = await settleDebtBot(1, 5, `${packUuid(SID)}:${(300000).toString(36)}`);
+
+    const [sid, expected, at] = vi.mocked(settleStudentDebts).mock.calls[0];
+    expect(sid).toBe(SID);
+    expect(expected).toBe(300000);
+    expect(vi.mocked(recolorStudent)).toHaveBeenCalledWith(SID);
+    expect(toast).toMatch(/Стас — 3\s000 ₽/);
+    expect(lastText()).toMatch(/✅ Стас: оплачено 3\s000 ₽/);
+    const undo = lastKb().inline_keyboard[0][0];
+    expect(undo.text).toBe("↩️ Отменить: Стас");
+    expect(undo.callback_data).toBe(`dund:${packUuid(SID)}:${(at as Date).getTime().toString(36)}`);
+    expect(Buffer.byteLength(undo.callback_data)).toBeLessThanOrEqual(64);
+    expect(vi.mocked(sendOwner)).not.toHaveBeenCalled();
+  });
+
+  it("долг вырос с момента показа — не гасим, просто обновляем список", async () => {
+    vi.mocked(settleStudentDebts).mockResolvedValue({ ok: false, reason: "changed" });
+    vi.mocked(listDebtors).mockResolvedValue([debtor({ debtKopecks: 450000 })]);
+    const toast = await settleDebtBot(1, 5, `${packUuid(SID)}:${(300000).toString(36)}`);
+    expect(toast).toMatch(/изменился/);
+    expect(vi.mocked(recolorStudent)).not.toHaveBeenCalled();
+    expect(lastKb().inline_keyboard[0][1].callback_data).toBe(
+      `dpay:${packUuid(SID)}:${(450000).toString(36)}`
+    );
+  });
+
+  it("отмена возвращает счета того же тапа и перекрашивает", async () => {
+    vi.mocked(unsettleStudentDebts).mockResolvedValue(2);
+    const at = new Date("2026-10-06T18:00:00.123Z");
+    const toast = await unsettleDebtBot(1, 5, `${packUuid(SID)}:${at.getTime().toString(36)}`);
+    expect(vi.mocked(unsettleStudentDebts)).toHaveBeenCalledWith(SID, at);
+    expect(vi.mocked(recolorStudent)).toHaveBeenCalledWith(SID);
+    expect(toast).toBe("Долг возвращён");
+    expect(lastText()).toMatch(/долг возвращён/);
+  });
+
+  it("повторная отмена ничего не делает", async () => {
+    vi.mocked(unsettleStudentDebts).mockResolvedValue(0);
+    const toast = await unsettleDebtBot(1, 5, `${packUuid(SID)}:${Date.now().toString(36)}`);
+    expect(toast).toBe("Уже отменено");
+    expect(vi.mocked(recolorStudent)).not.toHaveBeenCalled();
+  });
+});
+
+describe("planSettle", () => {
+  const p = (id: string, kind: string, amountKopecks: number, status = "unpaid") => ({
+    id,
+    kind,
+    status,
+    amountKopecks,
+  });
+
+  it("гасит долг и ручные счета, но не аванс и не пакет", () => {
+    const rows = [p("a", "debt", 100000), p("b", "manual", 50000), p("c", "advance", 150000), p("d", "package:8", 1200000)];
+    expect(planSettle(rows, 150000)).toEqual({ ids: ["a", "b"] });
+  });
+
+  it("сумма не совпала с показанной — changed; гасить нечего — none", () => {
+    expect(planSettle([p("a", "debt", 100000)], 50000)).toEqual({ reason: "changed" });
+    expect(planSettle([p("a", "debt", 100000, "paid"), p("c", "advance", 1)], 100000)).toEqual({ reason: "none" });
   });
 });

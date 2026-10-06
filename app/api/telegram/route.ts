@@ -63,6 +63,8 @@ import {
   deleteStudentBot,
   makeStudentFull,
   markPaymentPaid,
+  settleDebtBot,
+  unsettleDebtBot,
   pickSubjectForNew,
   promptDeletePayment,
   promptDeleteStudent,
@@ -430,6 +432,16 @@ async function handleCallback(cq: any): Promise<NextResponse> {
   if (data.startsWith("les:")) {
     await showLessons(chatId, messageId, data.slice(4));
     await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("dpay:")) {
+    const toast = await settleDebtBot(chatId, messageId, data.slice(5));
+    await answerCallback(cq.id, toast);
+    return ok();
+  }
+  if (data.startsWith("dund:")) {
+    const toast = await unsettleDebtBot(chatId, messageId, data.slice(5));
+    await answerCallback(cq.id, toast);
     return ok();
   }
   if (data.startsWith("payp:")) {
