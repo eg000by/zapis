@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { groups, payments, students } from "./schema";
 import { FREE_COLOR_ID, MISSED_COLOR_ID, MSK_OFFSET_MINUTES } from "./config";
-import { isPackageKind, summarizeOutstanding } from "./payments";
+import { isDebtKind, isPackageKind, summarizeOutstanding } from "./payments";
 import { fetchBusy, listDayOccurrences } from "./google";
 import { buildWeek, weekWindowBounds, type DaySlots } from "./slots";
 
@@ -201,14 +201,13 @@ export function groupDebtors(
         oldestAt: null,
         invoices: 0,
       };
-    if (isPackageKind(r.kind)) row.packageKopecks += r.amountKopecks;
-    else if (r.kind === "advance") row.advanceKopecks += r.amountKopecks;
-    else {
+    if (isDebtKind(r.kind)) {
       row.debtKopecks += r.amountKopecks;
       row.invoices++;
       const at = r.createdAt ? new Date(r.createdAt) : null;
       if (at && (!row.oldestAt || at < row.oldestAt)) row.oldestAt = at;
-    }
+    } else if (isPackageKind(r.kind)) row.packageKopecks += r.amountKopecks;
+    else row.advanceKopecks += r.amountKopecks;
     acc.set(r.studentId, row);
   }
   return [...acc.values()]

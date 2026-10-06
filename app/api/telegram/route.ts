@@ -63,6 +63,7 @@ import {
   deleteStudentBot,
   makeStudentFull,
   markPaymentPaid,
+  recolorAfterPayment,
   settleDebtBot,
   unsettleDebtBot,
   pickSubjectForNew,
@@ -434,14 +435,12 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
-  if (data.startsWith("dpay:")) {
-    const toast = await settleDebtBot(chatId, messageId, data.slice(5));
+  if (data.startsWith("dpay:") || data.startsWith("dund:")) {
+    const tap = data.startsWith("dpay:") ? settleDebtBot : unsettleDebtBot;
+    const { toast, recolor } = await tap(chatId, messageId, data.slice(5));
     await answerCallback(cq.id, toast);
-    return ok();
-  }
-  if (data.startsWith("dund:")) {
-    const toast = await unsettleDebtBot(chatId, messageId, data.slice(5));
-    await answerCallback(cq.id, toast);
+    // Календарь перекрашиваем уже после ответа: тап не висит на вызовах Google.
+    if (recolor) await recolorAfterPayment(recolor);
     return ok();
   }
   if (data.startsWith("payp:")) {

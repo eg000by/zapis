@@ -1,7 +1,7 @@
 // Сервисный слой «Оплаты». Деньги — целыми копейками. Оплата принимается вне сайта
 // (в «Мой налог»: СБП + чек автоматически), поэтому статус «оплачено» ставит
 // преподаватель вручную (нет вебхука от «Мой налог»). Общий слой для /admin и бота.
-import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, ne, notLike } from "drizzle-orm";
 import { db } from "./db";
 import { payments, type Payment } from "./schema";
 
@@ -47,6 +47,13 @@ export interface OutstandingSummary {
   totalKopecks: number;
 }
 
+// Что считается долгом — единственное место правила: сводка счетов, «Долги» и
+// погашение в один тап должны видеть одну и ту же сумму. Всё, кроме аванса и
+// предложенного пакета (за них ещё ничего не проведено).
+export function isDebtKind(kind: string): boolean {
+  return kind !== "advance" && !isPackageKind(kind);
+}
+
 export function summarizeOutstanding(
   rows: { kind: string; amountKopecks: number }[]
 ): OutstandingSummary {
@@ -58,9 +65,9 @@ export function summarizeOutstanding(
   };
   for (const r of rows) {
     sum.totalKopecks += r.amountKopecks;
-    if (isPackageKind(r.kind)) sum.packageKopecks += r.amountKopecks;
-    else if (r.kind === "advance") sum.advanceKopecks += r.amountKopecks;
-    else sum.debtKopecks += r.amountKopecks; // debt и ручные счета
+    if (isDebtKind(r.kind)) sum.debtKopecks += r.amountKopecks; // debt и ручные счета
+    else if (isPackageKind(r.kind)) sum.packageKopecks += r.amountKopecks;
+    else sum.advanceKopecks += r.amountKopecks;
   }
   return sum;
 }
@@ -193,12 +200,6 @@ export async function setPaymentStatus(id: string, status: PaymentStatus): Promi
     .where(eq(payments.id, id));
 }
 
-// Долг по той же семантике, что summarizeOutstanding и «Долги»: всё, кроме аванса
-// и предложенного пакета (за них ещё ничего не проведено).
-export function isDebtKind(kind: string): boolean {
-  return kind !== "advance" && !isPackageKind(kind);
-}
-
 export type SettleResult =
   | { ok: true; kopecks: number; count: number }
   | { ok: false; reason: "none" | "changed" };
@@ -212,8 +213,7 @@ export function planSettle(
 ): { ids: string[] } | { reason: "none" | "changed" } {
   const debts = open.filter((p) => p.status === "unpaid" && isDebtKind(p.kind));
   if (!debts.length) return { reason: "none" };
-  const sum = debts.reduce((s, p) => s + p.amountKopecks, 0);
-  if (sum !== expectedKopecks) return { reason: "changed" };
+  if (summarizeOutstanding(debts).debtKopecks !== expectedKopecks) return { reason: "changed" };
   return { ids: debts.map((p) => p.id) };
 }
 
@@ -240,8 +240,9 @@ export async function settleStudentDebts(
   return { ok: true, kopecks: done.reduce((s, p) => s + p.amountKopecks, 0), count: done.length };
 }
 
-// Отмена промаха: возвращает в «неоплачено» счета, погашенные тем самым тапом (та же
-// миллисекунда paidAt). Оплаченное иначе — из карточки, ЮKassa — не трогает.
+// Отмена промаха: возвращает в «неоплачено» счета-долги, погашенные тем самым тапом
+// (та же миллисекунда paidAt — тап ставит её всем своим счетам разом). Аванс и пакет
+// тап не гасит, поэтому их не трогаем и здесь. Срок отмены ограничивает бот.
 export async function unsettleStudentDebts(studentId: string, at: Date): Promise<number> {
   const rows = await db()
     .update(payments)
@@ -250,6 +251,8 @@ export async function unsettleStudentDebts(studentId: string, at: Date): Promise
       and(
         eq(payments.studentId, studentId),
         eq(payments.status, "paid"),
+        ne(payments.kind, "advance"),
+        notLike(payments.kind, "package%"),
         gte(payments.paidAt, at),
         lt(payments.paidAt, new Date(at.getTime() + 1))
       )

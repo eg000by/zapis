@@ -88,6 +88,7 @@ vi.mock("@/lib/crm-bot", () => {
     "showPaidHistory", "showPayments", "showStats", "showStudentCard", "showStudentTools",
     "showStudentsList",
     "submitRateForNew", "submitTgForNew", "toggleStudentArchive",
+    "settleDebtBot", "unsettleDebtBot", "recolorAfterPayment",
   ];
   const out: Record<string, unknown> = {};
   for (const f of fns) out[f] = vi.fn(async () => false);
@@ -1155,5 +1156,32 @@ describe("кнопки утреннего отчёта", () => {
     vi.mocked(ensureAutoInvoices).mockClear();
     await tgCallback("ldone:ev_x");
     expect(ensureAutoInvoices).toHaveBeenCalledWith("stu-1", expect.any(String));
+  });
+});
+
+describe("«Долги»: тап «✅ Оплатил» через вебхук", () => {
+  it("всплывашка уходит до перекраски календаря — кнопка не висит на Google", async () => {
+    const crm = await import("@/lib/crm-bot");
+    const order: string[] = [];
+    vi.mocked(crm.settleDebtBot).mockResolvedValueOnce({ toast: "✅ Стас — 1 500 ₽", recolor: "stu-1" });
+    vi.mocked(answerCallback).mockImplementationOnce(async () => {
+      order.push("answer");
+    });
+    vi.mocked(crm.recolorAfterPayment).mockImplementationOnce(async () => {
+      order.push("recolor");
+    });
+    expect(await tgCallback("dpay:AAAAAAAAAAAAAAAAAAAAAA:1")).toBe(200);
+    expect(crm.settleDebtBot).toHaveBeenCalledWith(111222333, 42, "AAAAAAAAAAAAAAAAAAAAAA:1");
+    expect(answerCallback).toHaveBeenCalledWith("cb-1", "✅ Стас — 1 500 ₽");
+    expect(crm.recolorAfterPayment).toHaveBeenCalledWith("stu-1");
+    expect(order).toEqual(["answer", "recolor"]);
+  });
+
+  it("отмена без перекраски (уже отменено) — календарь не трогаем", async () => {
+    const crm = await import("@/lib/crm-bot");
+    vi.mocked(crm.unsettleDebtBot).mockResolvedValueOnce({ toast: "Уже отменено", recolor: null });
+    expect(await tgCallback("dund:AAAAAAAAAAAAAAAAAAAAAA:1")).toBe(200);
+    expect(answerCallback).toHaveBeenCalledWith("cb-1", "Уже отменено");
+    expect(crm.recolorAfterPayment).not.toHaveBeenCalled();
   });
 });
