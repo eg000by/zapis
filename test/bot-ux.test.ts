@@ -17,6 +17,7 @@ import { getSetting, setSetting } from "@/lib/settings";
 import { listDayOccurrences } from "@/lib/google";
 import { computeIncomeStats, listDebtors } from "@/lib/stats";
 import { getStudent, listStudents } from "@/lib/students";
+import { getLesson, setLessonNote } from "@/lib/lessons";
 import { updateStudent } from "@/lib/students";
 
 vi.mock("@/lib/telegram", async (importOriginal) => {
@@ -157,6 +158,32 @@ describe("ввод текста не плодит сообщений", () => {
     // Экран нарисован поверх приглашения…
     expect(vi.mocked(editMessageText).mock.calls[0][1]).toBe(77);
     // …и ни одного нового сообщения — в том числе никакого «✅ сохранено».
+    expect(vi.mocked(sendOwner)).not.toHaveBeenCalled();
+  });
+
+  // Заметку к прошедшему занятию пишут сразу после урока — в ответ хватает
+  // подтверждения, список всех занятий ученика был лишним экраном.
+  it("заметка к занятию: поверх приглашения только «✅ Заметка сохранена»", async () => {
+    vi.mocked(getState).mockResolvedValue({
+      chatId: "1",
+      action: "lesson.note",
+      targetId: "les-1",
+      promptMessageId: "77",
+      updatedAt: new Date(),
+    } as never);
+    vi.mocked(getLesson).mockResolvedValue({
+      id: "les-1",
+      studentId: "stu-1",
+      occurrenceStart: new Date("2026-10-05T12:00:00.000Z"),
+    } as never);
+
+    expect(await applyPendingInput(1, "разобрали циклы")).toBe(true);
+
+    expect(vi.mocked(setLessonNote)).toHaveBeenCalledWith("les-1", "разобрали циклы");
+    const [, msgId, text, kb] = vi.mocked(editMessageText).mock.calls.at(-1)!;
+    expect(msgId).toBe(77);
+    expect(text).toBe("✅ Заметка сохранена · Стас, Пн, 5 октября, 15:00");
+    expect(kb).toBeUndefined(); // без кнопок и без списка занятий
     expect(vi.mocked(sendOwner)).not.toHaveBeenCalled();
   });
 
