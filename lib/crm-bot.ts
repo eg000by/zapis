@@ -1070,8 +1070,9 @@ export async function cancelPending(
     } else if (st.action === "settings.sbp") {
       await showPaySettings(chatId, back);
     } else if (st.action === "lesson.note") {
-      const l = await getLesson(st.targetId);
-      if (l) await showLessons(chatId, back, l.studentId);
+      // Заметку начинают из вопроса «как прошло?» или списка занятий — приглашение
+      // это отдельное сообщение, и при отмене оно просто исчезает.
+      await deleteMessage(chatId, back);
     } else if (st.action === "payment.create") {
       await showPayments(chatId, back, st.targetId);
     } else if (st.action === "payment.link") {
@@ -1314,8 +1315,15 @@ export async function applyPendingInput(chatId: number | string, text: string): 
   if (st.action === "lesson.note") {
     await setLessonNote(st.targetId, value);
     await clearState(String(chatId));
+    // Только подтверждение поверх приглашения: заметку пишут сразу после занятия,
+    // и список всех занятий ученика в ответ — лишний экран, который надо листать.
     const lesson = await getLesson(st.targetId);
-    if (lesson) await showLessons(chatId, promptIdOf(st), lesson.studentId);
+    const s = lesson ? await getStudent(lesson.studentId) : null;
+    const when = lesson?.occurrenceStart
+      ? formatMskRange(new Date(lesson.occurrenceStart).toISOString(), 1).replace(/ \(МСК\)$/, "")
+      : "";
+    const about = [s?.name, when].filter(Boolean).map((x) => escapeHtml(String(x))).join(", ");
+    await emit(chatId, promptIdOf(st), `✅ Заметка сохранена${about ? ` · ${about}` : ""}`);
     return true;
   }
   await clearState(String(chatId));
