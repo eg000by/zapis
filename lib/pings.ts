@@ -25,10 +25,23 @@ export async function recordPing(instanceId: string): Promise<void> {
 // у занятий id календаря, у апдейтов — префикс tg:). Возвращает true, если апдейт
 // новый и его надо обработать.
 export async function claimTelegramUpdate(updateId: number): Promise<boolean> {
+  return claimOnce(`tg:${updateId}`);
+}
+
+// Атомарная «занятость» действия по ключу: true — первый, кто его взял. Нужна
+// там, где два быстрых нажатия (разные апдейты Telegram) иначе выполнили бы одно
+// действие дважды — например, записали бы одно пробное двумя событиями.
+export async function claimOnce(key: string): Promise<boolean> {
   const rows = await db()
     .insert(lessonPings)
-    .values({ instanceId: `tg:${updateId}` })
+    .values({ instanceId: key })
     .onConflictDoNothing()
     .returning({ id: lessonPings.instanceId });
   return rows.length > 0;
+}
+
+// Снимает «занятость» — действие можно выполнить снова (запись отменили или она
+// не удалась).
+export async function releaseClaim(key: string): Promise<void> {
+  await db().delete(lessonPings).where(eq(lessonPings.instanceId, key));
 }

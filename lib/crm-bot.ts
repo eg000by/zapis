@@ -44,6 +44,8 @@ import {
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { applyGroupInput } from "./group-bot";
+import { emit } from "./screen";
+import { applyTrialInput, showTrialWindows } from "./trial-bot";
 import { getGroup } from "./groups";
 import { ensureAutoInvoices } from "./autobill";
 import { clearState, getState, promptIdOf, setState } from "./botstate";
@@ -79,18 +81,6 @@ const PAY_STATUS: Record<string, string> = {
 // поэтому у приглашений к вводу показываем инлайн-«Отмена» (callback "cancel").
 const cancelKb = () => inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]]);
 
-// Отправляет новое сообщение (messageId=null) либо редактирует существующее.
-// Экран: правим уже отправленное сообщение, а не шлём новое — переписка не растёт.
-// Если править нечего (сообщение удалено или слишком старое), отправляем новое.
-async function emit(
-  chatId: number | string,
-  messageId: number | null,
-  text: string,
-  keyboard?: unknown
-): Promise<void> {
-  if (messageId != null && (await editMessageText(chatId, messageId, text, keyboard))) return;
-  await sendOwner(text, keyboard);
-}
 
 // Список учеников — сеткой по STUDENT_COLS имени в ряд, по алфавиту. По одному
 // в ряд («Имя · Предмет») он вырастал за экран телефона уже на полутора десятках
@@ -1069,6 +1059,16 @@ export async function cancelPending(
       await showStudentCard(chatId, back, st.targetId);
     } else if (st.action === "settings.sbp") {
       await showPaySettings(chatId, back);
+    } else if (st.action.startsWith("trial.")) {
+      // Пробное: назад к окнам той же недели и в том же режиме.
+      let o = 0;
+      let a = false;
+      try {
+        const c = JSON.parse(st.targetId);
+        o = Number(c.o) || 0;
+        a = !!c.a;
+      } catch {}
+      await showTrialWindows(chatId, back, o, a);
     } else if (st.action === "lesson.note") {
       // Заметку начинают из вопроса «как прошло?» или списка занятий — приглашение
       // это отдельное сообщение, и при отмене оно просто исчезает.
@@ -1205,6 +1205,13 @@ export async function applyPendingInput(chatId: number | string, text: string): 
   if (
     st.action.startsWith("grp.") &&
     (await applyGroupInput(chatId, st.action, st.targetId, value, promptIdOf(st)))
+  ) {
+    return true;
+  }
+  // Быстрая запись пробного — свой модуль (lib/trial-bot.ts).
+  if (
+    st.action.startsWith("trial.") &&
+    (await applyTrialInput(chatId, st.action, st.targetId, value, promptIdOf(st)))
   ) {
     return true;
   }

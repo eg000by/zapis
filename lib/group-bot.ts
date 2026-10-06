@@ -5,7 +5,6 @@
 // (время общее на четверых, один участник не может его выбрать или подвинуть).
 // Поэтому время выбирается прямо здесь: день недели → свободный час → серия.
 import {
-  editMessageText,
   escapeHtml,
   inlineKeyboard,
   packUuid,
@@ -43,20 +42,11 @@ import { buildRecurrence, buildWeek, formatMsk, weekWindowBounds } from "./slots
 import { RECURRENCE_WEEKS, SUBJECTS, TIMEZONE } from "./config";
 import { getOrCreateStudentLinkCode } from "./shortlink";
 import { contactKey } from "./link";
+import { emit } from "./screen";
 
 const rub = (kopecks: number) => (kopecks / 100).toLocaleString("ru-RU");
 const WEEKDAYS = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
-// См. crm-bot.emit: экран правится на месте, новое сообщение — только если не вышло.
-async function emit(
-  chatId: number | string,
-  messageId: number | null,
-  text: string,
-  keyboard?: unknown
-): Promise<void> {
-  if (messageId != null && (await editMessageText(chatId, messageId, text, keyboard))) return;
-  await sendOwner(text, keyboard);
-}
 
 export async function showGroupsList(
   chatId: number | string,

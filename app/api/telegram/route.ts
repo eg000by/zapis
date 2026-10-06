@@ -21,7 +21,15 @@ import {
   unpackUuid,
   MENU_STUDENTS,
   MENU_GROUPS,
+  MENU_TRIAL,
 } from "@/lib/telegram";
+import {
+  chooseTrialSubject,
+  confirmExistingTrial,
+  pickTrialSlot,
+  showTrialWindows,
+  undoTrialBot,
+} from "@/lib/trial-bot";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { refreshPanel, showToday } from "@/lib/panel";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
@@ -174,6 +182,33 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id);
     return ok();
   }
+  // Быстрая запись пробного: окна → время → «кто придёт».
+  if (data.startsWith("trw:")) {
+    const [o, a] = data.slice(4).split(":");
+    await showTrialWindows(chatId, messageId, Number(o) || 0, a === "1");
+    await answerCallback(cq.id);
+    return ok();
+  }
+  if (data.startsWith("trs:")) {
+    const err = await pickTrialSlot(chatId, messageId, data.slice(4));
+    await answerCallback(cq.id, err || undefined);
+    return ok();
+  }
+  if (data.startsWith("trsub:")) {
+    const err = await chooseTrialSubject(chatId, messageId, data.slice(6));
+    await answerCallback(cq.id, err || undefined);
+    return ok();
+  }
+  if (data === "trex") {
+    const err = await confirmExistingTrial(chatId, messageId);
+    await answerCallback(cq.id, err || undefined);
+    return ok();
+  }
+  if (data.startsWith("trundo:")) {
+    await answerCallback(cq.id, await undoTrialBot(chatId, messageId, data.slice(7)));
+    return ok();
+  }
+
   // Некликабельные кнопки (номер страницы, пустое место у крайней стрелки).
   if (data === "noop") {
     await answerCallback(cq.id);
@@ -521,6 +556,7 @@ async function handleCallback(cq: any): Promise<NextResponse> {
 // в меню остаются старые.
 const BOT_COMMANDS: { command: string; emoji: string; description: string }[] = [
   { command: "students", emoji: "👥", description: "Ученики, счета, заметки, ссылки" },
+  { command: "trial", emoji: "🎯", description: "Пробное: свободные окна и запись" },
   { command: "new", emoji: "➕", description: "Новый ученик + ссылка на запись" },
   { command: "groups", emoji: "👥", description: "Группы: состав, время, цена" },
   { command: "stats", emoji: "📊", description: "Доходы за месяц и всего" },
@@ -622,11 +658,12 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   // Кнопки постоянного меню (reply-клавиатура): это навигация, а не ввод, поэтому
   // разбираем их раньше ожидающего ввода — и убираем нажатие из переписки. Начатый
   // ввод сворачиваем ТИХО: «Нечего отменять» на каждое нажатие меню — мусор.
-  if ([MENU_STUDENTS, MENU_GROUPS].includes(text)) {
+  if ([MENU_STUDENTS, MENU_GROUPS, MENU_TRIAL].includes(text)) {
     await deleteMessage(chatId, incomingId);
     await cancelPending(chatId, { quiet: true });
     if (text === MENU_STUDENTS) await showStudentsList(chatId, null);
-    else await showGroupsList(chatId, null);
+    else if (text === MENU_GROUPS) await showGroupsList(chatId, null);
+    else await showTrialWindows(chatId, null);
     return ok();
   }
 
@@ -663,6 +700,10 @@ async function handleMessage(msg: any): Promise<NextResponse> {
   }
   if (text.startsWith("/pay")) {
     await showPaySettings(chatId, null);
+    return ok();
+  }
+  if (text.startsWith("/trial")) {
+    await showTrialWindows(chatId, null);
     return ok();
   }
   if (text.startsWith("/new")) {
