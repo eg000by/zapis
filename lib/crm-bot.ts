@@ -39,7 +39,6 @@ import {
   deletePayment,
   getPayment,
   listStudentPayments,
-  outstandingPayments,
   setPayLink,
   setPaymentStatus,
   settleStudentDebts,
@@ -182,10 +181,6 @@ export async function showStudentCard(
   // Участник группы занимается по её расписанию и цене — это первое, что должно
   // быть видно в карточке (иначе непонятно, почему личная ставка не при делах).
   const group = s.groupId ? await getGroup(s.groupId).catch(() => null) : null;
-  const outstanding = await outstandingPayments(s.id);
-  // Долгом считаем только счета за проведённые занятия: счёт «вперёд» и пакетный
-  // оффер — предоплата, ученик по ним ничего не задолжал.
-  const out = summarizeOutstanding(outstanding);
 
   const lines = [
     `🧑‍🎓 <b>${escapeHtml(s.name)}</b>${s.trial ? " · 🎯 пробный" : ""}${s.active ? "" : " · 🚫 архив"}`,
@@ -203,10 +198,10 @@ export async function showStudentCard(
         : s.rateKopecks > 0
           ? `${rub(s.rateKopecks)} ₽/час`
           : "ставка не задана"
-    } · долг: <b>${rub(out.debtKopecks)} ₽</b>`,
+    }`,
   ];
-  // Аванс и предложенный пакет в карточке не пишем: это не долг, а их разницу никто
-  // не держит в голове. Счета целиком — в «💳 Счета».
+  // Денег (долг, аванс, пакет) в карточке нет: долги — в «🧾 Долги», счета ученика —
+  // в «💳 Счета». Карточка — кто это и как с ним связаться.
   // Ссылка на кабинет — по тапу открывает сайт (скопировать — долгим нажатием).
   const base = botBaseUrl();
   if (base) {
