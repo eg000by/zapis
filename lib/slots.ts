@@ -53,6 +53,26 @@ function mskWallToInstant(y: number, m: number, d: number, hh: number, mm = 0): 
   return new Date(Date.UTC(y, m, d, hh, mm) - MSK_OFFSET_MINUTES * 60000);
 }
 
+// Дата момента по МСК: день недели (0 = вс), число, месяц (0–11), год.
+export function mskDateParts(iso: string): { y: number; m: number; d: number; wd: number } {
+  const t = new Date(new Date(iso).getTime() + MSK_OFFSET_MINUTES * 60000);
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth(), d: t.getUTCDate(), wd: t.getUTCDay() };
+}
+
+// «Пн, 13 октября» — дата момента по МСК для сообщений.
+export function mskDayLabel(iso: string): string {
+  const p = mskDateParts(iso);
+  return `${WEEKDAYS_SHORT[p.wd]}, ${p.d} ${MONTHS_GEN[p.m]}`;
+}
+
+// Полночь МСК даты момента, сдвинутой на plusDays суток (абсолютный момент).
+export function mskDayStart(iso: string, plusDays = 0): Date {
+  const p = mskDateParts(iso);
+  return mskWallToInstant(p.y, p.m, p.d + plusDays, 0);
+}
+
+export { MONTHS_GEN, WEEKDAYS_SHORT };
+
 // Текущий момент, выраженный в "стеночных" полях МСК.
 function mskNowParts(now: Date): { y: number; m: number; d: number } {
   const shifted = new Date(now.getTime() + MSK_OFFSET_MINUTES * 60000);

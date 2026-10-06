@@ -1,24 +1,18 @@
 // Пробное занятие за три нажатия: экран свободных окон (текст для родителя
 // копируется одним тапом) → время, которое назвал родитель → «Маша ОГЭ».
 // Логика записи — в lib/trial.ts; здесь только экраны и шаги диалога.
-import {
-  editMessageText,
-  escapeHtml,
-  inlineKeyboard,
-  packUuid,
-  sendOwner,
-  unpackUuid,
-  type TgButton,
-} from "./telegram";
+import { escapeHtml, inlineKeyboard, packUuid, unpackUuid, type TgButton } from "./telegram";
 import { clearState, getState, setState } from "./botstate";
 import { SUBJECTS, siteBaseUrl } from "./config";
 import { formatMskRange } from "./slots";
 import { getOrCreateStudentLinkCode } from "./shortlink";
 import { refreshPanel } from "./panel";
+import { emit } from "./screen";
 import {
   bookTrialByTeacher,
   formatTrialWindows,
   loadTrialDays,
+  normalizeSubject,
   parseTrialLine,
   undoTrial,
   weekRangeLabel,
@@ -27,18 +21,8 @@ import {
 const CALLBACK_LIMIT = 64;
 // Сколько недель вперёд можно листать: дальше расписание всё равно не живёт.
 const MAX_OFFSET = 8;
-
-// Экран правится на месте; новое сообщение — только если править нечего.
-// Возвращает id сообщения, на котором экран оказался (для следующего шага).
-async function emit(
-  chatId: number | string,
-  messageId: number | null,
-  text: string,
-  keyboard?: unknown
-): Promise<number | null> {
-  if (messageId != null && (await editMessageText(chatId, messageId, text, keyboard))) return messageId;
-  return (await sendOwner(text, keyboard))?.message_id ?? null;
-}
+// Предметы для кнопок: «Другое» не нужно — свой предмет пишут словами.
+const SUBJECT_BUTTONS = SUBJECTS.filter((s) => s !== "Другое");
 
 // Время слота в кнопке — минуты от эпохи в base36 (6 символов): ISO-строка в
 // callback_data не помещается вместе с остальным, а хранить список слотов в
@@ -50,23 +34,41 @@ export const unpackSlot = (s: string) => {
 };
 
 const whenLabel = (iso: string) => formatMskRange(iso, 1);
+const backToWindows = (o: number, a: boolean): TgButton => ({
+  text: "⬅️ К окнам",
+  data: `trw:${o}:${a ? 1 : 0}`,
+});
 
-// Экран окон. offset — неделя (0 — ближайшие 7 дней), all — все свободные, а не
-// только рекомендуемые.
+type TrialCtx = { start: string; o: number; a: boolean; name?: string; tg?: string; subject?: string };
+
+function parseCtx(raw: string): TrialCtx | null {
+  try {
+    const c = JSON.parse(raw);
+    return c && typeof c.start === "string" ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+// Экран окон. offset — страница из 7 дат (0 — с сегодня), all — все свободные, а
+// не только рекомендуемые.
 export async function showTrialWindows(
   chatId: number | string,
   messageId: number | null,
   offset = 0,
   all = false
 ): Promise<void> {
-  await clearState(String(chatId));
+  // Сбрасываем только диалог пробного: старая кнопка «К окнам» не должна молча
+  // обрывать начатый в это время ввод счёта или заметки.
+  const st = await getState(String(chatId)).catch(() => null);
+  if (st?.action.startsWith("trial.")) await clearState(String(chatId));
+
   const now = new Date();
   const o = Math.min(Math.max(0, offset), MAX_OFFSET);
   const days = await loadTrialDays(now, o);
   const f = formatTrialWindows(days, all);
-  const range = weekRangeLabel(now, o);
+  const head = `🎯 <b>Пробное</b> · ${weekRangeLabel(now, o)}`;
 
-  const head = `🎯 <b>Пробное</b> · ${range}`;
   let body: string;
   if (!f.text) {
     body = `${head}\n\nСвободных окон на эти дни нет — посмотрите следующую неделю.`;
@@ -83,23 +85,24 @@ export async function showTrialWindows(
       `Родитель выбрал время? Нажмите его ниже — и напишите, кто придёт.`;
   }
 
+  // На кнопке — день недели, ЧИСЛО и время: на странице бывают две «субботы»
+  // (сегодняшняя и через неделю), и без числа их не отличить.
+  const label = new Map<string, string>();
+  for (const d of days) for (const s of d.slots) label.set(s.start, `${d.weekday} ${d.day} · ${s.time}`);
   const rows: TgButton[][] = [];
   for (let i = 0; i < f.slots.length; i += 3) {
     rows.push(
-      f.slots.slice(i, i + 3).map((s) => {
-        const wd = days.find((d) => d.slots.some((x) => x.start === s.start))?.weekday || "";
-        return { text: `${wd} ${s.time}`, data: `trs:${o}:${all ? 1 : 0}:${packSlot(s.start)}` };
-      })
+      f.slots.slice(i, i + 3).map((s) => ({
+        text: label.get(s.start) || s.time,
+        data: `trs:${o}:${all ? 1 : 0}:${packSlot(s.start)}`,
+      }))
     );
   }
   const nav: TgButton[] = [];
   if (o > 0) nav.push({ text: "◀️ Раньше", data: `trw:${o - 1}:${all ? 1 : 0}` });
   // Переключатель режима нужен, только когда есть что переключать.
   if (all || !f.fellBack) {
-    nav.push({
-      text: all ? "★ Рекомендуемые" : "Все свободные",
-      data: `trw:${o}:${all ? 0 : 1}`,
-    });
+    nav.push({ text: all ? "★ Рекомендуемые" : "Все свободные", data: `trw:${o}:${all ? 0 : 1}` });
   }
   if (o < MAX_OFFSET) nav.push({ text: "Дальше ▶️", data: `trw:${o + 1}:${all ? 1 : 0}` });
   rows.push(nav);
@@ -115,32 +118,17 @@ export async function pickTrialSlot(
   const [o, a, packed] = data.split(":");
   const start = unpackSlot(packed || "");
   if (!start) return "Время не распознано — откройте 🎯 Пробное заново";
+  const ctx: TrialCtx = { start, o: Number(o) || 0, a: a === "1" };
   const id = await emit(
     chatId,
     messageId,
     `🎯 <b>Пробное · ${escapeHtml(whenLabel(start))}</b>\n\n` +
       `Кто придёт? Имя и предмет одной строкой, например <code>Маша ОГЭ</code>.\n` +
       `Можно добавить Telegram: <code>Маша ОГЭ @masha</code>.`,
-    inlineKeyboard([[{ text: "⬅️ К окнам", data: `trw:${Number(o) || 0}:${a === "1" ? 1 : 0}` }]])
+    inlineKeyboard([[backToWindows(ctx.o, ctx.a)]])
   );
-  await setState(
-    String(chatId),
-    "trial.who",
-    JSON.stringify({ start, o: Number(o) || 0, a: a === "1" }),
-    id ?? undefined
-  );
+  await setState(String(chatId), "trial.who", JSON.stringify(ctx), id ?? undefined);
   return null;
-}
-
-type TrialCtx = { start: string; o: number; a: boolean; name?: string; tg?: string };
-
-function parseCtx(raw: string): TrialCtx | null {
-  try {
-    const c = JSON.parse(raw);
-    return c && typeof c.start === "string" ? c : null;
-  } catch {
-    return null;
-  }
 }
 
 // Ввод на шагах пробного. Возвращает true, если обработал.
@@ -162,32 +150,32 @@ export async function applyTrialInput(
         promptId,
         `🎯 <b>Пробное · ${escapeHtml(whenLabel(ctx.start))}</b>\n\n` +
           `Не вижу имени. Пришлите, например, <code>Маша ОГЭ</code>.`,
-        inlineKeyboard([[{ text: "⬅️ К окнам", data: `trw:${ctx.o}:${ctx.a ? 1 : 0}` }]])
+        inlineKeyboard([[backToWindows(ctx.o, ctx.a)]])
       );
       return true;
     }
-    if (!p.subject) {
-      await askSubject(chatId, promptId, { ...ctx, name: p.name, tg: p.tg });
-      return true;
-    }
-    await finishBooking(chatId, promptId, { ...ctx, name: p.name, tg: p.tg }, p.subject);
+    const next = { ...ctx, name: p.name, tg: p.tg };
+    if (!p.subject) await askSubject(chatId, promptId, next);
+    else await finishBooking(chatId, promptId, { ...next, subject: p.subject });
     return true;
   }
 
-  // Предмет не распознали и показали кнопки — но его можно и написать словами
-  // («Робототехника»): тогда берём текст как есть.
+  // Предмет не распознали и показали кнопки — но его можно и написать словами.
+  // «огэ» превращается в «ОГЭ информатика», как и в первой строке, — иначе вышел
+  // бы второй ученик с тем же именем.
   if (action === "trial.subj" && ctx.name) {
-    if (!value) return true;
-    await finishBooking(chatId, promptId, ctx, value);
+    if (value) await finishBooking(chatId, promptId, { ...ctx, subject: normalizeSubject(value) });
     return true;
   }
   return false;
 }
 
 async function askSubject(chatId: number | string, promptId: number | null, ctx: TrialCtx) {
-  const subjects = SUBJECTS.filter((s) => s !== "Другое");
-  const rows: TgButton[][] = subjects.map((s, i) => [{ text: s, data: `trsub:${i}` }]);
-  rows.push([{ text: "⬅️ К окнам", data: `trw:${ctx.o}:${ctx.a ? 1 : 0}` }]);
+  // Кнопка предмета несёт время своей записи: нажатие на старом экране (другая
+  // запись успела начаться) распознаётся как устаревшее, а не записывает не того.
+  const slot = packSlot(ctx.start);
+  const rows: TgButton[][] = SUBJECT_BUTTONS.map((s, i) => [{ text: s, data: `trsub:${i}:${slot}` }]);
+  rows.push([backToWindows(ctx.o, ctx.a)]);
   const id = await emit(
     chatId,
     promptId,
@@ -198,17 +186,32 @@ async function askSubject(chatId: number | string, promptId: number | null, ctx:
   await setState(String(chatId), "trial.subj", JSON.stringify(ctx), id ?? undefined);
 }
 
-// Предмет выбран кнопкой.
+// Предмет выбран кнопкой («<index>:<packed slot>»).
 export async function chooseTrialSubject(
   chatId: number | string,
   messageId: number | null,
-  index: number
+  data: string
 ): Promise<string | null> {
+  const [i, slot] = data.split(":");
   const st = await getState(String(chatId));
   const ctx = st?.action === "trial.subj" ? parseCtx(st.targetId) : null;
-  const subject = SUBJECTS.filter((s) => s !== "Другое")[index];
-  if (!ctx?.name || !subject) return "Выбор устарел — откройте 🎯 Пробное заново";
-  await finishBooking(chatId, messageId, ctx, subject);
+  const subject = SUBJECT_BUTTONS[Number(i)];
+  if (!ctx?.name || !subject || unpackSlot(slot || "") !== ctx.start) {
+    return "Этот выбор устарел — откройте 🎯 Пробное заново";
+  }
+  await finishBooking(chatId, messageId, { ...ctx, subject });
+  return null;
+}
+
+// «Такой ученик уже есть»: записать ему разовое занятие или вернуться к вводу.
+export async function confirmExistingTrial(
+  chatId: number | string,
+  messageId: number | null
+): Promise<string | null> {
+  const st = await getState(String(chatId));
+  const ctx = st?.action === "trial.exists" ? parseCtx(st.targetId) : null;
+  if (!ctx?.name || !ctx.subject) return "Этот выбор устарел — откройте 🎯 Пробное заново";
+  await finishBooking(chatId, messageId, ctx, true);
   return null;
 }
 
@@ -216,16 +219,46 @@ async function finishBooking(
   chatId: number | string,
   promptId: number | null,
   ctx: TrialCtx,
-  subject: string
+  toExisting = false
 ): Promise<void> {
   await clearState(String(chatId));
-  const r = await bookTrialByTeacher({ startIso: ctx.start, name: ctx.name || "", subject, tg: ctx.tg });
+  let r;
+  try {
+    r = await bookTrialByTeacher({
+      startIso: ctx.start,
+      name: ctx.name || "",
+      subject: ctx.subject || "",
+      tg: ctx.tg,
+      toExisting,
+    });
+  } catch (e) {
+    // Сбой базы или календаря: экран не должен застыть на «Кто придёт?».
+    console.error("trial: booking failed", e);
+    r = { ok: false as const, code: "error" as const, reason: "сбой — попробуйте ещё раз" };
+  }
+
+  if (!r.ok && r.code === "exists") {
+    const id = await emit(
+      chatId,
+      promptId,
+      `🎯 <b>Пробное · ${escapeHtml(whenLabel(ctx.start))}</b>\n\n` +
+        `🧑‍🎓 ${escapeHtml(r.reason)}.\n` +
+        `Записать ему разовое занятие на это время? Если это другой ученик — допишите фамилию.`,
+      inlineKeyboard([
+        [{ text: "✅ Записать ему", data: "trex" }],
+        [{ text: "✏️ Другой ученик", data: `trs:${ctx.o}:${ctx.a ? 1 : 0}:${packSlot(ctx.start)}` }],
+        [backToWindows(ctx.o, ctx.a)],
+      ])
+    );
+    await setState(String(chatId), "trial.exists", JSON.stringify(ctx), id ?? undefined);
+    return;
+  }
   if (!r.ok) {
     await emit(
       chatId,
       promptId,
-      `⚠️ <b>Не записано:</b> ${escapeHtml(r.reason)}\n${escapeHtml(whenLabel(ctx.start))}\n\nВыберите другое время.`,
-      inlineKeyboard([[{ text: "🎯 К окнам", data: `trw:${ctx.o}:${ctx.a ? 1 : 0}` }]])
+      `⚠️ <b>Не записано:</b> ${escapeHtml(r.reason)}\n${escapeHtml(whenLabel(ctx.start))}`,
+      inlineKeyboard([[backToWindows(ctx.o, ctx.a)]])
     );
     return;
   }
@@ -235,24 +268,25 @@ async function finishBooking(
   const base = siteBaseUrl();
   if (base) {
     try {
-      link = `${base}/z/${await getOrCreateStudentLinkCode(r.studentId, true)}`;
+      link = `${base}/z/${await getOrCreateStudentLinkCode(r.studentId, r.trial)}`;
     } catch (e) {
       console.error("trial: link failed", e);
     }
   }
-  const rows: TgButton[][] = [];
   const undo = `trundo:${r.eventId}:${packUuid(r.studentId)}`;
-  rows.push([
-    { text: "🧑‍🎓 Карточка", data: `stu:${r.studentId}` },
-    // Слишком длинный id события (не наш формат) — кнопку отмены не показываем,
-    // иначе Telegram отверг бы весь экран (BUTTON_DATA_INVALID).
-    ...(Buffer.byteLength(undo) <= CALLBACK_LIMIT ? [{ text: "↩️ Отменить запись", data: undo }] : []),
-  ]);
-  rows.push([{ text: "🎯 Ещё пробное", data: "trw:0:0" }]);
+  const rows: TgButton[][] = [
+    [
+      { text: "🧑‍🎓 Карточка", data: `stu:${r.studentId}` },
+      // Слишком длинный id события (не наш формат) — кнопку отмены не показываем,
+      // иначе Telegram отверг бы весь экран (BUTTON_DATA_INVALID).
+      ...(Buffer.byteLength(undo) <= CALLBACK_LIMIT ? [{ text: "↩️ Отменить запись", data: undo }] : []),
+    ],
+    [{ text: "🎯 Ещё пробное", data: "trw:0:0" }],
+  ];
   await emit(
     chatId,
     promptId,
-    `✅ <b>Пробное записано</b>\n` +
+    `✅ <b>${r.trial ? "Пробное записано" : "Занятие записано"}</b>\n` +
       `🧑‍🎓 ${escapeHtml(r.name)} · ${escapeHtml(r.subject)}\n` +
       `🕒 ${escapeHtml(whenLabel(r.start))}` +
       (link
@@ -264,21 +298,24 @@ async function finishBooking(
   await refreshPanel().catch((e) => console.error("trial: panel refresh failed", e));
 }
 
-// «↩️ Отменить запись» на экране итога.
+// «↩️ Отменить запись» на экране итога. Возвращает текст всплывающего ответа.
 export async function undoTrialBot(
   chatId: number | string,
   messageId: number | null,
   data: string // «<eventId>:<packedStudentId>»
 ): Promise<string> {
   const idx = data.lastIndexOf(":");
-  const eventId = data.slice(0, idx);
-  const studentId = unpackUuid(data.slice(idx + 1));
+  const eventId = idx > 0 ? data.slice(0, idx) : "";
+  const studentId = idx > 0 ? unpackUuid(data.slice(idx + 1)) : "";
   if (!eventId || !studentId) return "Не удалось разобрать запись";
-  const { removedStudent } = await undoTrial(eventId, studentId);
+  const r = await undoTrial(eventId, studentId);
+  // Отказ (занятие уже началось, календарь не ответил) — экран итога не трогаем:
+  // запись по-прежнему в силе, и это должно оставаться видно.
+  if (!r.ok) return r.reason;
   await emit(
     chatId,
     messageId,
-    `↩️ <b>Запись отменена</b>${removedStudent ? " · ученик удалён" : ""}`,
+    `↩️ <b>Запись отменена</b>${r.removedStudent ? " · ученик удалён" : ""}`,
     inlineKeyboard([[{ text: "🎯 К окнам", data: "trw:0:0" }]])
   );
   await refreshPanel().catch((e) => console.error("trial undo: panel refresh failed", e));

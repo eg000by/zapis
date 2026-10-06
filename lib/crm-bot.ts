@@ -44,6 +44,7 @@ import {
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { applyGroupInput } from "./group-bot";
+import { emit } from "./screen";
 import { applyTrialInput, showTrialWindows } from "./trial-bot";
 import { getGroup } from "./groups";
 import { ensureAutoInvoices } from "./autobill";
@@ -80,18 +81,6 @@ const PAY_STATUS: Record<string, string> = {
 // поэтому у приглашений к вводу показываем инлайн-«Отмена» (callback "cancel").
 const cancelKb = () => inlineKeyboard([[{ text: "✖️ Отмена", data: "cancel" }]]);
 
-// Отправляет новое сообщение (messageId=null) либо редактирует существующее.
-// Экран: правим уже отправленное сообщение, а не шлём новое — переписка не растёт.
-// Если править нечего (сообщение удалено или слишком старое), отправляем новое.
-async function emit(
-  chatId: number | string,
-  messageId: number | null,
-  text: string,
-  keyboard?: unknown
-): Promise<void> {
-  if (messageId != null && (await editMessageText(chatId, messageId, text, keyboard))) return;
-  await sendOwner(text, keyboard);
-}
 
 // Список учеников — сеткой по STUDENT_COLS имени в ряд, по алфавиту. По одному
 // в ряд («Имя · Предмет») он вырастал за экран телефона уже на полутора десятках

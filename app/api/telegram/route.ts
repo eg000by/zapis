@@ -23,7 +23,13 @@ import {
   MENU_GROUPS,
   MENU_TRIAL,
 } from "@/lib/telegram";
-import { chooseTrialSubject, pickTrialSlot, showTrialWindows, undoTrialBot } from "@/lib/trial-bot";
+import {
+  chooseTrialSubject,
+  confirmExistingTrial,
+  pickTrialSlot,
+  showTrialWindows,
+  undoTrialBot,
+} from "@/lib/trial-bot";
 import { setLessonStatusByEvent, updateLessonByEvent } from "@/lib/lessons";
 import { refreshPanel, showToday } from "@/lib/panel";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
@@ -189,7 +195,12 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     return ok();
   }
   if (data.startsWith("trsub:")) {
-    const err = await chooseTrialSubject(chatId, messageId, Number(data.slice(6)));
+    const err = await chooseTrialSubject(chatId, messageId, data.slice(6));
+    await answerCallback(cq.id, err || undefined);
+    return ok();
+  }
+  if (data === "trex") {
+    const err = await confirmExistingTrial(chatId, messageId);
     await answerCallback(cq.id, err || undefined);
     return ok();
   }
