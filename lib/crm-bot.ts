@@ -7,6 +7,8 @@ import {
   inlineKeyboard,
   sendOwner,
   escapeHtml,
+  packUuid,
+  unpackUuid,
   type TgButton,
 } from "./telegram";
 import {
@@ -40,7 +42,9 @@ import {
   outstandingPayments,
   setPayLink,
   setPaymentStatus,
+  settleStudentDebts,
   summarizeOutstanding,
+  unsettleStudentDebts,
 } from "./payments";
 import { markPastLessonsFree, recolorStudent } from "./coloring";
 import { applyGroupInput } from "./group-bot";
@@ -288,13 +292,20 @@ export async function showWeekLoad(
 
 // Долги одним экраном: кто, сколько и как давно. Долгом считаются только счета за
 // проведённые занятия и ручные — аванс и предложенный пакет сюда не идут.
+// У каждого должника — «✅ Оплатил»: вечером оплаты отмечаются подряд прямо отсюда,
+// без захода в карточку. notice — строка итога сверху и кнопка отмены промаха.
 export async function showDebtors(
   chatId: number | string,
-  messageId: number | null
+  messageId: number | null,
+  notice?: { text: string; undo?: TgButton }
 ): Promise<void> {
   const rows = await listDebtors();
   const lines = ["🧾 <b>Долги</b>"];
   const kb: TgButton[][] = [];
+  if (notice) {
+    lines.push(notice.text);
+    if (notice.undo) kb.push([notice.undo]);
+  }
   if (!rows.length) {
     lines.push("\nДолгов нет 🎉");
   } else {
@@ -311,13 +322,117 @@ export async function showDebtors(
           (r.active ? "" : " · 🗄 архив")
       );
     }
+    lines.push("\n<i>✅ — ученик оплатил весь долг. Имя — открыть карточку.</i>");
     // Кнопки — на первых 10 должников (Telegram не любит длинные клавиатуры).
+    // Сумма в кнопке оплаты — та, что видна на экране: изменится — гасить не будем.
     for (const r of rows.slice(0, 10)) {
-      kb.push([{ text: `${r.name} · ${rub(r.debtKopecks)} ₽`, data: `stu:${r.studentId}` }]);
+      kb.push([
+        { text: `${r.name} · ${rub(r.debtKopecks)} ₽`, data: `stu:${r.studentId}` },
+        { text: "✅ Оплатил", data: `dpay:${packUuid(r.studentId)}:${r.debtKopecks.toString(36)}` },
+      ]);
     }
   }
   kb.push([{ text: "⬅️ Ученики", data: "stus" }]);
   await emit(chatId, messageId, lines.join("\n"), inlineKeyboard(kb));
+}
+
+export async function recolorAfterPayment(studentId: string): Promise<void> {
+  try {
+    await recolorStudent(studentId);
+  } catch (e) {
+    console.error("bot payment recolor failed", studentId, e);
+  }
+}
+
+// Подсказка «задай ставку» нужна только индивидуальному ученику: пробного и члена
+// группы recolorStudent не красит намеренно (группа платит по ставке группы).
+function lacksRate(s: { rateKopecks: number; trial: boolean; groupId: string | null } | null): boolean {
+  return !!s && s.rateKopecks <= 0 && !s.trial && !s.groupId;
+}
+
+// Отмена промаха живёт ограниченно: старая кнопка, нажатая через неделю, вернула бы
+// в долг оплату, по которой чек в «Мой налог» давно выбит.
+export const DEBT_UNDO_WINDOW_MS = 12 * 3600_000;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Разбор «<packUuid>:<число base36>» из callback_data. Кривые данные — null, а не
+// запрос в БД с не-uuid (Postgres бросил бы, и кнопка крутилась бы без ответа).
+function parseDebtArg(arg: string): { packed: string; studentId: string; n: number } | null {
+  const [packed = "", raw = ""] = arg.split(":");
+  const studentId = unpackUuid(packed);
+  const n = /^[0-9a-z]{1,12}$/.test(raw) ? parseInt(raw, 36) : NaN;
+  if (!UUID_RE.test(studentId) || !Number.isFinite(n)) return null;
+  return { packed, studentId, n };
+}
+
+// Результат тапа в «Долгах»: текст всплывашки и чей календарь перекрасить. Перекраска
+// (десятки вызовов Google на длинной серии) — ПОСЛЕ ответа на тап: иначе кнопка
+// крутится секундами, хочется тапнуть ещё, и параллельные тапы перетирают экран.
+export interface DebtTapResult {
+  toast: string;
+  recolor: string | null;
+}
+
+// «✅ Оплатил» в «Долгах»: гасит весь долг ученика и перерисовывает экран на месте.
+// Отдельных сообщений не шлём — их было бы по одному на каждого отмеченного.
+export async function settleDebtBot(
+  chatId: number | string,
+  messageId: number | null,
+  arg: string
+): Promise<DebtTapResult> {
+  const parsed = parseDebtArg(arg);
+  if (!parsed) {
+    await showDebtors(chatId, messageId);
+    return { toast: "Кнопка устарела — список обновлён", recolor: null };
+  }
+  const { packed, studentId, n: expected } = parsed;
+  const at = new Date();
+  const res = await settleStudentDebts(studentId, expected, at);
+  if (!res.ok) {
+    await showDebtors(chatId, messageId);
+    return {
+      toast:
+        res.reason === "changed" ? "Долг изменился — проверь сумму и нажми ещё раз" : "Уже отмечено",
+      recolor: null,
+    };
+  }
+  const s = await getStudent(studentId);
+  const name = s?.name ?? "Ученик";
+  await showDebtors(chatId, messageId, {
+    text: `✅ ${escapeHtml(name)}: оплачено ${rub(res.kopecks)} ₽`,
+    undo: { text: `↩️ Отменить: ${name}`, data: `dund:${packed}:${at.getTime().toString(36)}` },
+  });
+  return {
+    toast: lacksRate(s)
+      ? "Оплата отмечена. Цвета не расставлены: нет ставки ₽/час"
+      : `✅ ${name} — ${rub(res.kopecks)} ₽`,
+    recolor: studentId,
+  };
+}
+
+// «↩️ Отменить» после промаха: возвращает долг, погашенный тем же тапом, — в пределах
+// DEBT_UNDO_WINDOW_MS. Позже поправить можно только из карточки ученика.
+export async function unsettleDebtBot(
+  chatId: number | string,
+  messageId: number | null,
+  arg: string,
+  now = Date.now()
+): Promise<DebtTapResult> {
+  const parsed = parseDebtArg(arg);
+  if (parsed && now - parsed.n > DEBT_UNDO_WINDOW_MS) {
+    return { toast: "Отменить уже нельзя — прошло больше 12 часов. Поправь в карточке ученика.", recolor: null };
+  }
+  const n = parsed ? await unsettleStudentDebts(parsed.studentId, new Date(parsed.n)) : 0;
+  if (!parsed || !n) {
+    await showDebtors(chatId, messageId);
+    return { toast: "Уже отменено", recolor: null };
+  }
+  const s = await getStudent(parsed.studentId);
+  await showDebtors(chatId, messageId, {
+    text: `↩️ ${escapeHtml(s?.name ?? "Ученик")}: долг возвращён`,
+  });
+  return { toast: "Долг возвращён", recolor: parsed.studentId };
 }
 
 // Продление серии занятий из кнопки в напоминании «занятия скоро закончатся».
@@ -595,13 +710,9 @@ export async function markPaymentPaid(paymentId: string): Promise<string | null>
   if (!p) return null;
   await setPaymentStatus(paymentId, "paid");
   const s = await getStudent(p.studentId);
-  try {
-    await recolorStudent(p.studentId);
-  } catch (e) {
-    console.error("bot markPaid recolor failed", e);
-  }
+  await recolorAfterPayment(p.studentId);
   // Без ставки число оплаченных занятий не посчитать — подскажем.
-  if (s && s.rateKopecks <= 0) {
+  if (lacksRate(s)) {
     await sendOwner(
       "ℹ️ Оплату отметил, но цвета не расставлены: не задана ставка ₽/час. Задайте её на /admin, чтобы считать оплаченные занятия."
     );
@@ -638,11 +749,7 @@ export async function deletePaymentBot(paymentId: string): Promise<string | null
   const p = await getPayment(paymentId);
   if (!p) return null;
   await deletePayment(paymentId);
-  try {
-    await recolorStudent(p.studentId);
-  } catch (e) {
-    console.error("bot delete payment recolor failed", e);
-  }
+  await recolorAfterPayment(p.studentId);
   return p.studentId;
 }
 
