@@ -5,7 +5,7 @@
 // (подтверждение/откат пропуска), «Не прошло» (серый, не тарифицируется), «📝» (заметка).
 import { listDayOccurrences } from "./google";
 import { MISSED_COLOR_ID, SLOT_MINUTES, SLOT_STEP_MINUTES } from "./config";
-import { pingSent, recordPing } from "./pings";
+import { claimOnce, releaseClaim } from "./pings";
 import { escapeHtml, inlineKeyboard, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
 import { ensureAutoInvoices } from "./autobill";
@@ -29,10 +29,14 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
   // за прогон (ensureAutoInvoices идемпотентен и считает весь баланс целиком).
   const toBill = new Map<string, string>();
   for (const o of occ) {
+    let claimed = false;
     try {
       if (blockEndMs(o.start, o.hours) > now.getTime()) continue; // ещё идёт или впереди
       if (o.colorId === MISSED_COLOR_ID) continue; // уже помечено пропуском
-      if (await pingSent(o.instanceId)) continue;
+      // Атомарно: пульс дёргают два планировщика, и одновременные прогоны иначе
+      // спросили бы про одно занятие дважды.
+      if (!(await claimOnce(o.instanceId))) continue;
+      claimed = true;
 
       // Групповое занятие касается всех участников: счёт после занятия должен
       // появиться у каждого, а не потеряться из-за пустого studentId. У обычного
@@ -52,7 +56,6 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
             GROUP_QUESTION,
           inlineKeyboard(attendanceKeyboard(members, o.instanceId))
         );
-        await recordPing(o.instanceId);
         sent++;
         continue;
       }
@@ -63,10 +66,11 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
         )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n${REPORT_QUESTION}`,
         inlineKeyboard(reportKeyboard(o.instanceId))
       );
-      await recordPing(o.instanceId);
       sent++;
     } catch (e) {
       console.error("pulse: occurrence failed", o.instanceId, e);
+      // Не дошло — снимаем отметку, следующий прогон спросит снова.
+      if (claimed) await releaseClaim(o.instanceId).catch(() => {});
     }
   }
 

@@ -13,7 +13,7 @@ import { contactKey, encodeToken } from "@/lib/link";
 import { answerCallback, editMessageText, notifyRequest, sendOwner, sendTo } from "@/lib/telegram";
 import { markLessonMissed, recolorStudent, unmarkLessonMissed } from "@/lib/coloring";
 import { setLessonStatusByEvent } from "@/lib/lessons";
-import { getStudent, updateStudent } from "@/lib/students";
+import { clearTgChat, getStudent, updateStudent } from "@/lib/students";
 import { notifyStudentById } from "@/lib/notify";
 
 vi.mock("googleapis", async () => {
@@ -45,6 +45,7 @@ vi.mock("@/lib/students", () => ({
   getStudentByContactKey: vi.fn(async () => null),
   getStudentByTgChatId: vi.fn(async () => null),
   updateStudent: vi.fn(async () => {}),
+  clearTgChat: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/notify", () => ({
   notifyStudent: vi.fn(async () => {}),
@@ -912,6 +913,21 @@ describe("/api/my — записи и плашка «ближайшее заня
     expect(my.paidHistory).toEqual([]);
   });
 
+  it("кнопка уведомлений — уже с первой заявкой: иначе «запись подтверждена» не дошла бы", async () => {
+    await post("book", { token: TOKEN(), start: TUE_9 });
+    const { getStudentByContactKey } = await import("@/lib/students");
+    vi.mocked(getStudentByContactKey).mockResolvedValueOnce({
+      id: "stu-1",
+      name: "Тест Тестов",
+      active: true,
+      tgChatId: "",
+    } as any);
+
+    const my = await getMy(TOKEN());
+    expect(my.events[0].status).toBe("pending");
+    expect(my.tgNotify).toEqual({ url: "https://t.me/test_bot?start=stu-1", connected: false });
+  });
+
   it("цена занятия отдаётся ДО подтверждения — её показываем в окне записи", async () => {
     // Гейт закрывает «занятийные» данные (счета, Телемост, баланс), но не прайс:
     // ученик должен видеть стоимость до того, как записался.
@@ -1113,7 +1129,8 @@ describe("уведомления ученику в Telegram", () => {
     } as any);
 
     await tgMessage("/stop", 999000111);
-    expect(updateStudent).toHaveBeenCalledWith("stu-9", { tgChatId: "" });
+    // По чату, а не по одному ученику: на этом Telegram могут висеть и братья-сёстры.
+    expect(clearTgChat).toHaveBeenCalledWith("999000111");
     expect(sendTo).toHaveBeenCalledWith(
       999000111,
       expect.stringContaining("Уведомления отключены")
@@ -1125,7 +1142,7 @@ describe("уведомления ученику в Telegram", () => {
     vi.mocked(getStudentByTgChatId).mockResolvedValueOnce(null);
 
     await tgMessage("/stop", 999000111);
-    expect(updateStudent).not.toHaveBeenCalled();
+    expect(clearTgChat).not.toHaveBeenCalled();
     expect(sendTo).toHaveBeenCalledWith(999000111, expect.stringContaining("не подключены"));
   });
 

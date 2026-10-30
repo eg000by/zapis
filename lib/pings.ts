@@ -45,3 +45,9 @@ export async function claimOnce(key: string): Promise<boolean> {
 export async function releaseClaim(key: string): Promise<void> {
   await db().delete(lessonPings).where(eq(lessonPings.instanceId, key));
 }
+
+// Ученик нажал в кабинете «Не смогу прийти» на это занятие (метку ставит
+// /api/absence). Напоминать ему и звать подключаться после этого — странно.
+export function absenceKey(studentId: string, start: Date): string {
+  return `skip:${studentId}:${start.toISOString()}`;
+}

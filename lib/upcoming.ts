@@ -5,14 +5,15 @@
 // а не по точному моменту: занятие попадает в уведомление, если начинается в ближайшие
 // UPCOMING_LEAD_MINUTES и по нему ещё не писали. Дедупликация — та же таблица
 // lesson_pings с префиксом soon: (вопрос «как прошло» пишется по чистому instanceId,
-// так что ключи не сталкиваются). Пропущенный прогон не рассылает задним числом:
+// так что ключи не сталкиваются; отметка ставится атомарно ДО отправки). Пропущенный
+// прогон не рассылает задним числом:
 // уже начавшееся занятие в окно не входит.
 import { listDayOccurrences } from "./google";
 import { getStudent } from "./students";
 import { activeMembers, getGroup } from "./groups";
 import type { Student } from "./schema";
 import { listStudentLessons } from "./lessons";
-import { pingSent, recordPing } from "./pings";
+import { absenceKey, claimOnce, pingSent, releaseClaim } from "./pings";
 import { notifyStudent } from "./notify";
 import { escapeHtml, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
@@ -80,11 +81,15 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
 
   let sent = 0;
   for (const o of occ) {
+    const key = `soon:${o.instanceId}`;
+    let claimed = false;
     try {
       if (!o.studentId && !o.groupId) continue;
       if (o.colorId === MISSED_COLOR_ID) continue; // помечено пропуском заранее
-      const key = `soon:${o.instanceId}`;
-      if (await pingSent(key)) continue;
+      // Атомарно: пульс дёргают два планировщика, и раздельные «проверил → записал»
+      // пропускали бы одновременные прогоны оба — каждый со своей копией сообщений.
+      if (!(await claimOnce(key))) continue;
+      claimed = true;
 
       // Групповое занятие касается всех участников: преподавателю пишем один раз,
       // ученикам — каждому. Ссылка на занятие у группы своя, общая.
@@ -117,6 +122,8 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
       const contact = teacherTgUrl();
       for (const m of members) {
         if (!m.tgChatId) continue;
+        // Предупредил «Не смогу прийти» — звать его подключаться незачем.
+        if (await pingSent(absenceKey(m.id, o.start))) continue;
         await notifyStudent(
           m,
           `⏰ <b>Скоро занятие</b>\n\n` +
@@ -127,10 +134,11 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
         );
       }
 
-      await recordPing(key);
       sent++;
     } catch (e) {
       console.error("upcoming: occurrence failed", o.instanceId, e);
+      // Не дошло — снимаем отметку, следующий прогон попробует снова.
+      if (claimed) await releaseClaim(key).catch(() => {});
     }
   }
   return { sent };

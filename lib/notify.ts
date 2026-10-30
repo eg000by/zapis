@@ -2,20 +2,25 @@
 // поэтому ученик сам подключается по deep-link t.me/<бот>?start=<studentId> из кабинета —
 // /start привязывает его chat_id к строке ученика (students.tg_chat_id). Все отправки
 // best-effort: недоступность Telegram не должна ломать основной сценарий.
-import { pinChatMessage, sendTo } from "./telegram";
-import { getStudent } from "./students";
+import { isChatGone, pinChatMessage, sendMessageRaw, sendTo } from "./telegram";
+import { clearTgChat, getStudent } from "./students";
 import { getOrCreateStudentLinkCode } from "./shortlink";
 import { siteBaseUrl, teacherTgUrl } from "./config";
 import type { Student } from "./schema";
 
 // Шлёт ученику сообщение, если он подключил уведомления. Ошибки глотаются (логируются).
+//
+// Заблокировал бота — отвязываем чат. Иначе кабинет вечно показывал бы «уведомления
+// подключены», а кнопка переподключения так и не появилась бы: Telegram отказывает
+// молча, ученик об этом не узнает.
 export async function notifyStudent(
   student: Pick<Student, "tgChatId"> | null,
   text: string
 ): Promise<void> {
   if (!student?.tgChatId) return;
   try {
-    await sendTo(student.tgChatId, text);
+    const data = await sendMessageRaw(student.tgChatId, text);
+    if (isChatGone(data)) await clearTgChat(student.tgChatId);
   } catch (e) {
     console.error("notifyStudent failed", e);
   }

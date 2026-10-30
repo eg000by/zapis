@@ -156,14 +156,32 @@ export async function sendTo(
   text: string,
   replyMarkup?: unknown
 ): Promise<{ message_id?: number } | null> {
-  const data = await api("sendMessage", {
+  const data = await sendMessageRaw(chatId, text, replyMarkup);
+  return data?.result ?? null;
+}
+
+// То же, но с сырым ответом Telegram: по нему видно, почему не доставилось.
+export async function sendMessageRaw(
+  chatId: number | string,
+  text: string,
+  replyMarkup?: unknown
+): Promise<any> {
+  return api("sendMessage", {
     chat_id: chatId,
     text: clampMessage(text),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return data?.result ?? null;
+}
+
+// В этот чат писать больше некуда: человек заблокировал бота или удалил аккаунт
+// (403), либо такого чата нет вовсе. Повтор тут не поможет — в отличие от сетевого
+// сбоя или 429, которые проходят сами.
+export function isChatGone(data: any): boolean {
+  if (!data || data.ok) return false;
+  if (data.error_code === 403) return true;
+  return /chat not found/i.test(String(data.description || ""));
 }
 
 // Закрепляет сообщение в чате (в личном чате с ботом права не нужны).
@@ -192,18 +210,22 @@ export async function sendOwner(
 
 // Username бота — для deep-link t.me/<бот>?start=…. Явный TELEGRAM_BOT_USERNAME из env
 // либо getMe (кэшируется на жизнь лямбды). Пустая строка — узнать не удалось.
+//
+// Кэшируется только удача: один сбой getMe раньше запоминался пустой строкой, и
+// кнопка подключения уведомлений пропадала из кабинета до холодного старта лямбды.
 let cachedUsername: string | null = null;
 export async function botUsername(): Promise<string> {
   const explicit = (process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
   if (explicit) return explicit;
-  if (cachedUsername != null) return cachedUsername;
+  if (cachedUsername) return cachedUsername;
   try {
     const data = await api("getMe", {});
-    cachedUsername = String(data?.result?.username || "");
+    const name = String(data?.result?.username || "");
+    if (name) cachedUsername = name;
+    return name;
   } catch {
-    cachedUsername = "";
+    return "";
   }
-  return cachedUsername ?? "";
 }
 
 // ── Постоянное меню ─────────────────────────────────────────────────────────

@@ -218,9 +218,20 @@ test("без подтверждённых занятий: Телемост, па
   await expect(page.locator(".pay-card")).toHaveCount(0);
   await expect(page.getByText("К оплате")).toHaveCount(0);
   await expect(page.getByText("Ближайшее занятие")).toHaveCount(0);
-  // Подключение уведомлений — тоже «занятийное»: пока занятие не подтверждено,
-  // предлагать ученику подписку не на что.
-  await expect(page.locator("a.panel-tg")).toHaveCount(0);
+});
+
+test("уведомления: кнопка есть уже у заявки — подтверждение придёт в Telegram", async ({ page }) => {
+  const my = {
+    ...MY_FULL,
+    events: MY_FULL.events.map((e: { status: string }) => ({ ...e, status: "pending" })),
+    tgNotify: { url: "https://t.me/zapis_test_bot?start=stu-1", connected: false },
+  };
+  await mockApi(page, { my });
+  await page.goto(tokenUrl());
+
+  const btn = page.locator("a.panel-tg");
+  await expect(btn).toContainText("Подключить уведомления в Telegram");
+  await expect(btn).toContainText("Сообщим, как только запись подтвердят");
 });
 
 test("уведомления в Telegram: кнопка ведёт на бота с deep-link ученика", async ({ page }) => {

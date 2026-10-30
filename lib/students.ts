@@ -91,6 +91,13 @@ export async function getStudentByTgChatId(chatId: string): Promise<Student | nu
   return row ?? null;
 }
 
+// Чат стал недоступен (бот заблокирован) — отвязываем его от всех учеников сразу:
+// один Telegram на нескольких детей — обычное дело, а писать некуда ни про кого.
+export async function clearTgChat(chatId: string): Promise<void> {
+  if (!chatId) return;
+  await db().update(students).set({ tgChatId: "" }).where(eq(students.tgChatId, chatId));
+}
+
 export async function updateStudent(
   id: string,
   fields: Partial<

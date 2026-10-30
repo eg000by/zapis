@@ -15,7 +15,7 @@ import { listDayOccurrences, type DayOccurrence } from "./google";
 import { getStudent } from "./students";
 import { activeMembers } from "./groups";
 import { notifyStudent } from "./notify";
-import { pingSent, recordPing } from "./pings";
+import { absenceKey, claimOnce, pingSent, releaseClaim } from "./pings";
 import { MSK_OFFSET_MINUTES, MISSED_COLOR_ID } from "./config";
 
 export const EVENING_HOUR_MSK = 19; // накануне — о завтрашних утренних занятиях
@@ -94,6 +94,7 @@ export async function sendLessonReminders(now: Date): Promise<{ reminders: numbe
         ? [o.studentId]
         : [];
     for (const studentId of memberIds) {
+      if (await pingSent(absenceKey(studentId, o.start))) continue; // «Не смогу прийти»
       const key = `${studentId}:${at.toISOString()}`;
       const g = groups.get(key) || { studentId, at, items: [] };
       g.items.push(o);
@@ -103,20 +104,28 @@ export async function sendLessonReminders(now: Date): Promise<{ reminders: numbe
 
   let reminders = 0;
   for (const [key, g] of groups) {
+    const pingKey = `rem:${key}`;
+    let claimed = false;
     try {
-      if (await pingSent(`rem:${key}`)) continue;
+      // Сначала ученик, потом отметка: неподключённому отметку не ставим — подключит
+      // уведомления до отсечки, и напоминание всё-таки придёт.
       const s = await getStudent(g.studentId);
       if (!s?.tgChatId) continue;
+      // Атомарно: пульс дёргают два планировщика, и проверка «уже писали?» отдельно
+      // от записи пропускала бы оба прогона, пришедших одновременно, — два сообщения.
+      if (!(await claimOnce(pingKey))) continue;
+      claimed = true;
 
       const times = g.items.map((o) => hmMsk(o.start)).join(", ");
       const first = g.items[0].start;
       const when = dayWord(now, first) || dateMsk(first);
       const word = g.items.length > 1 ? "занятия" : "занятие";
       await notifyStudent(s, `🔔 Напоминание: ${when} ${word} в <b>${times}</b> (МСК).`);
-      await recordPing(`rem:${key}`);
       reminders++;
     } catch (e) {
       console.error("reminder failed", key, e);
+      // Не отправили — снимаем отметку, следующий прогон попробует снова.
+      if (claimed) await releaseClaim(pingKey).catch(() => {});
     }
   }
   return { reminders };

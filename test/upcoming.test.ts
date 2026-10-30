@@ -6,7 +6,7 @@ import { sendUpcomingLessonAlerts, UPCOMING_LEAD_MINUTES } from "@/lib/upcoming"
 import { listDayOccurrences } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { listStudentLessons } from "@/lib/lessons";
-import { pingSent, recordPing } from "@/lib/pings";
+import { claimOnce, pingSent, releaseClaim } from "@/lib/pings";
 import { notifyStudent } from "@/lib/notify";
 import { sendOwner } from "@/lib/telegram";
 
@@ -17,9 +17,11 @@ vi.mock("@/lib/groups", () => ({
   activeMembers: vi.fn(async () => []),
 }));
 vi.mock("@/lib/lessons", () => ({ listStudentLessons: vi.fn(async () => []) }));
-vi.mock("@/lib/pings", () => ({
+vi.mock("@/lib/pings", async (importOriginal) => ({
+  absenceKey: (await importOriginal<typeof import("@/lib/pings")>()).absenceKey,
   pingSent: vi.fn(async () => false),
-  recordPing: vi.fn(async () => {}),
+  claimOnce: vi.fn(async () => true),
+  releaseClaim: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
 vi.mock("@/lib/telegram", () => ({
@@ -61,6 +63,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
   vi.mocked(pingSent).mockResolvedValue(false);
+  vi.mocked(claimOnce).mockResolvedValue(true);
   vi.mocked(getStudent).mockResolvedValue(STUDENT as never);
   vi.mocked(listStudentLessons).mockResolvedValue([]);
 });
@@ -79,7 +82,7 @@ describe("sendUpcomingLessonAlerts", () => {
     expect(t).toContain("Стас");
     expect(t).toContain("https://telemost.yandex.ru/j/777");
     expect(t).toContain("Прошлое занятие (05.07): разбирали словари");
-    expect(recordPing).toHaveBeenCalledWith("soon:ev1_a");
+    expect(claimOnce).toHaveBeenCalledWith("soon:ev1_a");
   });
 
   // Доска — такая же рабочая ссылка, как звонок: без неё занятие не начать, и
@@ -162,7 +165,7 @@ describe("sendUpcomingLessonAlerts", () => {
 
   it("уже предупреждали — второй раз не пишем", async () => {
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(SOON)] as never);
-    vi.mocked(pingSent).mockResolvedValue(true);
+    vi.mocked(claimOnce).mockResolvedValue(false); // отметку уже взял другой прогон
 
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 0 });
     expect(sendOwner).not.toHaveBeenCalled();
@@ -191,6 +194,9 @@ describe("sendUpcomingLessonAlerts", () => {
     vi.mocked(sendOwner).mockRejectedValueOnce(new Error("Telegram недоступен"));
 
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
+    // Отметку упавшего снимаем — следующий прогон попробует снова.
+    expect(releaseClaim).toHaveBeenCalledOnce();
+    expect(releaseClaim).toHaveBeenCalledWith("soon:ev1_a");
   });
 
   it("предупреждаем примерно за час, а не за полдня", async () => {
@@ -237,6 +243,26 @@ describe("sendUpcomingLessonAlerts", () => {
     expect(studentText()).toContain("https://telemost.yandex.ru/j/group");
     // Личного ученика по такому занятию не ищем — его там нет.
     expect(getStudent).not.toHaveBeenCalled();
+  });
+
+  it("участнику, нажавшему «Не смогу прийти», ссылку на подключение не шлём", async () => {
+    const { getGroup, activeMembers } = await import("@/lib/groups");
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ(SOON, { studentId: "", groupId: "grp-1", student: "ОГЭ, суббота" }),
+    ] as never);
+    vi.mocked(getGroup).mockResolvedValue({ id: "grp-1", meetLink: "https://m" } as never);
+    vi.mocked(activeMembers).mockResolvedValue([
+      { id: "s1", name: "Егор", tgChatId: "111" },
+      { id: "s2", name: "Дима", tgChatId: "222" },
+    ] as never);
+    vi.mocked(pingSent).mockImplementation(
+      async (key: string) => key === `skip:s1:${SOON.toISOString()}`
+    );
+
+    expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
+    expect(sendOwner).toHaveBeenCalledOnce(); // преподавателю — как обычно
+    expect(notifyStudent).toHaveBeenCalledOnce();
+    expect(vi.mocked(notifyStudent).mock.calls[0][0]).toMatchObject({ id: "s2" });
   });
 
   it("окно запроса к календарю — ровно на UPCOMING_LEAD_MINUTES вперёд", async () => {

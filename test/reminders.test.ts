@@ -13,15 +13,17 @@ import {
 import { listDayOccurrences } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { notifyStudent } from "@/lib/notify";
-import { pingSent, recordPing } from "@/lib/pings";
+import { claimOnce, pingSent, releaseClaim } from "@/lib/pings";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
 vi.mock("@/lib/groups", () => ({ activeMembers: vi.fn(async () => []) }));
 vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
-vi.mock("@/lib/pings", () => ({
+vi.mock("@/lib/pings", async (importOriginal) => ({
+  absenceKey: (await importOriginal<typeof import("@/lib/pings")>()).absenceKey,
   pingSent: vi.fn(async () => false),
-  recordPing: vi.fn(async () => {}),
+  claimOnce: vi.fn(async () => true),
+  releaseClaim: vi.fn(async () => {}),
 }));
 
 // МСК = UTC+3.
@@ -49,6 +51,7 @@ beforeEach(() => {
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
   vi.mocked(getStudent).mockResolvedValue(STUDENT as never);
   vi.mocked(pingSent).mockResolvedValue(false);
+  vi.mocked(claimOnce).mockResolvedValue(true);
 });
 
 describe("reminderMomentFor — когда напоминать", () => {
@@ -134,11 +137,10 @@ describe("sendLessonReminders", () => {
   it("повторно не напоминаем", async () => {
     const now = msk("2026-07-15T10:01:00");
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(msk("2026-07-15T18:30:00"))] as never);
-    vi.mocked(pingSent).mockResolvedValue(true);
+    vi.mocked(claimOnce).mockResolvedValue(false); // отметку уже взял другой прогон
 
     expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
     expect(notifyStudent).not.toHaveBeenCalled();
-    expect(recordPing).not.toHaveBeenCalled();
   });
 
   it("ученик не подключил уведомления — ничего не шлём", async () => {
@@ -148,6 +150,8 @@ describe("sendLessonReminders", () => {
 
     expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
     expect(notifyStudent).not.toHaveBeenCalled();
+    // Отметку не ставим: подключит до отсечки — напоминание ещё придёт.
+    expect(claimOnce).not.toHaveBeenCalled();
   });
 
   // Групповое занятие — одно событие без studentId: напоминание должно прийти
@@ -169,10 +173,42 @@ describe("sendLessonReminders", () => {
     expect(await sendLessonReminders(now)).toEqual({ reminders: 2 });
     expect(notifyStudent).toHaveBeenCalledTimes(2);
     // Дедупликация — по каждому участнику отдельно.
-    expect(vi.mocked(recordPing).mock.calls.map((c) => c[0])).toEqual([
+    expect(vi.mocked(claimOnce).mock.calls.map((c) => c[0])).toEqual([
       expect.stringContaining("rem:s1:"),
       expect.stringContaining("rem:s2:"),
     ]);
+  });
+
+  it("участник нажал «Не смогу прийти» — ему не напоминаем, остальным напоминаем", async () => {
+    const now = msk("2026-07-15T10:01:00");
+    const start = msk("2026-07-15T18:30:00");
+    const { activeMembers } = await import("@/lib/groups");
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ(start, { studentId: "", groupId: "grp-1", student: "ОГЭ, суббота" }),
+    ] as never);
+    vi.mocked(activeMembers).mockResolvedValue([
+      { id: "s1", name: "Егор" },
+      { id: "s2", name: "Дима" },
+    ] as never);
+    vi.mocked(getStudent).mockImplementation(
+      async (id: string) => ({ ...STUDENT, id, tgChatId: `chat-${id}` }) as never
+    );
+    vi.mocked(pingSent).mockImplementation(
+      async (key: string) => key === `skip:s1:${start.toISOString()}`
+    );
+
+    expect(await sendLessonReminders(now)).toEqual({ reminders: 1 });
+    expect(notifyStudent).toHaveBeenCalledOnce();
+    expect(vi.mocked(notifyStudent).mock.calls[0][0]).toMatchObject({ id: "s2" });
+  });
+
+  it("сбой отправки снимает отметку — следующий прогон попробует снова", async () => {
+    const now = msk("2026-07-15T10:01:00");
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(msk("2026-07-15T18:30:00"))] as never);
+    vi.mocked(notifyStudent).mockRejectedValueOnce(new Error("сеть"));
+
+    expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
+    expect(releaseClaim).toHaveBeenCalledWith(expect.stringContaining("rem:stu-1:"));
   });
 
   it("уже начавшееся и помеченное пропуском занятие не напоминаем", async () => {
