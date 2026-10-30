@@ -180,3 +180,39 @@ describe("listContactMasters", () => {
     expect(got.map((m) => m.id)).toEqual([master.id]);
   });
 });
+
+// Конец серии считается из самого правила, без запросов к Google: пустой ответ API
+// не должен решать, кончилась ли серия.
+describe("truncateRecurrence", () => {
+  const AT = new Date("2026-07-12T09:00:00.000Z");
+  const START = "2026-06-02T06:00:00.000Z";
+
+  it("идущая серия (COUNT) обрезается по UNTIL=at, EXDATE остаются", async () => {
+    const { truncateRecurrence } = await import("@/lib/google");
+    expect(
+      truncateRecurrence(["EXDATE;TZID=Europe/Moscow:20260616T090000", "RRULE:FREQ=WEEKLY;COUNT=26"], START, AT)
+    ).toEqual(["EXDATE;TZID=Europe/Moscow:20260616T090000", "RRULE:FREQ=WEEKLY;UNTIL=20260712T090000Z"]);
+  });
+
+  it("бесконечная серия тоже обрезается", async () => {
+    const { truncateRecurrence } = await import("@/lib/google");
+    expect(truncateRecurrence(["RRULE:FREQ=WEEKLY"], START, AT)).toEqual([
+      "RRULE:FREQ=WEEKLY;UNTIL=20260712T090000Z",
+    ]);
+  });
+
+  it("закончившиеся серии (UNTIL и COUNT в прошлом) не трогаем — иначе бы продлили", async () => {
+    const { truncateRecurrence } = await import("@/lib/google");
+    expect(truncateRecurrence(["RRULE:FREQ=WEEKLY;UNTIL=20260624T000000Z"], START, AT)).toBeNull();
+    // 2 июня + 5 недель = 30 июня — последнее занятие уже было.
+    expect(truncateRecurrence(["RRULE:FREQ=WEEKLY;COUNT=5"], START, AT)).toBeNull();
+    // COUNT=6 с интервалом 2 недели: последнее 11 августа — ещё впереди.
+    expect(truncateRecurrence(["RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=6"], START, AT)).not.toBeNull();
+  });
+
+  it("правило, конец которого посчитать не умеем, не трогаем", async () => {
+    const { truncateRecurrence } = await import("@/lib/google");
+    expect(truncateRecurrence(["RRULE:FREQ=DAILY;COUNT=400"], START, AT)).toBeNull();
+    expect(truncateRecurrence(["RRULE:FREQ=WEEKLY;UNTIL=мусор"], START, AT)).toBeNull();
+  });
+});

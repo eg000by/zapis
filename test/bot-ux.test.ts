@@ -274,6 +274,33 @@ describe("панель дня", () => {
     expect(text.length).toBeLessThan(400);
   });
 
+  it("загруженный день: заметки укорачиваются, чтобы панель влезла в одно сообщение", async () => {
+    vi.setSystemTime(new Date("2026-09-02T02:00:00.000Z"));
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ...occ(10, `Ученик${i}`),
+      instanceId: `ev${i}`,
+      studentId: `stu-${i}`,
+    }));
+    vi.mocked(listDayOccurrences).mockResolvedValue(many as never);
+    vi.mocked(recentLessonNotes).mockResolvedValue(
+      many.map((o) => ({ studentId: o.studentId, start: new Date("2026-08-31T07:00:00.000Z"), note: "з".repeat(300) }))
+    );
+    const { text } = await renderPanel();
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(text).toContain("Ученик29"); // расписание целиком
+  });
+
+  it("эмодзи на границе обрезки не режется пополам", async () => {
+    vi.setSystemTime(new Date("2026-09-02T05:00:00.000Z"));
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(10, "Амина")] as never);
+    vi.mocked(recentLessonNotes).mockResolvedValue([
+      { studentId: "stu-1", start: new Date("2026-08-31T07:00:00.000Z"), note: "😀".repeat(200) },
+    ]);
+    const { text } = await renderPanel();
+    expect(text).toContain(`${"😀".repeat(159)}…`);
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/); // нет «половинок»
+  });
+
   it("обновление правит то же сообщение, а не шлёт новое", async () => {
     vi.mocked(getSetting).mockResolvedValue("500");
     await refreshPanel();
