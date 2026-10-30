@@ -62,13 +62,8 @@ vi.mock("@/lib/coloring", () => ({
   markLessonMissed: vi.fn(async () => ({ found: true, studentId: "stu-1" })),
   unmarkLessonMissed: vi.fn(async () => ({ found: true, studentId: "stu-1" })),
 }));
-vi.mock("@/lib/payments", async (importOriginal) => {
-  // Чистые хелперы вида счёта (package:N) — настоящие, запросов в БД в них нет.
-  const actual = await importOriginal<typeof import("@/lib/payments")>();
+vi.mock("@/lib/payments", () => {
   return {
-    findPackageInvoice: actual.findPackageInvoice,
-    isPackageKind: actual.isPackageKind,
-    packageLessonsOf: actual.packageLessonsOf,
     outstandingPayments: vi.fn(async () => []),
     paidPayments: vi.fn(async () => []),
   };
@@ -855,7 +850,6 @@ describe("/api/my — записи и плашка «ближайшее заня
       meetLink: "",
       boardLink: "",
       payHint: "",
-      packageOffer: null,
       paidHistory: [],
       nextLesson: null,
       upcoming: [],
@@ -908,7 +902,6 @@ describe("/api/my — записи и плашка «ближайшее заня
     expect(my.boardLink).toBe("");
     expect(my.payments).toEqual([]);
     expect(my.balance).toBeNull();
-    expect(my.packageOffer).toBeNull();
     expect(my.nextLesson).toBeNull();
     expect(my.paidHistory).toEqual([]);
   });

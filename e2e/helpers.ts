@@ -61,13 +61,12 @@ export const MY_EMPTY = {
   balance: null,
   meetLink: "",
   payHint: "",
-  packageOffer: null,
   paidHistory: [],
   nextLesson: null,
   lessonPriceKopecks: 150000, // 1500 ₽/час — цена видна ещё до записи
 };
 
-// Кабинет экзаменационного ученика (ЕГЭ): поштучный счёт + карточка месячного пакета.
+// Кабинет экзаменационного ученика (ЕГЭ): поштучный счёт.
 // Есть подтверждённое занятие — иначе «занятийные» блоки в кабинете не показываются.
 export const MY_EGE = {
   events: [
@@ -90,16 +89,6 @@ export const MY_EGE = {
   balance: null,
   meetLink: "",
   payHint: "",
-  packageOffer: {
-    exam: true,
-    label: "ЕГЭ",
-    lessons: 8,
-    amountKopecks: 1700000,
-    perLessonKopecks: 250000,
-    savingsKopecks: 300000,
-    savingsPercent: 15,
-    payLink: "https://yookassa.test/package",
-  },
   paidHistory: [],
   nextLesson: null,
   lessonPriceKopecks: 250000,
@@ -129,7 +118,6 @@ export const MY_GROUP = {
     members: ["Тестовый Егор", "Дима", "Злата"],
     limit: 4,
   },
-  packageOffer: null,
   payments: [
     { id: "g1", amountKopecks: 75000, note: "Автосчёт: следующее занятие (1 ч)", payLink: "https://yookassa.test/pay", kind: "advance" },
   ],
@@ -173,7 +161,6 @@ export const MY_FULL = {
       origStart: "",
     },
   ],
-  packageOffer: null,
   // Два счёта: долг за проведённое занятие и предоплата вперёд — в кабинете
   // они складываются в одну сумму с разбивкой.
   payments: [

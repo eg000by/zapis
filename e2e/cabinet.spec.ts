@@ -77,60 +77,18 @@ test("режим «СБП-перевод»: реквизиты вместо кн
   await expect(page.getByText("ждём ссылку на оплату")).toHaveCount(0);
 });
 
-test("экзамен ЕГЭ: два способа оплатить ОДИН счёт — поштучно или пакетом", async ({ page }) => {
+test("экзамен ЕГЭ: только поштучный счёт, пакета со скидкой нет", async ({ page }) => {
   await mockApi(page, { my: MY_EGE });
   await page.goto(tokenUrl());
 
-  // Сумма к оплате — только поштучный счёт: пакет её не увеличивает, а заменяет.
   const pay = page.locator(".pay-card");
   await expect(pay.locator(".pay-total")).toHaveText("2 500 ₽");
-
-  const opts = pay.locator(".pay-opt");
-  await expect(opts).toHaveCount(2);
-  await expect(opts.nth(0)).toContainText("По одному занятию");
-  await expect(opts.nth(0).locator(".pay-opt-price")).toHaveText("2 500 ₽");
-
-  const pkg = pay.locator(".pay-opt.best");
-  await expect(pkg).toContainText("8 занятий сразу");
-  await expect(pkg.locator(".pay-opt-price")).toHaveText("17 000 ₽");
-  await expect(pkg.locator(".pkg-save")).toContainText("−15%");
-  await expect(pkg.locator(".pkg-save")).toContainText("выгода 3 000 ₽");
-  // Подпись у второго варианта — про то, что он ВМЕСТО счёта рядом, а не вдобавок.
-  await expect(pkg).toContainText("Вместо оплаты по одному занятию");
-  await expect(pkg.getByRole("link", { name: /Оплатить пакет/ })).toHaveAttribute(
+  await expect(pay.getByRole("link", { name: /Оплатить 2 500 ₽/ })).toHaveAttribute(
     "href",
-    "https://yookassa.test/package"
+    "https://yookassa.test/lesson"
   );
-});
-
-test("обычный ученик: второй вариант — весь месяц одним платежом, без скидки", async ({ page }) => {
-  const my = {
-    ...MY_FULL,
-    packageOffer: {
-      exam: false,
-      label: "",
-      lessons: 5,
-      amountKopecks: 750000,
-      perLessonKopecks: 150000,
-      savingsKopecks: 0, // скидки нет — бейдж выгоды не показываем
-      savingsPercent: 0,
-      payLink: "https://yookassa.test/month",
-    },
-  };
-  await mockApi(page, { my });
-  await page.goto(tokenUrl());
-
-  const pay = page.locator(".pay-card");
-  await expect(pay.locator(".pay-total")).toHaveText("7 500 ₽"); // предложение сумму не меняет
-  const month = pay.locator(".pay-opt.best");
-  await expect(month).toContainText("Месяц вперёд · 5 занятий");
-  await expect(month.locator(".pay-opt-price")).toHaveText("7 500 ₽");
-  await expect(month.locator(".pkg-save")).toHaveCount(0);
-  await expect(month).toContainText("Вместо оплаты по одному занятию");
-  await expect(month.getByRole("link", { name: /Оплатить месяц/ })).toHaveAttribute(
-    "href",
-    "https://yookassa.test/month"
-  );
+  await expect(pay).not.toContainText("пакет");
+  await expect(pay).not.toContainText("занятий сразу");
 });
 
 test("оплачено вперёд: видно на самом занятии и в блоке оплаты, счёта нет", async ({ page }) => {
@@ -147,16 +105,6 @@ test("оплачено вперёд: видно на самом занятии �
       paidUntil: "2026-07-14T07:00:00.000Z",
       nextPaid: true,
     },
-    packageOffer: {
-      exam: false,
-      label: "",
-      lessons: 4,
-      amountKopecks: 600000,
-      perLessonKopecks: 150000,
-      savingsKopecks: 0,
-      savingsPercent: 0,
-      payLink: "https://yookassa.test/ahead",
-    },
   };
   await mockApi(page, { my });
   await page.goto(tokenUrl());
@@ -165,10 +113,6 @@ test("оплачено вперёд: видно на самом занятии �
   const pay = page.locator(".pay-card");
   await expect(pay.locator(".pay-ok")).toContainText("Ближайшее занятие оплачено");
   await expect(pay).toContainText("Оплачено вперёд 1 занятие — до Вт, 14 июля");
-  // Оплатить дальше вперёд можно, но это предложение, а не счёт.
-  const ahead = pay.locator(".pay-opt.ahead");
-  await expect(ahead).toContainText("Оплатить вперёд · 4 занятия");
-  await expect(ahead).toContainText("Чтобы не платить перед каждым занятием");
   await expect(pay.locator(".pay-total")).toHaveCount(0);
 });
 
@@ -177,7 +121,6 @@ test("экзамен ЕГЭ в режиме СБП: реквизиты вмес�
     ...MY_EGE,
     payHint: "Перевод по СБП на номер 8 927 750-23-78 (Т-Банк или Сбер)",
     payments: [{ ...MY_EGE.payments[0], payLink: "" }],
-    packageOffer: { ...MY_EGE.packageOffer, payLink: "" },
   };
   await mockApi(page, { my });
   await page.goto(tokenUrl());
@@ -186,7 +129,7 @@ test("экзамен ЕГЭ в режиме СБП: реквизиты вмес�
   await expect(pay.locator(".pay-btn")).toHaveCount(0);
 });
 
-test("без подтверждённых занятий: Телемост, пакет и счета скрыты", async ({ page }) => {
+test("без подтверждённых занятий: Телемост и счета скрыты", async ({ page }) => {
   const my = {
     events: [
       {
@@ -206,14 +149,13 @@ test("без подтверждённых занятий: Телемост, па
     balance: null,
     meetLink: "https://telemost.yandex.ru/j/e2e",
     payHint: "",
-      packageOffer: MY_EGE.packageOffer,
     nextLesson: "2026-07-14T07:00:00.000Z",
   };
   await mockApi(page, { my });
   await page.goto(tokenUrl());
 
   await expect(page.getByText("ждёт подтверждения")).toBeVisible();
-  // Ничего «занятийного» — Телемост, пакет, счета, ближайшее занятие скрыты.
+  // Ничего «занятийного» — Телемост, счета, ближайшее занятие скрыты.
   await expect(page.locator("a.panel-join")).toHaveCount(0);
   await expect(page.locator(".pay-card")).toHaveCount(0);
   await expect(page.getByText("К оплате")).toHaveCount(0);

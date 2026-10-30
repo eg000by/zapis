@@ -37,7 +37,18 @@ export async function POST(req: Request) {
   const our =
     (yk.metadata.paymentId ? await getPayment(yk.metadata.paymentId) : null) ||
     (await getPaymentByProviderId(yk.id));
-  if (!our) return ok; // не наш платёж
+  if (!our) {
+    // Платёж создавали мы (metadata.paymentId), а счёта уже нет — его удалили, пока
+    // ссылка ещё жила (сверка автосчетов, ручное удаление). Деньги пришли: молча
+    // промолчать нельзя, иначе оплата не попадёт ни в баланс, ни на глаза.
+    if (yk.status === "succeeded" && yk.metadata.paymentId) {
+      console.error("webhook: paid invoice not found", { yk: yk.id, payment: yk.metadata.paymentId });
+      await sendOwner(
+        `⚠️ <b>Оплата по удалённому счёту</b>\n\nПоступило ${(yk.amountKopecks / 100).toLocaleString("ru-RU")} ₽ (платёж ЮKassa ${escapeHtml(yk.id)}), но счёта в базе уже нет.\nСоздайте счёт на эту сумму в /admin и отметьте его оплаченным.`
+      ).catch(() => {});
+    }
+    return ok; // не наш платёж
+  }
 
   try {
     if (yk.status === "succeeded") {

@@ -10,9 +10,9 @@ import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
 import { getGroup } from "./groups";
 import type { Student } from "./schema";
-import { paidHoursBreakdown } from "./payments";
+import { sumPaidKopecks } from "./payments";
 import { missedStarts } from "./lessons";
-import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
+import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // Занятия, исключённые из тарификации: пропуск (серый) и бесплатное (пробное).
 const isUntariffed = (colorId: string | null) =>
@@ -109,19 +109,13 @@ export async function computeStudentBalance(
 
   // Участник группы занимается по расписанию и цене ГРУППЫ: занятия лежат под её
   // ключом, а личная ставка не участвует — иначе цену пришлось бы переписывать
-  // каждому при смене цены группы. Пакета со скидкой у группы нет: она и так дешевле
-  // индивидуальных занятий, и «скидка от индивидуальной ставки» была бы неправдой.
+  // каждому при смене цены группы.
   const group = s.groupId ? await getGroup(s.groupId) : null;
   const rateKopecks = group ? group.rateKopecks : s.rateKopecks;
   if (rateKopecks <= 0) return null;
 
-  // Пакетные оплаты (месяц ОГЭ/ЕГЭ) кредитуют фиксированные часы, а не деньги÷ставку.
-  const packageLessons = group ? 0 : (detectExamTariff(s.subject)?.packageLessons ?? 0);
-  const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(
-    s.id,
-    rateKopecks,
-    packageLessons
-  );
+  const paidKopecks = await sumPaidKopecks(s.id);
+  const paidHours = Math.floor(paidKopecks / rateKopecks);
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
   //
   // У группы занятие одно на всех, и цвет события про пропуск одного участника
@@ -132,14 +126,13 @@ export async function computeStudentBalance(
     (o) => !isUntariffed(o.colorId) && !missed.has(o.start.toISOString())
   );
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
-  // Остаток на балансе = все полученные деньги (включая пакетные) минус стоимость
-  // уже разложенных на занятия часов по ставке. Пакетные часы НЕ оцениваем по полной
-  // ставке: пакет со скидкой 18 000 ₽ должен показывать 18 000 ₽ остатка, а не 20 000 ₽.
+  // Остаток на балансе = все полученные деньги минус стоимость уже разложенных на
+  // занятия часов по ставке.
   return {
     ...summary,
     items,
     rateKopecks,
     debtKopecks: summary.debtHours * rateKopecks,
-    balanceKopecks: moneyKopecks + packageKopecks - (paidHours - summary.leftoverHours) * rateKopecks,
+    balanceKopecks: paidKopecks - (paidHours - summary.leftoverHours) * rateKopecks,
   };
 }

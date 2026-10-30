@@ -85,6 +85,13 @@
       "when": 1788188144316,
       "tag": "0011_high_puff_adder",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793398832081,
+      "tag": "0012_delete_package_offers",
+      "breakpoints": true
     }
   ]
 }

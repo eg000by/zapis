@@ -7,51 +7,24 @@ import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
 // manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт за одно
-// ближайшее занятие (и только если оно ещё не закрыто балансом); package:N — оплата
-// вперёд одним платежом: пакет ОГЭ/ЕГЭ со скидкой либо занятия месяца по ставке.
-// Кредитует ровно N часов, а не деньги÷ставку.
-export type PaymentKind = "manual" | "debt" | "advance" | `package:${number}`;
+// ближайшее занятие (и только если оно ещё не закрыто балансом).
+export type PaymentKind = "manual" | "debt" | "advance";
 
-// Число оплаченных занятий пакета хранится В САМОМ счёте (kind = «package:8»), а не
-// берётся из конфига при чтении: иначе правка тарифа задним числом переоценила бы
-// уже оплаченные пакеты (8 часов вдруг стали бы 10). Старые строки с kind="package"
-// (до этого формата) читаются с запасным значением из текущего тарифа.
-export function packageKind(lessons: number): PaymentKind {
-  return `package:${lessons}`;
-}
-
-export function isPackageKind(kind: string): boolean {
-  return kind === "package" || kind.startsWith("package:");
-}
-
-export function packageLessonsOf(kind: string, fallbackLessons: number): number {
-  const n = Number(kind.slice("package:".length));
-  return kind.startsWith("package:") && Number.isFinite(n) && n > 0 ? n : fallbackLessons;
-}
-
-// Пакетный счёт среди уже загруженных счетов ученика (самый свежий). Отдельного
-// запроса в БД не делаем — списки неоплаченных счетов вызывающие уже держат.
-export function findPackageInvoice(rows: Payment[]): Payment | null {
-  return rows.find((p) => isPackageKind(p.kind)) ?? null;
-}
-
-// Неоплаченные счета по смыслу: долг ≠ аванс ≠ предложение пакета. Долг — только
-// за УЖЕ проведённые занятия (автосчёт debt) и ручные счета преподавателя (он
-// выставил их осознанно). Счёт «вперёд» — предоплата за будущее занятие, а пакет
-// вообще предложение, которое ученик волен не принимать: показывать их как
-// задолженность нельзя ни в карточке, ни в аналитике.
+// Неоплаченные счета по смыслу: долг ≠ аванс. Долг — только за УЖЕ проведённые
+// занятия (автосчёт debt) и ручные счета преподавателя (он выставил их осознанно).
+// Счёт «вперёд» — предоплата за будущее занятие: показывать её как задолженность
+// нельзя ни в карточке, ни в аналитике.
 export interface OutstandingSummary {
   debtKopecks: number;
   advanceKopecks: number;
-  packageKopecks: number;
   totalKopecks: number;
 }
 
 // Что считается долгом — единственное место правила: сводка счетов, «Долги» и
-// погашение в один тап должны видеть одну и ту же сумму. Всё, кроме аванса и
-// предложенного пакета (за них ещё ничего не проведено).
+// погашение в один тап должны видеть одну и ту же сумму. Всё, кроме аванса (за
+// него ещё ничего не проведено).
 export function isDebtKind(kind: string): boolean {
-  return kind !== "advance" && !isPackageKind(kind);
+  return kind !== "advance";
 }
 
 export function summarizeOutstanding(
@@ -60,13 +33,11 @@ export function summarizeOutstanding(
   const sum: OutstandingSummary = {
     debtKopecks: 0,
     advanceKopecks: 0,
-    packageKopecks: 0,
     totalKopecks: 0,
   };
   for (const r of rows) {
     sum.totalKopecks += r.amountKopecks;
     if (isDebtKind(r.kind)) sum.debtKopecks += r.amountKopecks; // debt и ручные счета
-    else if (isPackageKind(r.kind)) sum.packageKopecks += r.amountKopecks;
     else sum.advanceKopecks += r.amountKopecks;
   }
   return sum;
@@ -154,45 +125,6 @@ export async function sumPaidKopecks(studentId: string): Promise<number> {
   return rows.reduce((sum, r) => sum + r.amount, 0);
 }
 
-// Оплаченные ЧАСЫ ученика — единый расчёт для баланса и покраски. Обычные счета
-// кредитуют деньги÷ставку; пакетные («месяц» ОГЭ/ЕГЭ) дают ровно своё число часов
-// независимо от скидки. moneyKopecks — деньги непакетных оплат, packageKopecks —
-// пакетных (вместе дают всю полученную сумму для остатка на балансе).
-// fallbackPackageLessons — для старых строк kind="package" без числа занятий.
-export async function paidHoursBreakdown(
-  studentId: string,
-  rateKopecks: number,
-  fallbackPackageLessons: number
-): Promise<{
-  paidHours: number;
-  moneyKopecks: number;
-  packageHours: number;
-  packageKopecks: number;
-}> {
-  const rows = await db()
-    .select({ amount: payments.amountKopecks, kind: payments.kind })
-    .from(payments)
-    .where(and(eq(payments.studentId, studentId), eq(payments.status, "paid")));
-  let moneyKopecks = 0;
-  let packageKopecks = 0;
-  let packageHours = 0;
-  for (const r of rows) {
-    // Сколько часов даёт пакет: из самого счёта, иначе (старые строки) из тарифа.
-    const lessons = isPackageKind(r.kind) ? packageLessonsOf(r.kind, fallbackPackageLessons) : 0;
-    if (lessons > 0) {
-      packageHours += lessons;
-      packageKopecks += r.amount;
-    } else {
-      // Не пакет — или пакет, число занятий которого определить нечем (старая строка
-      // у неэкзаменационного предмета). Тогда считаем как обычные деньги: полученная
-      // сумма не должна исчезать из баланса ни при каких обстоятельствах.
-      moneyKopecks += r.amount;
-    }
-  }
-  const fromMoney = rateKopecks > 0 ? Math.floor(moneyKopecks / rateKopecks) : 0;
-  return { paidHours: fromMoney + packageHours, moneyKopecks, packageHours, packageKopecks };
-}
-
 export async function setPaymentStatus(id: string, status: PaymentStatus): Promise<void> {
   await db()
     .update(payments)
@@ -241,8 +173,8 @@ export async function settleStudentDebts(
 }
 
 // Отмена промаха: возвращает в «неоплачено» счета-долги, погашенные тем самым тапом
-// (та же миллисекунда paidAt — тап ставит её всем своим счетам разом). Аванс и пакет
-// тап не гасит, поэтому их не трогаем и здесь. Срок отмены ограничивает бот.
+// (та же миллисекунда paidAt — тап ставит её всем своим счетам разом). Аванс тап не
+// гасит, поэтому его не трогаем и здесь. Срок отмены ограничивает бот.
 export async function unsettleStudentDebts(studentId: string, at: Date): Promise<number> {
   const rows = await db()
     .update(payments)

@@ -932,45 +932,6 @@ a.meet-link:hover {
   padding-top: 0;
 }
 
-/* Два способа оплатить ОДИН счёт: поштучно или пакетом */
-.pay-options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-}
-.pay-opt {
-  padding: 14px;
-  border: 1.5px solid var(--border);
-  border-radius: 14px;
-}
-.pay-opt.best {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-/* Предложение заплатить дальше вперёд, когда счетов нет: не должно выглядеть
-   требованием — поэтому пунктир, а не сплошная рамка «к оплате». */
-.pay-opt.ahead {
-  margin-top: 14px;
-  border-style: dashed;
-}
-.pay-opt-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-}
-.pay-opt-price {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--accent);
-}
-.pay-opt-note {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
 /* История оплат */
 .pay-history {
   margin-top: 16px;
@@ -1002,14 +963,6 @@ a.meet-link:hover {
   font-size: 14px;
 }
 
-.pkg-save {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--success);
-  background: rgba(22, 163, 74, 0.14);
-  padding: 3px 8px;
-  border-radius: 999px;
-}
 /* Тег «Перенос» на строке разово перенесённого занятия */
 .badge.move {
   background: rgba(217, 119, 6, 0.16);

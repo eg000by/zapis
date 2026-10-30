@@ -31,10 +31,6 @@ const { store } = vi.hoisted(() => ({ store: { rows: [] as Row[], seq: 0 } }));
 vi.mock("@/lib/payments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payments")>();
   return {
-    findPackageInvoice: actual.findPackageInvoice,
-    isPackageKind: actual.isPackageKind,
-    packageKind: actual.packageKind,
-    packageLessonsOf: actual.packageLessonsOf,
     summarizeOutstanding: actual.summarizeOutstanding,
     createPayment: vi.fn(async (input: any) => {
       const row: Row = {
@@ -71,31 +67,11 @@ vi.mock("@/lib/payments", async (importOriginal) => {
         row.paidAt = status === "paid" ? new Date() : null;
       }
     }),
-    // Тот же расчёт, что в БД-версии: пакетные счета кредитуют свои часы,
-    // остальные — деньги ÷ ставку.
-    paidHoursBreakdown: vi.fn(async (studentId: string, rate: number, fallback: number) => {
-      let moneyKopecks = 0;
-      let packageKopecks = 0;
-      let packageHours = 0;
-      for (const r of store.rows) {
-        if (r.studentId !== studentId || r.status !== "paid") continue;
-        const lessons = actual.isPackageKind(r.kind)
-          ? actual.packageLessonsOf(r.kind, fallback)
-          : 0;
-        if (lessons > 0) {
-          packageHours += lessons;
-          packageKopecks += r.amountKopecks;
-        } else {
-          moneyKopecks += r.amountKopecks;
-        }
-      }
-      return {
-        paidHours: (rate > 0 ? Math.floor(moneyKopecks / rate) : 0) + packageHours,
-        moneyKopecks,
-        packageHours,
-        packageKopecks,
-      };
-    }),
+    sumPaidKopecks: vi.fn(async (studentId: string) =>
+      store.rows
+        .filter((r) => r.studentId === studentId && r.status === "paid")
+        .reduce((sum, r) => sum + r.amountKopecks, 0)
+    ),
   };
 });
 
@@ -219,15 +195,10 @@ describe("месяц из жизни ученика — сквозной сце�
     const { promptReportLessonNote } = await import("@/lib/crm-bot");
 
     // ── 1. Ученик открывает кабинет до первого занятия ────────────────────────
-    // Ждём счёт ровно на одно ближайшее занятие плюс необязательное предложение
-    // закрыть всё вперёд одним платежом. Долга нет — занятий ещё не было.
-    // package:5, а не 6 — окно предложения AUTO_ADVANCE_DAYS = 30 дней, шестое
-    // занятие серии в него уже не попадает.
+    // Ждём счёт ровно на одно ближайшее занятие — и ничего сверх (предложения
+    // «оплатить вперёд одним платежом» больше нет). Долга нет — занятий ещё не было.
     await ensureAutoInvoices(STUDENT.id, STUDENT.name);
-    expect(invoices()).toEqual([
-      { kind: "advance", rub: 1000 },
-      { kind: "package:5", rub: 5000 },
-    ]);
+    expect(invoices()).toEqual([{ kind: "advance", rub: 1000 }]);
 
     // ── 2. Оплатил счёт «вперёд» ──────────────────────────────────────────────
     payAll("advance");
@@ -271,30 +242,6 @@ describe("месяц из жизни ученика — сквозной сце�
     await recolorStudent(STUDENT.id);
     expect(colorOf(1)).toBe("10");
     expect(invoices().some((i) => i.kind === "debt")).toBe(false);
-  });
-
-  it("оплата вперёд одним платежом закрывает и долг, и будущие занятия", async () => {
-    const { ensureAutoInvoices } = await import("@/lib/autobill");
-    const { recolorStudent } = await import("@/lib/coloring");
-
-    // Два занятия прошли без оплаты — накопился долг.
-    afterLesson(1);
-    await ensureAutoInvoices(STUDENT.id, STUDENT.name);
-    expect(invoices()).toContainEqual({ kind: "debt", rub: 2000 });
-
-    // Предложение «вперёд одним платежом» покрывает долг + оставшиеся занятия.
-    const offer = invoices().find((i) => i.kind.startsWith("package:"))!;
-    expect(offer.rub).toBe(6000); // 2 долга + 4 будущих по 1000 ₽
-
-    payAll(offer.kind);
-    await ensureAutoInvoices(STUDENT.id, STUDENT.name);
-    await recolorStudent(STUDENT.id);
-
-    // Долг закрыт, прошедшие зелёные, будущие оранжевые.
-    expect(invoices().some((i) => i.kind === "debt" || i.kind === "advance")).toBe(false);
-    expect(colorOf(0)).toBe("10");
-    expect(colorOf(1)).toBe("10");
-    expect(colorOf(2)).toBe("6");
   });
 
   it("отменённое занятие не превращается в долг и не ломает раскладку", async () => {

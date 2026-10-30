@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureAutoInvoices, monthOffer, planAutoInvoices } from "@/lib/autobill";
+import { ensureAutoInvoices, planAutoInvoices } from "@/lib/autobill";
 import { computeStudentBalance } from "@/lib/balance";
 import {
   createPayment,
@@ -10,14 +10,8 @@ import {
 import { createYkPayment, yookassaConfigured } from "@/lib/yookassa";
 
 vi.mock("@/lib/balance", () => ({ computeStudentBalance: vi.fn(async () => null) }));
-// Чистые хелперы вида счёта (package:N) мокать нечего — берём настоящие.
-vi.mock("@/lib/payments", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/payments")>();
+vi.mock("@/lib/payments", () => {
   return {
-    findPackageInvoice: actual.findPackageInvoice,
-    isPackageKind: actual.isPackageKind,
-    packageKind: actual.packageKind,
-    packageLessonsOf: actual.packageLessonsOf,
     createPayment: vi.fn(async () => ({ id: "new" })),
     deletePayment: vi.fn(async () => {}),
     updatePayment: vi.fn(async () => {}),
@@ -119,34 +113,6 @@ const mk = (daysFromNow: number, paid: boolean, past = false, hours = 1) => ({
   past,
 });
 
-describe("monthOffer — предложение «оплатить месяц вперёд»", () => {
-  it("долг + все будущие занятия окна, оплаченные и дальние не считаются", () => {
-    const balance = {
-      rateKopecks: 150000,
-      debtHours: 1, // проведённое неоплаченное — предложение закрывает и его
-      items: [
-        mk(-3, false, true), // прошлое (тот самый долг)
-        mk(2, true), // будущее, уже оплачено — не выставляем
-        mk(9, false), // будущее, не оплачено → в предложение
-        mk(16, false, false, 2), // блок 2 часа → в предложение
-        mk(40, false), // за пределами 30 дней — не в предложение
-      ],
-    } as any;
-    // 1 (долг) + 1 + 2 = 4 занятия по 1500 ₽.
-    expect(monthOffer(balance, NOW)).toEqual({ lessons: 4, kopecks: 4 * 150000 });
-  });
-
-  it("впереди всего одно занятие — предлагать нечего (это и есть счёт «вперёд»)", () => {
-    const balance = { rateKopecks: 150000, debtHours: 0, items: [mk(2, false)] } as any;
-    expect(monthOffer(balance, NOW)).toBeNull();
-  });
-
-  it("будущих занятий нет — предложения нет даже при долге", () => {
-    const balance = { rateKopecks: 150000, debtHours: 2, items: [mk(-3, false, true)] } as any;
-    expect(monthOffer(balance, NOW)).toBeNull();
-  });
-});
-
 describe("ensureAutoInvoices — применение к счетам", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -188,7 +154,6 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     vi.mocked(outstandingPayments).mockResolvedValue([
       { id: "d1", kind: "debt", amountKopecks: 300000, payLink: "" },
       { id: "a1", kind: "advance", amountKopecks: 150000, payLink: "" },
-      { id: "pk", kind: "package:4", amountKopecks: 600000, payLink: "" },
       { id: "m1", kind: "manual", amountKopecks: 100000, payLink: "" },
     ] as any);
 
@@ -198,7 +163,7 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     expect(createPayment).not.toHaveBeenCalled();
     expect(updatePayment).not.toHaveBeenCalled();
     // Ручной счёт выставил преподаватель осознанно — его не трогаем.
-    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["d1", "a1", "pk"]);
+    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["d1", "a1"]);
   });
 
   it("создаёт счёт на долг с человекочитаемой заметкой", async () => {
@@ -212,9 +177,7 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     });
   });
 
-  it("обычному ученику: счёт на ОДНО следующее занятие + предложение на месяц", async () => {
-    // Раньше «вперёд» сразу выставлялся на месяц. Теперь по умолчанию — одно занятие,
-    // а месяц предлагается вторым вариантом оплаты того же счёта.
+  it("обычному ученику: счёт на ОДНО следующее занятие и ничего сверх", async () => {
     mockBalance({
       debtKopecks: 0,
       debtHours: 0,
@@ -228,17 +191,11 @@ describe("ensureAutoInvoices — применение к счетам", () => {
       kind: "advance",
       note: "Автосчёт: следующее занятие (1 ч)",
     });
-    expect(createPayment).toHaveBeenCalledWith({
-      studentId: "stu-1",
-      amountKopecks: 450000,
-      kind: "package:3",
-      note: "Оплата вперёд: 3 занятий одним платежом",
-    });
+    // Предложения «оплатить вперёд одним платежом» больше нет.
+    expect(createPayment).toHaveBeenCalledTimes(1);
   });
 
-  // На проде: ЕГЭ с индивидуальной ставкой 1 500 ₽ получал пакет за 17 000 ₽ —
-  // цену брали из тарифа по умолчанию (2 500 ₽), и пакет выходил дороже поштучной.
-  it("пакет ЕГЭ считается от ставки ученика, а не от тарифа по умолчанию", async () => {
+  it("экзаменационному ученику пакет со скидкой не выставляется", async () => {
     mockBalance({
       debtKopecks: 0,
       debtHours: 0,
@@ -247,43 +204,21 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     const ege = { id: "stu-1", subject: "ЕГЭ информатика", rateKopecks: 150000 } as any;
     await ensureAutoInvoices("stu-1", "Милена", ege);
 
-    expect(createPayment).toHaveBeenCalledWith({
-      studentId: "stu-1",
-      amountKopecks: 1020000, // 8 × 1 500 ₽ − 15% = 10 200 ₽
-      kind: "package:8",
-      note: "Пакет из 8 занятий (ЕГЭ)",
-    });
+    expect(createPayment).toHaveBeenCalledTimes(1);
+    expect(createPayment).toHaveBeenCalledWith(expect.objectContaining({ kind: "advance" }));
   });
 
-  it("ученик в архиве: «вперёд» и пакет снимаются, долг остаётся", async () => {
+  it("ученик в архиве: «вперёд» снимается, долг остаётся", async () => {
     mockBalance({ debtKopecks: 120000, debtHours: 1, items: [mk(-3, false, true), mk(2, false)] });
     vi.mocked(outstandingPayments).mockResolvedValue([
       { id: "a1", kind: "advance", amountKopecks: 120000, payLink: "" },
-      { id: "pk", kind: "package:8", amountKopecks: 816000, payLink: "" },
     ] as any);
     const archived = { id: "stu-1", subject: "ОГЭ информатика", rateKopecks: 120000, active: false } as any;
     await ensureAutoInvoices("stu-1", "Дима", archived);
 
-    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0]).sort()).toEqual(["a1", "pk"]);
+    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["a1"]);
     expect(createPayment).toHaveBeenCalledTimes(1);
     expect(createPayment).toHaveBeenCalledWith(expect.objectContaining({ kind: "debt", amountKopecks: 120000 }));
-  });
-
-  it("выставленный пакет по старой цене пересчитывается под ставку", async () => {
-    mockBalance({ debtKopecks: 0, debtHours: 0, items: [mk(2, false), mk(9, false)] });
-    vi.mocked(outstandingPayments).mockResolvedValue([
-      { id: "pk", kind: "package:8", amountKopecks: 1700000, payLink: "https://old" },
-    ] as any);
-    const ege = { id: "stu-1", subject: "ЕГЭ информатика", rateKopecks: 150000 } as any;
-    await ensureAutoInvoices("stu-1", "Милена", ege);
-
-    expect(updatePayment).toHaveBeenCalledWith("pk", {
-      amountKopecks: 1020000,
-      kind: "package:8",
-      note: "Пакет из 8 занятий (ЕГЭ)",
-      payLink: "",
-      providerPaymentId: "",
-    });
   });
 
   it("ближайшее занятие оплачено вперёд — счёт «вперёд» снимается, нового нет", async () => {
@@ -305,22 +240,7 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     expect(createPayment).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "advance" })
     );
-    // Предложение «оплатить вперёд одним платежом» остаётся: оно необязательное.
-    expect(createPayment).toHaveBeenCalledWith({
-      studentId: "stu-1",
-      amountKopecks: 300000,
-      kind: "package:2",
-      note: "Оплата вперёд: 2 занятий одним платежом",
-    });
-  });
-
-  it("предлагать месяц нечем — висящее предложение снимается", async () => {
-    mockBalance({ debtKopecks: 0, debtHours: 0, items: [mk(2, false)] }); // одно занятие впереди
-    vi.mocked(outstandingPayments).mockResolvedValue([
-      { id: "pk1", kind: "package:4", amountKopecks: 600000, payLink: "" },
-    ] as any);
-    await ensureAutoInvoices("stu-1", "Тест");
-    expect(deletePayment).toHaveBeenCalledWith("pk1");
+    expect(createPayment).not.toHaveBeenCalled();
   });
 
   it("обновление суммы сбрасывает ссылку оплаты (старый платёж ЮKassa неактуален)", async () => {

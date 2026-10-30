@@ -30,15 +30,6 @@ vi.mock("@/lib/payments", () => {
   const sumPaidKopecks = vi.fn(async () => 0);
   return {
     sumPaidKopecks,
-    paidHoursBreakdown: vi.fn(async (id: string, rate: number) => {
-      const money = await sumPaidKopecks();
-      return {
-        paidHours: rate > 0 ? Math.floor(money / rate) : 0,
-        moneyKopecks: money,
-        packageHours: 0,
-        packageKopecks: 0,
-      };
-    }),
   };
 });
 

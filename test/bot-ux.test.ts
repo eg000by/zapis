@@ -332,7 +332,6 @@ describe("экран «Доходы»", () => {
       outstandingKopecks: 0,
       debtKopecks: 390000,
       advanceKopecks: 1770000,
-      packageOfferKopecks: 11812000,
       activeStudents: 16,
       paidCount: 85,
       expectedMonthKopecks: 5340000,
@@ -413,7 +412,6 @@ describe("«Долги»: оплата в один тап", () => {
     active: true,
     debtKopecks: 300000,
     advanceKopecks: 0,
-    packageKopecks: 0,
     oldestAt: new Date(Date.now() - 3 * 86400000),
     invoices: 2,
     ...over,
@@ -531,8 +529,8 @@ describe("planSettle", () => {
     amountKopecks,
   });
 
-  it("гасит долг и ручные счета, но не аванс и не пакет", () => {
-    const rows = [p("a", "debt", 100000), p("b", "manual", 50000), p("c", "advance", 150000), p("d", "package:8", 1200000)];
+  it("гасит долг и ручные счета, но не аванс", () => {
+    const rows = [p("a", "debt", 100000), p("b", "manual", 50000), p("c", "advance", 150000)];
     expect(planSettle(rows, 150000)).toEqual({ ids: ["a", "b"] });
   });
 
