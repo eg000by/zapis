@@ -90,7 +90,7 @@
       "idx": 12,
       "version": "7",
       "when": 1793398832081,
-      "tag": "0012_cancel_package_offers",
+      "tag": "0012_delete_package_offers",
       "breakpoints": true
     }
   ]

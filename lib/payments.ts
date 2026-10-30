@@ -7,17 +7,8 @@ import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
 // manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт за одно
-// ближайшее занятие (и только если оно ещё не закрыто балансом); package:N — бывшая
-// «оплата вперёд одним платежом» (пакеты убраны, неоплаченные отменены миграцией
-// 0012). Новых таких счетов не бывает, но оплаченный кредитует ровно N часов.
-export type PaymentKind = "manual" | "debt" | "advance" | `package:${number}`;
-
-// Число занятий пакета хранится В САМОМ счёте (kind = «package:8»). Строка без
-// числа (самый старый формат kind="package") — 0: такую оплату считаем деньгами.
-export function packageLessonsOf(kind: string): number {
-  const n = Number(kind.slice("package:".length));
-  return kind.startsWith("package:") && Number.isFinite(n) && n > 0 ? n : 0;
-}
+// ближайшее занятие (и только если оно ещё не закрыто балансом).
+export type PaymentKind = "manual" | "debt" | "advance";
 
 // Неоплаченные счета по смыслу: долг ≠ аванс. Долг — только за УЖЕ проведённые
 // занятия (автосчёт debt) и ручные счета преподавателя (он выставил их осознанно).
@@ -134,48 +125,6 @@ export async function sumPaidKopecks(studentId: string): Promise<number> {
   return rows.reduce((sum, r) => sum + r.amount, 0);
 }
 
-export interface PaidHours {
-  paidHours: number;
-  moneyKopecks: number;
-  packageHours: number;
-  packageKopecks: number;
-}
-
-// Оплаченные ЧАСЫ ученика — единый расчёт для баланса и покраски. Обычные счета
-// кредитуют деньги÷ставку; пакетные (package:N) дают ровно своё число часов
-// независимо от суммы. moneyKopecks — деньги непакетных оплат, packageKopecks —
-// пакетных (вместе дают всю полученную сумму для остатка на балансе).
-// Чистая часть — для тестов (без БД).
-export function splitPaidHours(
-  rows: { amount: number; kind: string }[],
-  rateKopecks: number
-): PaidHours {
-  let moneyKopecks = 0;
-  let packageKopecks = 0;
-  let packageHours = 0;
-  for (const r of rows) {
-    const lessons = packageLessonsOf(r.kind);
-    if (lessons > 0) {
-      packageHours += lessons;
-      packageKopecks += r.amount;
-    } else {
-      // Не пакет — или пакет без числа занятий (самый старый формат). Тогда считаем
-      // как обычные деньги: полученная сумма не должна исчезать из баланса.
-      moneyKopecks += r.amount;
-    }
-  }
-  const fromMoney = rateKopecks > 0 ? Math.floor(moneyKopecks / rateKopecks) : 0;
-  return { paidHours: fromMoney + packageHours, moneyKopecks, packageHours, packageKopecks };
-}
-
-export async function paidHoursBreakdown(studentId: string, rateKopecks: number): Promise<PaidHours> {
-  const rows = await db()
-    .select({ amount: payments.amountKopecks, kind: payments.kind })
-    .from(payments)
-    .where(and(eq(payments.studentId, studentId), eq(payments.status, "paid")));
-  return splitPaidHours(rows, rateKopecks);
-}
-
 export async function setPaymentStatus(id: string, status: PaymentStatus): Promise<void> {
   await db()
     .update(payments)
@@ -224,8 +173,8 @@ export async function settleStudentDebts(
 }
 
 // Отмена промаха: возвращает в «неоплачено» счета-долги, погашенные тем самым тапом
-// (та же миллисекунда paidAt — тап ставит её всем своим счетам разом). Аванс и пакет
-// тап не гасит, поэтому их не трогаем и здесь. Срок отмены ограничивает бот.
+// (та же миллисекунда paidAt — тап ставит её всем своим счетам разом). Аванс тап не
+// гасит, поэтому его не трогаем и здесь. Срок отмены ограничивает бот.
 export async function unsettleStudentDebts(studentId: string, at: Date): Promise<number> {
   const rows = await db()
     .update(payments)

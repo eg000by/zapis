@@ -62,11 +62,8 @@ vi.mock("@/lib/coloring", () => ({
   markLessonMissed: vi.fn(async () => ({ found: true, studentId: "stu-1" })),
   unmarkLessonMissed: vi.fn(async () => ({ found: true, studentId: "stu-1" })),
 }));
-vi.mock("@/lib/payments", async (importOriginal) => {
-  // Чистые хелперы вида счёта (package:N) — настоящие, запросов в БД в них нет.
-  const actual = await importOriginal<typeof import("@/lib/payments")>();
+vi.mock("@/lib/payments", () => {
   return {
-    packageLessonsOf: actual.packageLessonsOf,
     outstandingPayments: vi.fn(async () => []),
     paidPayments: vi.fn(async () => []),
   };

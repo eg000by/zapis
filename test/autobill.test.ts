@@ -10,11 +10,8 @@ import {
 import { createYkPayment, yookassaConfigured } from "@/lib/yookassa";
 
 vi.mock("@/lib/balance", () => ({ computeStudentBalance: vi.fn(async () => null) }));
-// Чистые хелперы вида счёта (package:N) мокать нечего — берём настоящие.
-vi.mock("@/lib/payments", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/payments")>();
+vi.mock("@/lib/payments", () => {
   return {
-    packageLessonsOf: actual.packageLessonsOf,
     createPayment: vi.fn(async () => ({ id: "new" })),
     deletePayment: vi.fn(async () => {}),
     updatePayment: vi.fn(async () => {}),

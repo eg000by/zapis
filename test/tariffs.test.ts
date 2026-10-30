@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { detectExamTariff } from "@/lib/config";
 import { nextLessonCostKopecks, planAutoInvoices } from "@/lib/autobill";
-import { packageLessonsOf, splitPaidHours } from "@/lib/payments";
 import type { StudentBalance } from "@/lib/balance";
 
 describe("detectExamTariff — тариф по предмету", () => {
@@ -23,7 +22,7 @@ describe("detectExamTariff — тариф по предмету", () => {
 
   it("упоминание экзамена внутри строки НЕ включает тариф", () => {
     // Предмет — свободный текст (в боте есть «Другое»). Раньше вхождение подстроки
-    // молча включало ставку 2500 ₽, поштучный автосчёт и пакет.
+    // молча включало ставку 2500 ₽.
     expect(detectExamTariff("Не ЕГЭ, просто информатика")).toBeNull();
     expect(detectExamTariff("Информатика кроме ОГЭ")).toBeNull();
     expect(detectExamTariff("Подготовка к ОГЭ по информатике")).toBeNull();
@@ -82,42 +81,6 @@ describe("nextLessonCostKopecks — «вперёд» = ровно одно бл�
 
   it("нет будущих занятий — 0", () => {
     expect(nextLessonCostKopecks(bal([{ past: true, paid: false, hours: 1 }]))).toBe(0);
-  });
-});
-
-describe("packageLessonsOf — число занятий старого пакета хранится в самом счёте", () => {
-  it("kind несёт число занятий", () => {
-    expect(packageLessonsOf("package:8")).toBe(8);
-  });
-
-  it("строка без числа и обычные счета — 0 (считаются деньгами)", () => {
-    expect(packageLessonsOf("package")).toBe(0);
-    expect(packageLessonsOf("manual")).toBe(0);
-    expect(packageLessonsOf("advance")).toBe(0);
-  });
-});
-
-describe("splitPaidHours — оплаченные часы", () => {
-  it("обычные оплаты — деньги÷ставку, остаток копеек не теряется", () => {
-    expect(splitPaidHours([{ amount: 250000, kind: "debt" }, { amount: 100000, kind: "manual" }], 120000)).toEqual({
-      paidHours: 2, // 3 500 ₽ / 1 200 ₽ = 2 полных часа
-      moneyKopecks: 350000,
-      packageHours: 0,
-      packageKopecks: 0,
-    });
-  });
-
-  it("старый оплаченный пакет кредитует свои часы, а не деньги÷ставку", () => {
-    expect(splitPaidHours([{ amount: 816000, kind: "package:8" }, { amount: 120000, kind: "advance" }], 120000)).toEqual({
-      paidHours: 9, // 8 по пакету + 1 за аванс
-      moneyKopecks: 120000,
-      packageHours: 8,
-      packageKopecks: 816000,
-    });
-  });
-
-  it("пакет без числа занятий — обычные деньги", () => {
-    expect(splitPaidHours([{ amount: 240000, kind: "package" }], 120000).paidHours).toBe(2);
   });
 });
 

@@ -10,7 +10,7 @@ import { listContactOccurrences, type ColorOccurrence } from "./google";
 import { getStudent } from "./students";
 import { getGroup } from "./groups";
 import type { Student } from "./schema";
-import { paidHoursBreakdown } from "./payments";
+import { sumPaidKopecks } from "./payments";
 import { missedStarts } from "./lessons";
 import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
@@ -114,8 +114,8 @@ export async function computeStudentBalance(
   const rateKopecks = group ? group.rateKopecks : s.rateKopecks;
   if (rateKopecks <= 0) return null;
 
-  // Оплаченный package:N (пакеты убраны, но старые оплаты в силе) — ровно N часов.
-  const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(s.id, rateKopecks);
+  const paidKopecks = await sumPaidKopecks(s.id);
+  const paidHours = Math.floor(paidKopecks / rateKopecks);
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
   //
   // У группы занятие одно на всех, и цвет события про пропуск одного участника
@@ -126,13 +126,13 @@ export async function computeStudentBalance(
     (o) => !isUntariffed(o.colorId) && !missed.has(o.start.toISOString())
   );
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
-  // Остаток на балансе = все полученные деньги (включая пакетные) минус стоимость
-  // уже разложенных на занятия часов по ставке.
+  // Остаток на балансе = все полученные деньги минус стоимость уже разложенных на
+  // занятия часов по ставке.
   return {
     ...summary,
     items,
     rateKopecks,
     debtKopecks: summary.debtHours * rateKopecks,
-    balanceKopecks: moneyKopecks + packageKopecks - (paidHours - summary.leftoverHours) * rateKopecks,
+    balanceKopecks: paidKopecks - (paidHours - summary.leftoverHours) * rateKopecks,
   };
 }

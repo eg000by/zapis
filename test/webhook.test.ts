@@ -140,14 +140,9 @@ describe("/api/payments/webhook — ЮKassa", () => {
     expect(sendOwner).not.toHaveBeenCalled();
   });
 
-  it("оплата старого (отменённого) предложения пакета засчитывается", async () => {
-    vi.mocked(getYkPayment).mockResolvedValue(ykPayment({ amountKopecks: 816000 }));
-    vi.mocked(getPayment).mockResolvedValue({
-      ...OUR,
-      status: "canceled",
-      kind: "package:8",
-      amountKopecks: 816000,
-    } as any);
+  it("оплата по ссылке снятого (canceled) счёта засчитывается", async () => {
+    vi.mocked(getYkPayment).mockResolvedValue(ykPayment());
+    vi.mocked(getPayment).mockResolvedValue({ ...OUR, status: "canceled" } as any);
     await call(EVENT);
     expect(setPaymentStatus).toHaveBeenCalledWith("p1", "paid");
   });
