@@ -6,11 +6,12 @@ function token(): string {
   return t;
 }
 
-async function api(method: string, body: unknown): Promise<any> {
+async function api(method: string, body: unknown, opts: { timeoutMs?: number } = {}): Promise<any> {
   const res = await fetch(`https://api.telegram.org/bot${token()}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
   });
   const data = await res.json();
   if (!data.ok && !isNotModified(data)) {
@@ -209,23 +210,29 @@ export async function sendOwner(
 }
 
 // Username бота — для deep-link t.me/<бот>?start=…. Явный TELEGRAM_BOT_USERNAME из env
-// либо getMe (кэшируется на жизнь лямбды). Пустая строка — узнать не удалось.
+// либо getMe. Пустая строка — узнать не удалось.
 //
-// Кэшируется только удача: один сбой getMe раньше запоминался пустой строкой, и
-// кнопка подключения уведомлений пропадала из кабинета до холодного старта лямбды.
-let cachedUsername: string | null = null;
+// Удача кэшируется на жизнь лямбды, неудача — на BOT_USERNAME_RETRY_MS. Раньше один
+// сбой getMe запоминался навсегда, и кнопка подключения уведомлений пропадала из
+// кабинета до холодного старта; без кэша неудачи же каждый кабинет во время сбоя
+// Telegram ждал бы свой getMe. Сам getMe — с таймаутом: кабинет не должен висеть.
+const BOT_USERNAME_RETRY_MS = 60000;
+const GET_ME_TIMEOUT_MS = 3000;
+let cachedUsername = "";
+let usernameFailedAt = 0;
 export async function botUsername(): Promise<string> {
   const explicit = (process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
   if (explicit) return explicit;
   if (cachedUsername) return cachedUsername;
+  if (usernameFailedAt && Date.now() - usernameFailedAt < BOT_USERNAME_RETRY_MS) return "";
   try {
-    const data = await api("getMe", {});
-    const name = String(data?.result?.username || "");
-    if (name) cachedUsername = name;
-    return name;
+    const data = await api("getMe", {}, { timeoutMs: GET_ME_TIMEOUT_MS });
+    cachedUsername = String(data?.result?.username || "");
   } catch {
-    return "";
+    cachedUsername = "";
   }
+  usernameFailedAt = cachedUsername ? 0 : Date.now();
+  return cachedUsername;
 }
 
 // ── Постоянное меню ─────────────────────────────────────────────────────────

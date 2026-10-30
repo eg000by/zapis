@@ -6,7 +6,7 @@ import { sendUpcomingLessonAlerts, UPCOMING_LEAD_MINUTES } from "@/lib/upcoming"
 import { listDayOccurrences } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { listStudentLessons } from "@/lib/lessons";
-import { claimOnce, pingSent, releaseClaim } from "@/lib/pings";
+import { claimLease, pingSent, recordPing, releaseClaim } from "@/lib/pings";
 import { notifyStudent } from "@/lib/notify";
 import { sendOwner } from "@/lib/telegram";
 
@@ -20,7 +20,8 @@ vi.mock("@/lib/lessons", () => ({ listStudentLessons: vi.fn(async () => []) }));
 vi.mock("@/lib/pings", async (importOriginal) => ({
   absenceKey: (await importOriginal<typeof import("@/lib/pings")>()).absenceKey,
   pingSent: vi.fn(async () => false),
-  claimOnce: vi.fn(async () => true),
+  claimLease: vi.fn(async () => true),
+  recordPing: vi.fn(async () => {}),
   releaseClaim: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
@@ -63,7 +64,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
   vi.mocked(pingSent).mockResolvedValue(false);
-  vi.mocked(claimOnce).mockResolvedValue(true);
+  vi.mocked(claimLease).mockResolvedValue(true);
   vi.mocked(getStudent).mockResolvedValue(STUDENT as never);
   vi.mocked(listStudentLessons).mockResolvedValue([]);
 });
@@ -82,7 +83,7 @@ describe("sendUpcomingLessonAlerts", () => {
     expect(t).toContain("Стас");
     expect(t).toContain("https://telemost.yandex.ru/j/777");
     expect(t).toContain("Прошлое занятие (05.07): разбирали словари");
-    expect(claimOnce).toHaveBeenCalledWith("soon:ev1_a");
+    expect(recordPing).toHaveBeenCalledWith("soon:ev1_a");
   });
 
   // Доска — такая же рабочая ссылка, как звонок: без неё занятие не начать, и
@@ -165,7 +166,7 @@ describe("sendUpcomingLessonAlerts", () => {
 
   it("уже предупреждали — второй раз не пишем", async () => {
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(SOON)] as never);
-    vi.mocked(claimOnce).mockResolvedValue(false); // отметку уже взял другой прогон
+    vi.mocked(pingSent).mockImplementation(async (k: string) => k === "soon:ev1_a");
 
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 0 });
     expect(sendOwner).not.toHaveBeenCalled();
@@ -195,8 +196,9 @@ describe("sendUpcomingLessonAlerts", () => {
 
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
     // Отметку упавшего снимаем — следующий прогон попробует снова.
-    expect(releaseClaim).toHaveBeenCalledOnce();
-    expect(releaseClaim).toHaveBeenCalledWith("soon:ev1_a");
+    expect(releaseClaim).toHaveBeenCalledWith("lock:soon:ev1_a");
+    expect(recordPing).not.toHaveBeenCalledWith("soon:ev1_a");
+    expect(recordPing).toHaveBeenCalledWith("soon:ev1_b");
   });
 
   it("предупреждаем примерно за час, а не за полдня", async () => {
@@ -260,7 +262,10 @@ describe("sendUpcomingLessonAlerts", () => {
     );
 
     expect(await sendUpcomingLessonAlerts(NOW)).toEqual({ sent: 1 });
-    expect(sendOwner).toHaveBeenCalledOnce(); // преподавателю — как обычно
+    expect(sendOwner).toHaveBeenCalledOnce();
+    // Преподавателю — кого не ждать.
+    expect(ownerText()).toContain("Участников: 2");
+    expect(ownerText()).toContain("🙈 Не смогут: Егор");
     expect(notifyStudent).toHaveBeenCalledOnce();
     expect(vi.mocked(notifyStudent).mock.calls[0][0]).toMatchObject({ id: "s2" });
   });

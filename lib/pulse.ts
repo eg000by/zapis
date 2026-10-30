@@ -5,7 +5,7 @@
 // (подтверждение/откат пропуска), «Не прошло» (серый, не тарифицируется), «📝» (заметка).
 import { listDayOccurrences } from "./google";
 import { MISSED_COLOR_ID, SLOT_MINUTES, SLOT_STEP_MINUTES } from "./config";
-import { claimOnce, releaseClaim } from "./pings";
+import { sendOnce } from "./once";
 import { escapeHtml, inlineKeyboard, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
 import { ensureAutoInvoices } from "./autobill";
@@ -29,48 +29,43 @@ export async function sendFinishedLessonPrompts(now: Date): Promise<{ sent: numb
   // за прогон (ensureAutoInvoices идемпотентен и считает весь баланс целиком).
   const toBill = new Map<string, string>();
   for (const o of occ) {
-    let claimed = false;
     try {
       if (blockEndMs(o.start, o.hours) > now.getTime()) continue; // ещё идёт или впереди
       if (o.colorId === MISSED_COLOR_ID) continue; // уже помечено пропуском
-      // Атомарно: пульс дёргают два планировщика, и одновременные прогоны иначе
-      // спросили бы про одно занятие дважды.
-      if (!(await claimOnce(o.instanceId))) continue;
-      claimed = true;
+      // Пульс дёргают два планировщика: sendOnce не даст одновременным прогонам
+      // спросить про одно занятие дважды, а упавшему — потерять вопрос.
+      const asked = await sendOnce(o.instanceId, async () => {
+        // Групповое занятие касается всех участников: счёт после занятия должен
+        // появиться у каждого, а не потеряться из-за пустого studentId. У обычного
+        // занятия ученик уже известен из события — лишний запрос в БД не делаем.
+        const members = o.groupId ? await activeMembers(o.groupId) : [];
+        if (o.groupId) for (const m of members) toBill.set(m.id, m.name);
+        else if (o.studentId) toBill.set(o.studentId, o.student || "");
 
-      // Групповое занятие касается всех участников: счёт после занятия должен
-      // появиться у каждого, а не потеряться из-за пустого studentId. У обычного
-      // занятия ученик уже известен из события — лишний запрос в БД не делаем.
-      const members = o.groupId ? await activeMembers(o.groupId) : [];
-      if (o.groupId) for (const m of members) toBill.set(m.id, m.name);
-      else if (o.studentId) toBill.set(o.studentId, o.student || "");
+        // У группы спрашиваем не «как прошло», а «кто был»: пришли не все — и цвет
+        // одного события про это сказать не может. По умолчанию отмечены все: обычный
+        // случай — полный состав, и тогда достаточно нажать «Готово».
+        if (o.groupId && members.length) {
+          await sendOwner(
+            `🏁 <b>Занятие группы завершилось</b>\n\n👥 ${escapeHtml(o.student || "")} · ${escapeHtml(
+              o.subject
+            )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n` +
+              GROUP_QUESTION,
+            inlineKeyboard(attendanceKeyboard(members, o.instanceId))
+          );
+          return;
+        }
 
-      // У группы спрашиваем не «как прошло», а «кто был»: пришли не все — и цвет
-      // одного события про это сказать не может. По умолчанию отмечены все: обычный
-      // случай — полный состав, и тогда достаточно нажать «Готово».
-      if (o.groupId && members.length) {
         await sendOwner(
-          `🏁 <b>Занятие группы завершилось</b>\n\n👥 ${escapeHtml(o.student || "")} · ${escapeHtml(
+          `🏁 <b>Занятие завершилось</b>\n\n🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(
             o.subject
-          )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n` +
-            GROUP_QUESTION,
-          inlineKeyboard(attendanceKeyboard(members, o.instanceId))
+          )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n${REPORT_QUESTION}`,
+          inlineKeyboard(reportKeyboard(o.instanceId))
         );
-        sent++;
-        continue;
-      }
-
-      await sendOwner(
-        `🏁 <b>Занятие завершилось</b>\n\n🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(
-          o.subject
-        )}\n🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n\n${REPORT_QUESTION}`,
-        inlineKeyboard(reportKeyboard(o.instanceId))
-      );
-      sent++;
+      });
+      if (asked) sent++;
     } catch (e) {
       console.error("pulse: occurrence failed", o.instanceId, e);
-      // Не дошло — снимаем отметку, следующий прогон спросит снова.
-      if (claimed) await releaseClaim(o.instanceId).catch(() => {});
     }
   }
 

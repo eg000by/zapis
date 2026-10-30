@@ -13,16 +13,17 @@ import {
 import { listDayOccurrences } from "@/lib/google";
 import { getStudent } from "@/lib/students";
 import { notifyStudent } from "@/lib/notify";
-import { claimOnce, pingSent, releaseClaim } from "@/lib/pings";
+import { claimLease, pingSent, recordPing, releaseClaim } from "@/lib/pings";
 
 vi.mock("@/lib/google", () => ({ listDayOccurrences: vi.fn(async () => []) }));
 vi.mock("@/lib/students", () => ({ getStudent: vi.fn(async () => null) }));
 vi.mock("@/lib/groups", () => ({ activeMembers: vi.fn(async () => []) }));
-vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => {}) }));
+vi.mock("@/lib/notify", () => ({ notifyStudent: vi.fn(async () => true) }));
 vi.mock("@/lib/pings", async (importOriginal) => ({
   absenceKey: (await importOriginal<typeof import("@/lib/pings")>()).absenceKey,
   pingSent: vi.fn(async () => false),
-  claimOnce: vi.fn(async () => true),
+  claimLease: vi.fn(async () => true),
+  recordPing: vi.fn(async () => {}),
   releaseClaim: vi.fn(async () => {}),
 }));
 
@@ -51,7 +52,8 @@ beforeEach(() => {
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
   vi.mocked(getStudent).mockResolvedValue(STUDENT as never);
   vi.mocked(pingSent).mockResolvedValue(false);
-  vi.mocked(claimOnce).mockResolvedValue(true);
+  vi.mocked(claimLease).mockResolvedValue(true);
+  vi.mocked(notifyStudent).mockResolvedValue(true);
 });
 
 describe("reminderMomentFor — когда напоминать", () => {
@@ -137,7 +139,17 @@ describe("sendLessonReminders", () => {
   it("повторно не напоминаем", async () => {
     const now = msk("2026-07-15T10:01:00");
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(msk("2026-07-15T18:30:00"))] as never);
-    vi.mocked(claimOnce).mockResolvedValue(false); // отметку уже взял другой прогон
+    vi.mocked(pingSent).mockImplementation(async (k: string) => k.startsWith("rem:"));
+
+    expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
+    expect(notifyStudent).not.toHaveBeenCalled();
+    expect(claimLease).not.toHaveBeenCalled();
+  });
+
+  it("одновременный прогон уже отправляет — второй молчит", async () => {
+    const now = msk("2026-07-15T10:01:00");
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(msk("2026-07-15T18:30:00"))] as never);
+    vi.mocked(claimLease).mockResolvedValue(false);
 
     expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
     expect(notifyStudent).not.toHaveBeenCalled();
@@ -151,7 +163,7 @@ describe("sendLessonReminders", () => {
     expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
     expect(notifyStudent).not.toHaveBeenCalled();
     // Отметку не ставим: подключит до отсечки — напоминание ещё придёт.
-    expect(claimOnce).not.toHaveBeenCalled();
+    expect(claimLease).not.toHaveBeenCalled();
   });
 
   // Групповое занятие — одно событие без studentId: напоминание должно прийти
@@ -173,7 +185,7 @@ describe("sendLessonReminders", () => {
     expect(await sendLessonReminders(now)).toEqual({ reminders: 2 });
     expect(notifyStudent).toHaveBeenCalledTimes(2);
     // Дедупликация — по каждому участнику отдельно.
-    expect(vi.mocked(claimOnce).mock.calls.map((c) => c[0])).toEqual([
+    expect(vi.mocked(recordPing).mock.calls.map((c) => c[0])).toEqual([
       expect.stringContaining("rem:s1:"),
       expect.stringContaining("rem:s2:"),
     ]);
@@ -202,13 +214,30 @@ describe("sendLessonReminders", () => {
     expect(vi.mocked(notifyStudent).mock.calls[0][0]).toMatchObject({ id: "s2" });
   });
 
-  it("сбой отправки снимает отметку — следующий прогон попробует снова", async () => {
+  it("не дошло (сеть, 429) — отметку не ставим, следующий прогон повторит", async () => {
     const now = msk("2026-07-15T10:01:00");
     vi.mocked(listDayOccurrences).mockResolvedValue([occ(msk("2026-07-15T18:30:00"))] as never);
-    vi.mocked(notifyStudent).mockRejectedValueOnce(new Error("сеть"));
+    vi.mocked(notifyStudent).mockResolvedValueOnce(false);
 
     expect(await sendLessonReminders(now)).toEqual({ reminders: 0 });
-    expect(releaseClaim).toHaveBeenCalledWith(expect.stringContaining("rem:stu-1:"));
+    expect(recordPing).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith(expect.stringContaining("lock:rem:stu-1:"));
+  });
+
+  it("«Не смогу прийти» на одно из двух занятий — напоминаем только о другом", async () => {
+    const now = msk("2026-07-15T10:01:00");
+    const skippedStart = msk("2026-07-15T16:00:00");
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ(skippedStart),
+      occ(msk("2026-07-15T18:30:00")),
+    ] as never);
+    vi.mocked(pingSent).mockImplementation(
+      async (k: string) => k === `skip:stu-1:${skippedStart.toISOString()}`
+    );
+
+    expect(await sendLessonReminders(now)).toEqual({ reminders: 1 });
+    expect(text()).toContain("занятие в <b>18:30</b>");
+    expect(text()).not.toContain("16:00");
   });
 
   it("уже начавшееся и помеченное пропуском занятие не напоминаем", async () => {

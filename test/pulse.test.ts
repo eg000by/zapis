@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/cron/pulse/route";
 import { listDayOccurrences } from "@/lib/google";
-import { claimOnce, releaseClaim } from "@/lib/pings";
+import { claimLease, pingSent, recordPing, releaseClaim } from "@/lib/pings";
 import { sendOwner } from "@/lib/telegram";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { recolorStudent } from "@/lib/coloring";
@@ -14,7 +14,9 @@ vi.mock("@/lib/coloring", () => ({ recolorStudent: vi.fn(async () => {}) }));
 // только шумела бы в проверках отправленных сообщений.
 vi.mock("@/lib/panel", () => ({ refreshPanel: vi.fn(async () => {}) }));
 vi.mock("@/lib/pings", () => ({
-  claimOnce: vi.fn(async () => true),
+  pingSent: vi.fn(async () => false),
+  claimLease: vi.fn(async () => true),
+  recordPing: vi.fn(async () => {}),
   releaseClaim: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
@@ -57,7 +59,8 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   delete process.env.CRON_SECRET;
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
-  vi.mocked(claimOnce).mockResolvedValue(true);
+  vi.mocked(pingSent).mockResolvedValue(false);
+  vi.mocked(claimLease).mockResolvedValue(true);
 });
 
 describe("/api/cron/pulse — «как прошло занятие?»", () => {
@@ -74,7 +77,7 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     expect(kb).toContain("ldone:ev1_a");
     expect(kb).toContain("lmiss:ev1_a");
     expect(kb).toContain("lrep:ev1_a");
-    expect(claimOnce).toHaveBeenCalledWith("ev1_a");
+    expect(recordPing).toHaveBeenCalledWith("ev1_a");
   });
 
   it("счёт за проведённое занятие выставляется сразу, не дожидаясь кабинета", async () => {
@@ -118,13 +121,13 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     const res = await call();
     expect(await res.json()).toMatchObject({ sent: 0 });
     expect(sendOwner).not.toHaveBeenCalled();
-    expect(claimOnce).not.toHaveBeenCalled();
+    expect(claimLease).not.toHaveBeenCalled();
     expect(ensureAutoInvoices).not.toHaveBeenCalled(); // счёт «вперёд» тут ни при чём
   });
 
   it("уже спрашивали (ping) — не дублируем", async () => {
     vi.mocked(listDayOccurrences).mockResolvedValue([occ("2026-07-12T07:00:00.000Z")] as any);
-    vi.mocked(claimOnce).mockResolvedValue(false);
+    vi.mocked(pingSent).mockResolvedValue(true);
 
     const res = await call();
     expect(await res.json()).toMatchObject({ sent: 0 });
@@ -137,7 +140,8 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
 
     const res = await call();
     expect(await res.json()).toMatchObject({ sent: 0 });
-    expect(releaseClaim).toHaveBeenCalledWith("ev1_a");
+    expect(releaseClaim).toHaveBeenCalledWith("lock:ev1_a");
+    expect(recordPing).not.toHaveBeenCalled();
   });
 
   it("уже помечено пропуском (серое) — не спрашиваем", async () => {

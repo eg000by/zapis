@@ -1,5 +1,6 @@
 // Имя бота для deep-link в кабинете. Один сбой getMe раньше запоминался пустой
-// строкой, и кнопка «Подключить уведомления» пропадала до холодного старта лямбды.
+// строкой навсегда, и кнопка «Подключить уведомления» пропадала до холодного старта;
+// теперь неудача помнится минуту, а сам getMe — с таймаутом.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fetchMock = vi.fn();
@@ -16,22 +17,42 @@ afterEach(() => vi.unstubAllGlobals());
 const reply = (body: unknown) => ({ json: async () => body });
 
 describe("botUsername", () => {
-  it("сбой getMe не запоминается — следующий вызов спрашивает снова", async () => {
+  it("сбой getMe помнится минуту, потом спрашиваем снова", async () => {
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
     const { botUsername } = await import("@/lib/telegram");
     fetchMock.mockRejectedValueOnce(new Error("ECONNRESET"));
     expect(await botUsername()).toBe("");
 
+    // Сразу после сбоя кабинеты не дёргают Telegram каждый раз заново.
+    expect(await botUsername()).toBe("");
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    now.mockReturnValue(t0 + 61000);
     fetchMock.mockResolvedValueOnce(reply({ ok: true, result: { username: "zapis_bot" } }));
     expect(await botUsername()).toBe("zapis_bot");
+    now.mockRestore();
   });
 
-  it("ответ без имени тоже не запоминается", async () => {
+  it("ответ без имени тоже не кэшируется навсегда", async () => {
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
     const { botUsername } = await import("@/lib/telegram");
     fetchMock.mockResolvedValueOnce(reply({ ok: false, error_code: 502, description: "Bad Gateway" }));
     expect(await botUsername()).toBe("");
 
+    now.mockReturnValue(t0 + 61000);
     fetchMock.mockResolvedValueOnce(reply({ ok: true, result: { username: "zapis_bot" } }));
     expect(await botUsername()).toBe("zapis_bot");
+    now.mockRestore();
+  });
+
+  it("getMe идёт с таймаутом — кабинет не висит на Telegram", async () => {
+    const { botUsername } = await import("@/lib/telegram");
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: { username: "zapis_bot" } }));
+    await botUsername();
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("удачный ответ кэшируется — getMe не дёргается на каждый кабинет", async () => {

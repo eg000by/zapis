@@ -15,6 +15,8 @@ vi.mock("@/lib/students", () => ({
   getStudent: vi.fn(async () => null),
   clearTgChat: vi.fn(async () => {}),
 }));
+vi.mock("@/lib/google", () => ({ listContactEvents: vi.fn(async () => []) }));
+vi.mock("@/lib/groups", () => ({ getGroup: vi.fn(async () => null) }));
 vi.mock("@/lib/shortlink", () => ({ getOrCreateStudentLinkCode: vi.fn(async () => "x") }));
 
 const STUDENT = { tgChatId: "555" };
@@ -23,7 +25,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("notifyStudent — недоступный чат", () => {
   it("доставлено — привязку не трогаем", async () => {
-    await notifyStudent(STUDENT, "привет");
+    expect(await notifyStudent(STUDENT, "привет")).toBe(true);
     expect(sendMessageRaw).toHaveBeenCalledWith("555", "привет");
     expect(clearTgChat).not.toHaveBeenCalled();
   });
@@ -34,7 +36,7 @@ describe("notifyStudent — недоступный чат", () => {
       error_code: 403,
       description: "Forbidden: bot was blocked by the user",
     });
-    await notifyStudent(STUDENT, "привет");
+    expect(await notifyStudent(STUDENT, "привет")).toBe(false);
     expect(clearTgChat).toHaveBeenCalledWith("555");
   });
 
@@ -66,7 +68,7 @@ describe("notifyStudent — недоступный чат", () => {
 
   it("сбой сети не роняет вызывающего", async () => {
     vi.mocked(sendMessageRaw).mockRejectedValueOnce(new Error("ECONNRESET"));
-    await expect(notifyStudent(STUDENT, "привет")).resolves.toBeUndefined();
+    await expect(notifyStudent(STUDENT, "привет")).resolves.toBe(false);
     expect(clearTgChat).not.toHaveBeenCalled();
   });
 });
