@@ -154,7 +154,7 @@ describe("окна для родителя", () => {
 
   it("по умолчанию только рекомендуемые; дни без них не выводятся", () => {
     const f = formatTrialWindows(days, false);
-    expect(f.text).toBe("Свободное время для пробного занятия (МСК):\nПн, 13 июля — 15:00");
+    expect(f.text).toBe("Свободное время (МСК):\nПн, 13 июля — 15:00");
     expect(f.slots.map((s) => s.start)).toEqual(["a"]);
     expect(f.fellBack).toBe(false);
   });
@@ -327,8 +327,9 @@ describe("бот: окна → время → «кто придёт»", () => {
     lesson("2026-07-14T07:10:00.000Z"); // Вт 10:10 → рядом 09:00 и 11:20
     await showTrialWindows(1, null);
     const text = String(vi.mocked(sendOwner).mock.calls.at(-1)![0]);
-    expect(text).toContain("<pre>Свободное время для пробного занятия (МСК):");
+    expect(text).toContain("<pre>Свободное время (МСК):\n");
     expect(text).toContain("Вт, 14 июля — 09:00, 11:20");
+    expect(/<pre>([\s\S]*?)<\/pre>/.exec(text)![1]).not.toMatch(/пробн/i); // текст родителю
     const buttons = (vi.mocked(sendOwner).mock.calls.at(-1)![1] as any).inline_keyboard.flat();
     expect(buttons.map((b: any) => b.text)).toContain("Вт 14 · 11:20");
     for (const b of buttons) {

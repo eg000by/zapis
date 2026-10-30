@@ -334,7 +334,9 @@ export function weeklyOccurrences(startIso: string, weeks: number): string[] {
 }
 
 // Момент в формате EXDATE/DTSTART по «стеночному» времени МСК: "20260722T100000".
-function mskWallStamp(iso: string): string {
+// Общий для новых серий (buildRecurrence) и закрепления отмен (lib/google.ts):
+// один формат — иначе сверка уже записанных EXDATE с новыми молча разъедется.
+export function mskWallStamp(iso: string): string {
   const d = new Date(new Date(iso).getTime() + MSK_OFFSET_MINUTES * 60000);
   const p = (n: number) => String(n).padStart(2, "0");
   return (

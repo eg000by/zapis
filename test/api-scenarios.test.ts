@@ -1140,7 +1140,8 @@ describe("кнопки утреннего отчёта", () => {
   it("«📝» → promptReportLessonNote с id инстанса", async () => {
     const { promptReportLessonNote } = await import("@/lib/crm-bot");
     await tgCallback("lrep:ev_x");
-    expect(promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_x");
+    // Без текста отчёта (кнопка не из «🏁 Занятие завершилось») — статус не меняем.
+    expect(promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_x", { held: false });
   });
 
   it("«Не прошло» → markLessonMissed, «Прошло» → unmarkLessonMissed", async () => {
@@ -1215,8 +1216,18 @@ describe("отчёт «🏁 Занятие завершилось» меняет
     const crm = await import("@/lib/crm-bot");
     vi.mocked(crm.promptReportLessonNote).mockResolvedValueOnce(true as never);
     await tgCallback("lrep:ev_1", { text: REPORT });
-    expect(crm.promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_1");
+    // «Проведено» — по-настоящему: заметка открывается с held, и серая отметка
+    // пропуска снимается внутри, после проверки, что занятие есть.
+    expect(crm.promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_1", { held: true });
     expect(lastEdit()[2]).toMatch(/✅ Проведено$/);
+  });
+
+  it("📝 из отчёта, но занятие не найдено — вопрос остаётся, ничего не меняем", async () => {
+    const crm = await import("@/lib/crm-bot");
+    vi.mocked(crm.promptReportLessonNote).mockResolvedValueOnce(false as never);
+    vi.mocked(editMessageText).mockClear();
+    await tgCallback("lrep:ev_1", { text: REPORT });
+    expect(editMessageText).not.toHaveBeenCalled();
   });
 
   it("📝 с экрана «Занятия» — сам экран не трогаем", async () => {
@@ -1225,6 +1236,8 @@ describe("отчёт «🏁 Занятие завершилось» меняет
     vi.mocked(editMessageText).mockClear();
     await tgCallback("lrep:ev_1", { text: "📅 Занятия — Стас\n\n…" });
     expect(editMessageText).not.toHaveBeenCalled();
+    // Заметка к занятию из списка статус не меняет: пропуск можно и описать.
+    expect(crm.promptReportLessonNote).toHaveBeenLastCalledWith(111222333, "ev_1", { held: false });
   });
 
   it("«↩️ Изменить» возвращает вопрос и кнопки", async () => {

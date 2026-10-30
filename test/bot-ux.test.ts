@@ -21,7 +21,7 @@ import { getSetting, setSetting } from "@/lib/settings";
 import { listDayOccurrences } from "@/lib/google";
 import { computeIncomeStats, listDebtors } from "@/lib/stats";
 import { getStudent, listStudents } from "@/lib/students";
-import { getLesson, setLessonNote } from "@/lib/lessons";
+import { getLesson, recentLessonNotes, setLessonNote } from "@/lib/lessons";
 import { updateStudent } from "@/lib/students";
 import { planSettle, settleStudentDebts, unsettleStudentDebts } from "@/lib/payments";
 import { recolorStudent } from "@/lib/coloring";
@@ -90,6 +90,7 @@ vi.mock("@/lib/google", () => ({
   setEventColor: vi.fn(),
 }));
 vi.mock("@/lib/lessons", () => ({
+  recentLessonNotes: vi.fn(async () => []),
   listStudentLessons: vi.fn(async () => []),
   findOrCreateOccurrenceLesson: vi.fn(),
   getLesson: vi.fn(),
@@ -131,6 +132,7 @@ beforeEach(() => {
   vi.mocked(getSetting).mockResolvedValue("");
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
   vi.mocked(listDebtors).mockResolvedValue([]);
+  vi.mocked(recentLessonNotes).mockResolvedValue([]);
 });
 
 describe("ввод текста не плодит сообщений", () => {
@@ -235,6 +237,68 @@ describe("панель дня", () => {
     // Кнопок у панели нет: любая из них переписала бы само закреплённое сообщение,
     // и в шапке чата вместо расписания оказывался бы открытый экран.
     expect(keyboard).toBeUndefined();
+  });
+
+  it("под занятием — последняя заметка ученика до него: видно, что делать сегодня", async () => {
+    vi.setSystemTime(new Date("2026-09-02T05:00:00.000Z")); // 08:00 МСК
+    vi.mocked(listDayOccurrences).mockResolvedValue([
+      occ(10, "Амина"),
+      { ...occ(12, "Стас"), studentId: "stu-2" },
+      { ...occ(14, "Группа"), studentId: "", groupId: "g1" },
+    ] as never);
+    vi.mocked(recentLessonNotes).mockResolvedValue([
+      // свежие сверху
+      { studentId: "stu-1", start: new Date("2026-08-31T07:00:00.000Z"), note: "бин поиск <начали>\nдальше задачи" },
+      { studentId: "stu-1", start: new Date("2026-08-24T07:00:00.000Z"), note: "старая" },
+    ]);
+
+    const { text } = await renderPanel();
+    expect(vi.mocked(recentLessonNotes).mock.calls[0][0]).toEqual(["stu-1", "stu-2"]); // без групп
+    const lines = text.split("\n");
+    const amina = lines.findIndex((l) => l.includes("Амина"));
+    expect(lines[amina + 1]).toBe("    📝 <i>бин поиск &lt;начали&gt; дальше задачи</i>");
+    expect(text).not.toContain("старая");
+    // У Стаса заметок нет — строки нет.
+    const stas = lines.findIndex((l) => l.includes("Стас"));
+    expect(lines[stas + 1]).not.toContain("📝");
+  });
+
+  it("длинная заметка в панели обрезается", async () => {
+    vi.setSystemTime(new Date("2026-09-02T05:00:00.000Z"));
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(10, "Амина")] as never);
+    vi.mocked(recentLessonNotes).mockResolvedValue([
+      { studentId: "stu-1", start: new Date("2026-08-31T07:00:00.000Z"), note: "а".repeat(500) },
+    ]);
+    const { text } = await renderPanel();
+    expect(text).toMatch(/а{150,}…<\/i>/);
+    expect(text.length).toBeLessThan(400);
+  });
+
+  it("загруженный день: заметки укорачиваются, чтобы панель влезла в одно сообщение", async () => {
+    vi.setSystemTime(new Date("2026-09-02T02:00:00.000Z"));
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ...occ(10, `Ученик${i}`),
+      instanceId: `ev${i}`,
+      studentId: `stu-${i}`,
+    }));
+    vi.mocked(listDayOccurrences).mockResolvedValue(many as never);
+    vi.mocked(recentLessonNotes).mockResolvedValue(
+      many.map((o) => ({ studentId: o.studentId, start: new Date("2026-08-31T07:00:00.000Z"), note: "з".repeat(300) }))
+    );
+    const { text } = await renderPanel();
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(text).toContain("Ученик29"); // расписание целиком
+  });
+
+  it("эмодзи на границе обрезки не режется пополам", async () => {
+    vi.setSystemTime(new Date("2026-09-02T05:00:00.000Z"));
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ(10, "Амина")] as never);
+    vi.mocked(recentLessonNotes).mockResolvedValue([
+      { studentId: "stu-1", start: new Date("2026-08-31T07:00:00.000Z"), note: "😀".repeat(200) },
+    ]);
+    const { text } = await renderPanel();
+    expect(text).toContain(`${"😀".repeat(159)}…`);
+    expect(text).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/); // нет «половинок»
   });
 
   it("обновление правит то же сообщение, а не шлёт новое", async () => {

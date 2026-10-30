@@ -47,13 +47,17 @@ vi.mock("@/lib/telegram", () => ({
 
 const INSTANCE = "ev1_20260727T153000Z";
 
+const patch = vi.fn(async (_: unknown) => ({ data: {} }));
+
 // Событие календаря, каким его отдаёт events.get.
-function mockEvent(priv: Record<string, string> = {}) {
+function mockEvent(priv: Record<string, string> = {}, colorId?: string) {
   vi.mocked(calendarClient).mockReturnValue({
     events: {
+      patch,
       get: vi.fn(async () => ({
         data: {
           id: INSTANCE,
+          colorId,
           start: { dateTime: "2026-07-27T18:30:00+03:00" },
           extendedProperties: {
             private: { studentId: "stu-1", subject: "Питон", lessons: "1", ...priv },
@@ -107,5 +111,37 @@ describe("📝 заметка к занятию — подтверждение, 
     await promptReportLessonNote(1, INSTANCE);
     expect(ensureAutoInvoices).not.toHaveBeenCalled();
     expect(recolorStudent).not.toHaveBeenCalled();
+  });
+});
+
+describe("📝 на висящем вопросе — ответ «Прошло»", () => {
+  it("held: серая отметка пропуска снимается до пересчёта счетов", async () => {
+    mockEvent({}, "8");
+    const order: string[] = [];
+    patch.mockImplementationOnce(async () => {
+      order.push("unmark");
+      return { data: {} };
+    });
+    vi.mocked(ensureAutoInvoices).mockImplementationOnce(async () => {
+      order.push("autobill");
+      return null;
+    });
+    expect(await promptReportLessonNote(1, INSTANCE, { held: true })).toBe(true);
+    expect(patch.mock.calls[0][0]).toMatchObject({ eventId: INSTANCE, requestBody: { colorId: null } });
+    expect(order).toEqual(["unmark", "autobill"]);
+    expect(recolorStudent).toHaveBeenCalledTimes(1); // один проход, не два
+  });
+
+  it("без held (заметка из списка занятий) пропуск остаётся пропуском", async () => {
+    mockEvent({}, "8");
+    await promptReportLessonNote(1, INSTANCE);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("занятие без ученика — ничего не меняем, даже с held", async () => {
+    mockEvent({ studentId: "" }, "8");
+    expect(await promptReportLessonNote(1, INSTANCE, { held: true })).toBe(false);
+    expect(patch).not.toHaveBeenCalled();
+    expect(ensureAutoInvoices).not.toHaveBeenCalled();
   });
 });

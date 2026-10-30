@@ -494,13 +494,17 @@ async function handleCallback(cq: any): Promise<NextResponse> {
     await answerCallback(cq.id, res.found ? "Занятие учтено ✅" : "Занятие не найдено");
     return ok();
   }
-  // Заметка к занятию прямо из отчёта (📝). Заметка = занятие состоялось (так и
-  // учитывается), поэтому висящий вопрос в отчёте сразу закрываем «Проведено».
+  // Заметка к занятию прямо из отчёта (📝). Нажатая на висящем вопросе, она отвечает
+  // на него «Прошло» — и по-настоящему, как «✅ Прошло»: серая отметка пропуска
+  // снимается (занятие отмечали «Не прошло», а потом передумали), счета пересчитываются.
+  // Иначе отчёт говорил «✅ Проведено», а календарь и счета считали занятие пропуском.
+  // Всё это — внутри promptReportLessonNote, после проверки, что занятие есть.
   if (data.startsWith("lrep:")) {
     const id = data.slice(5);
-    const started = await promptReportLessonNote(chatId, id);
     const report = parseReport(cq.message?.text);
-    if (started && report?.open && !report.group) {
+    const answers = !!report?.open && !report.group;
+    const started = await promptReportLessonNote(chatId, id, { held: answers });
+    if (started && answers) {
       await resolveReport(chatId, messageId, cq.message?.text, id, "done");
     }
     await answerCallback(cq.id);

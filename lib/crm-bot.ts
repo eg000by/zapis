@@ -1247,12 +1247,17 @@ export async function promptLessonNote(chatId: number | string, lessonId: string
 //
 // Заметка пишется к состоявшемуся занятию, поэтому строка сразу заводится со статусом
 // «проведено» — и, как и «Прошло», это повод пересчитать цвета и счета: неоплаченное
-// прошедшее занятие становится долгом (красным). Уже помеченный пропуск (серый) не
-// трогаем: recolorStudent пропускает нетарифицируемые занятия, так что заметка к
-// пропуску его не «воскресит».
+// прошедшее занятие становится долгом (красным).
+//
+// Пропуск (серый) по умолчанию не трогаем: заметку можно написать и к пропуску
+// («заболел»), и она его не «воскресит» — recolorStudent нетарифицируемые пропускает.
+// held=true — 📝 нажата на висящем вопросе «Как прошло?» и отвечает на него «Прошло»:
+// тогда серую отметку снимаем (как «✅ Прошло»), и только ПОСЛЕ проверки, что занятие
+// есть и привязано к ученику, — до пересчёта, одним проходом.
 export async function promptReportLessonNote(
   chatId: number | string,
-  instanceId: string
+  instanceId: string,
+  opts: { held?: boolean } = {}
 ): Promise<boolean> {
   const cal = calendarClient();
   let ev;
@@ -1274,6 +1279,13 @@ export async function promptReportLessonNote(
     occurrenceStart: new Date(start),
     subject: priv.subject || null,
   });
+  if (opts.held && ev.colorId === MISSED_COLOR_ID) {
+    try {
+      await cal.events.patch({ calendarId: CALENDAR_ID, eventId: instanceId, requestBody: { colorId: null } });
+    } catch (e) {
+      console.error("report note: unmark missed failed", instanceId, e);
+    }
+  }
   // Занятие состоялось: сверяем счета и цвета (best-effort — ввод заметки не должен
   // сорваться из-за недоступного календаря или БД).
   try {

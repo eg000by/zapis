@@ -1,7 +1,7 @@
 // Сервисный слой «Занятия». Одна строка = одно занятие (блок/повтор — по факту
 // проведения). Пишется из брони best-effort: если БД недоступна, запись в календарь
 // всё равно проходит. Заметку по содержанию занятия добавляет преподаватель.
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, ne } from "drizzle-orm";
 import { db } from "./db";
 import { lessons, type Lesson } from "./schema";
 
@@ -41,6 +41,30 @@ export async function listStudentLessons(studentId: string, limit = 30): Promise
     .where(eq(lessons.studentId, studentId))
     .orderBy(desc(lessons.occurrenceStart))
     .limit(limit);
+}
+
+// Заметки учеников к занятиям до момента before, свежие сверху: панель дня берёт
+// по каждому ученику последнюю до сегодняшнего занятия — на чём остановились и что
+// делать сегодня.
+export async function recentLessonNotes(
+  studentIds: string[],
+  before: Date
+): Promise<{ studentId: string; start: Date; note: string }[]> {
+  if (!studentIds.length) return [];
+  const rows = await db()
+    .select({ studentId: lessons.studentId, start: lessons.occurrenceStart, note: lessons.note })
+    .from(lessons)
+    .where(
+      and(
+        inArray(lessons.studentId, studentIds),
+        ne(lessons.note, ""),
+        lt(lessons.occurrenceStart, before),
+        // Заметка полугодовой давности о «что делать сегодня» уже не говорит.
+        gte(lessons.occurrenceStart, new Date(before.getTime() - 180 * 86400000))
+      )
+    )
+    .orderBy(desc(lessons.occurrenceStart));
+  return rows.filter((r): r is { studentId: string; start: Date; note: string } => !!r.start);
 }
 
 export async function setLessonNote(id: string, note: string): Promise<void> {
