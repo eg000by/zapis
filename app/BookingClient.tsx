@@ -72,19 +72,6 @@ interface MyBalance {
   nextPaid: boolean; // ближайшее занятие уже закрыто балансом
 }
 
-// Оплата вперёд одним платежом — второй вариант оплаты ТОГО ЖЕ счёта: пакет
-// со скидкой у ОГЭ/ЕГЭ (exam) либо занятия месяца по ставке у остальных.
-interface PackageOffer {
-  exam: boolean;
-  label: string;
-  lessons: number;
-  amountKopecks: number;
-  perLessonKopecks: number;
-  savingsKopecks: number;
-  savingsPercent: number;
-  payLink: string;
-}
-
 // "4 500 ₽" из копеек.
 function fmtRub(kopecks: number): string {
   return `${(kopecks / 100).toLocaleString("ru-RU")} ₽`;
@@ -107,15 +94,6 @@ function payLabel(p: { kind: string; note: string }): string {
   if (p.kind === "advance") return "Следующее занятие";
   if (p.kind === "debt") return "За проведённые занятия";
   return p.note;
-}
-
-// "счёт/счёта/счетов" по числу.
-function invoicesWord(n: number): string {
-  const d10 = n % 10;
-  const d100 = n % 100;
-  if (d10 === 1 && d100 !== 11) return "счёт";
-  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return "счёта";
-  return "счетов";
 }
 
 // "13:00" в МСК из ISO-момента.
@@ -302,7 +280,6 @@ export default function BookingClient({
   // Режим «СБП-перевод»: текст реквизитов вместо кнопки оплаты (пусто при ЮKassa).
   const [payHint, setPayHint] = useState<string>("");
   const [balance, setBalance] = useState<MyBalance | null>(null);
-  const [packageOffer, setPackageOffer] = useState<PackageOffer | null>(null);
   const [paidHistory, setPaidHistory] = useState<PaidRow[]>([]);
   // Цена одного занятия — показывается в подтверждении записи (0 — пробное/не задана).
   const [lessonPrice, setLessonPrice] = useState(0);
@@ -369,7 +346,7 @@ export default function BookingClient({
 
   const hasBookings = !!(my && my.length > 0);
   // Есть ли подтверждённые занятия. Пока нет — в кабинете не показываем ничего
-  // «занятийного» (Телемост, баланс, счета, пакет, ближайшее занятие): только сетку
+  // «занятийного» (Телемост, баланс, счета, ближайшее занятие): только сетку
   // записи и плашку про МСК. Заявки в статусе «ждёт подтверждения» сюда не считаются.
   const hasConfirmedLessons = !!(my && my.some((e) => e.status === "confirmed"));
   // Сетка выбирает новое время переноса, когда выбраны запись, режим move и режим (и дата — для once).
@@ -388,8 +365,7 @@ export default function BookingClient({
 
   // Деньги — одним блоком: сколько платить сейчас и из чего это состоит.
   // Долгом считаем счета за уже проведённые занятия и ручные (kind ≠ advance),
-  // предоплатой — счета «вперёд». Пакет в сумму не входит: это ВТОРОЙ способ
-  // оплатить тот же счёт, а не ещё один платёж.
+  // предоплатой — счета «вперёд».
   const dueTotal = payments.reduce((s, p) => s + p.amountKopecks, 0);
   const dueDebt = payments
     .filter((p) => p.kind !== "advance")
@@ -466,7 +442,6 @@ export default function BookingClient({
         setPayments(d.payments || []);
         setPayHint(d.payHint || "");
         setBalance(d.balance || null);
-        setPackageOffer(d.packageOffer || null);
         setPaidHistory(d.paidHistory || []);
         setLessonPrice(d.lessonPriceKopecks || 0);
         setMeetLink(d.meetLink || "");
@@ -963,79 +938,7 @@ export default function BookingClient({
             )}
           </div>
 
-          {/* Экзаменационному ученику показываем ДВА способа оплатить один и тот же
-              счёт: поштучно и пакетом. Пакет не добавляется к сумме — он её закрывает. */}
-          {packageOffer ? (
-            <div className="pay-options">
-              <div className="pay-opt">
-                <div className="pay-opt-head">
-                  <b>По одному занятию</b>
-                  <span className="pay-opt-price">{fmtRub(dueTotal)}</span>
-                </div>
-                <div className="pay-opt-note">
-                  {payments.length === 1
-                    ? payLabel(payments[0])
-                    : `${payments.length} ${invoicesWord(payments.length)}: долг и ближайшее занятие`}
-                </div>
-                {payments.length === 1 ? (
-                  payments[0].payLink ? (
-                    <a className="pay-btn" href={payments[0].payLink} target="_blank" rel="noreferrer">
-                      Оплатить {fmtRub(dueTotal)} ↗
-                    </a>
-                  ) : !payHint ? (
-                    <span className="badge wait">ждём ссылку на оплату</span>
-                  ) : null
-                ) : (
-                  <div className="pay-list">
-                    {payments.map((p) => (
-                      <div key={p.id} className="pay-row">
-                        <span>{fmtRub(p.amountKopecks)}</span>
-                        {p.payLink ? (
-                          <a className="pay-btn small" href={p.payLink} target="_blank" rel="noreferrer">
-                            Оплатить ↗
-                          </a>
-                        ) : !payHint ? (
-                          <span className="badge wait">ждём ссылку</span>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="pay-opt best">
-                <div className="pay-opt-head">
-                  <b>
-                    {packageOffer.exam
-                      ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
-                      : `Месяц вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
-                  </b>
-                  <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
-                  {/* Выгоду показываем, только если она есть: при индивидуальной
-                      ставке пакет может не быть дешевле поштучной оплаты. */}
-                  {packageOffer.savingsKopecks > 0 && (
-                    <span className="pkg-save">
-                      −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
-                    </span>
-                  )}
-                </div>
-                <div className="pay-opt-note">Вместо оплаты по одному занятию</div>
-                {packageOffer.payLink ? (
-                  <a
-                    className="pay-btn primary"
-                    href={packageOffer.payLink}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {packageOffer.exam ? "Оплатить пакет" : "Оплатить месяц"}{" "}
-                    {fmtRub(packageOffer.amountKopecks)} ↗
-                  </a>
-                ) : !payHint ? (
-                  <span className="badge wait">ждём ссылку на оплату</span>
-                ) : null}
-              </div>
-            </div>
-          ) : payments.length === 1 ? (
+          {payments.length === 1 ? (
             payments[0].payLink ? (
               <a className="pay-btn primary" href={payments[0].payLink} target="_blank" rel="noreferrer">
                 Оплатить {fmtRub(dueTotal)} ↗
@@ -1082,33 +985,6 @@ export default function BookingClient({
           </div>
           {balance && balance.balanceKopecks > 0 && (
             <div className="pay-split">Остаток на балансе: {fmtRub(balance.balanceKopecks)}</div>
-          )}
-          {/* Оплатить ещё дальше вперёд — по желанию: счёта нет, поэтому это
-              предложение, а не требование, и подписано именно так. */}
-          {packageOffer && (
-            <div className="pay-opt ahead">
-              <div className="pay-opt-head">
-                <b>
-                  {packageOffer.exam
-                    ? `${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)} сразу`
-                    : `Оплатить вперёд · ${packageOffer.lessons} ${lessonsWord(packageOffer.lessons)}`}
-                </b>
-                <span className="pay-opt-price">{fmtRub(packageOffer.amountKopecks)}</span>
-                {packageOffer.savingsKopecks > 0 && (
-                  <span className="pkg-save">
-                    −{packageOffer.savingsPercent}% · выгода {fmtRub(packageOffer.savingsKopecks)}
-                  </span>
-                )}
-              </div>
-              <div className="pay-opt-note">Чтобы не платить перед каждым занятием</div>
-              {packageOffer.payLink ? (
-                <a className="pay-btn" href={packageOffer.payLink} target="_blank" rel="noreferrer">
-                  Оплатить {fmtRub(packageOffer.amountKopecks)} ↗
-                </a>
-              ) : !payHint ? (
-                <span className="badge wait">ждём ссылку на оплату</span>
-              ) : null}
-            </div>
           )}
           {payHint && (
             <p className="hint" style={{ marginTop: 12 }}>

@@ -7,19 +7,12 @@ import { payments, type Payment } from "./schema";
 
 export type PaymentStatus = "unpaid" | "paid" | "canceled";
 // manual — выставлен вручную; debt — автосчёт за долг; advance — автосчёт за одно
-// ближайшее занятие (и только если оно ещё не закрыто балансом); package:N — оплата
-// вперёд одним платежом: пакет ОГЭ/ЕГЭ со скидкой либо занятия месяца по ставке.
-// Кредитует ровно N часов, а не деньги÷ставку.
+// ближайшее занятие (и только если оно ещё не закрыто балансом); package:N — бывшая
+// «оплата вперёд одним платежом» (пакеты убраны). Новых таких счетов не бывает, но
+// оплаченный пакет, если бы он был, кредитует ровно N часов, а не деньги÷ставку.
 export type PaymentKind = "manual" | "debt" | "advance" | `package:${number}`;
 
-// Число оплаченных занятий пакета хранится В САМОМ счёте (kind = «package:8»), а не
-// берётся из конфига при чтении: иначе правка тарифа задним числом переоценила бы
-// уже оплаченные пакеты (8 часов вдруг стали бы 10). Старые строки с kind="package"
-// (до этого формата) читаются с запасным значением из текущего тарифа.
-export function packageKind(lessons: number): PaymentKind {
-  return `package:${lessons}`;
-}
-
+// Число занятий пакета хранится В САМОМ счёте (kind = «package:8»).
 export function isPackageKind(kind: string): boolean {
   return kind === "package" || kind.startsWith("package:");
 }
@@ -29,27 +22,20 @@ export function packageLessonsOf(kind: string, fallbackLessons: number): number 
   return kind.startsWith("package:") && Number.isFinite(n) && n > 0 ? n : fallbackLessons;
 }
 
-// Пакетный счёт среди уже загруженных счетов ученика (самый свежий). Отдельного
-// запроса в БД не делаем — списки неоплаченных счетов вызывающие уже держат.
-export function findPackageInvoice(rows: Payment[]): Payment | null {
-  return rows.find((p) => isPackageKind(p.kind)) ?? null;
-}
-
-// Неоплаченные счета по смыслу: долг ≠ аванс ≠ предложение пакета. Долг — только
-// за УЖЕ проведённые занятия (автосчёт debt) и ручные счета преподавателя (он
-// выставил их осознанно). Счёт «вперёд» — предоплата за будущее занятие, а пакет
-// вообще предложение, которое ученик волен не принимать: показывать их как
-// задолженность нельзя ни в карточке, ни в аналитике.
+// Неоплаченные счета по смыслу: долг ≠ аванс. Долг — только за УЖЕ проведённые
+// занятия (автосчёт debt) и ручные счета преподавателя (он выставил их осознанно).
+// Счёт «вперёд» — предоплата за будущее занятие: показывать её как задолженность
+// нельзя ни в карточке, ни в аналитике. Старые предложения пакета — не обязательство
+// вовсе (их снимает сверка автосчетов) и в сводку не входят.
 export interface OutstandingSummary {
   debtKopecks: number;
   advanceKopecks: number;
-  packageKopecks: number;
   totalKopecks: number;
 }
 
 // Что считается долгом — единственное место правила: сводка счетов, «Долги» и
 // погашение в один тап должны видеть одну и ту же сумму. Всё, кроме аванса и
-// предложенного пакета (за них ещё ничего не проведено).
+// старого предложения пакета (за них ещё ничего не проведено).
 export function isDebtKind(kind: string): boolean {
   return kind !== "advance" && !isPackageKind(kind);
 }
@@ -60,13 +46,12 @@ export function summarizeOutstanding(
   const sum: OutstandingSummary = {
     debtKopecks: 0,
     advanceKopecks: 0,
-    packageKopecks: 0,
     totalKopecks: 0,
   };
   for (const r of rows) {
+    if (isPackageKind(r.kind)) continue;
     sum.totalKopecks += r.amountKopecks;
     if (isDebtKind(r.kind)) sum.debtKopecks += r.amountKopecks; // debt и ручные счета
-    else if (isPackageKind(r.kind)) sum.packageKopecks += r.amountKopecks;
     else sum.advanceKopecks += r.amountKopecks;
   }
   return sum;
@@ -155,8 +140,8 @@ export async function sumPaidKopecks(studentId: string): Promise<number> {
 }
 
 // Оплаченные ЧАСЫ ученика — единый расчёт для баланса и покраски. Обычные счета
-// кредитуют деньги÷ставку; пакетные («месяц» ОГЭ/ЕГЭ) дают ровно своё число часов
-// независимо от скидки. moneyKopecks — деньги непакетных оплат, packageKopecks —
+// кредитуют деньги÷ставку; пакетные (package:N) дают ровно своё число часов
+// независимо от суммы. moneyKopecks — деньги непакетных оплат, packageKopecks —
 // пакетных (вместе дают всю полученную сумму для остатка на балансе).
 // fallbackPackageLessons — для старых строк kind="package" без числа занятий.
 export async function paidHoursBreakdown(

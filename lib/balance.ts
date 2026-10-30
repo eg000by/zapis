@@ -12,7 +12,7 @@ import { getGroup } from "./groups";
 import type { Student } from "./schema";
 import { paidHoursBreakdown } from "./payments";
 import { missedStarts } from "./lessons";
-import { detectExamTariff, FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
+import { FREE_COLOR_ID, MISSED_COLOR_ID } from "./config";
 
 // Занятия, исключённые из тарификации: пропуск (серый) и бесплатное (пробное).
 const isUntariffed = (colorId: string | null) =>
@@ -109,18 +109,16 @@ export async function computeStudentBalance(
 
   // Участник группы занимается по расписанию и цене ГРУППЫ: занятия лежат под её
   // ключом, а личная ставка не участвует — иначе цену пришлось бы переписывать
-  // каждому при смене цены группы. Пакета со скидкой у группы нет: она и так дешевле
-  // индивидуальных занятий, и «скидка от индивидуальной ставки» была бы неправдой.
+  // каждому при смене цены группы.
   const group = s.groupId ? await getGroup(s.groupId) : null;
   const rateKopecks = group ? group.rateKopecks : s.rateKopecks;
   if (rateKopecks <= 0) return null;
 
-  // Пакетные оплаты (месяц ОГЭ/ЕГЭ) кредитуют фиксированные часы, а не деньги÷ставку.
-  const packageLessons = group ? 0 : (detectExamTariff(s.subject)?.packageLessons ?? 0);
+  // Пакетные оплаты (package:N, пакеты убраны) кредитуют фиксированные часы.
   const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(
     s.id,
     rateKopecks,
-    packageLessons
+    0
   );
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
   //
@@ -133,8 +131,7 @@ export async function computeStudentBalance(
   );
   const { items, summary } = allocateBalance(occ, paidHours, new Date());
   // Остаток на балансе = все полученные деньги (включая пакетные) минус стоимость
-  // уже разложенных на занятия часов по ставке. Пакетные часы НЕ оцениваем по полной
-  // ставке: пакет со скидкой 18 000 ₽ должен показывать 18 000 ₽ остатка, а не 20 000 ₽.
+  // уже разложенных на занятия часов по ставке.
   return {
     ...summary,
     items,

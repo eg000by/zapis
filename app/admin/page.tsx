@@ -587,9 +587,6 @@ export default async function AdminPage({
               <div style={{ fontSize: 22, fontWeight: 700 }}>{rub(stats.advanceKopecks)} ₽</div>
               <div className="hint" style={{ margin: 0 }}>
                 выставлено вперёд
-                {stats.packageOfferKopecks > 0
-                  ? ` · одним платежом ${rub(stats.packageOfferKopecks)} ₽`
-                  : ""}
               </div>
             </div>
             <div>

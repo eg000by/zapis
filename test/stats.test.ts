@@ -27,22 +27,21 @@ describe("summarizeIncome — сводка доходов", () => {
     expect(s.paidCount).toBe(3);
   });
 
-  it("долгом считаются только счета за проведённые: аванс и пакет — отдельно", () => {
+  it("долгом считаются только счета за проведённые; аванс отдельно, старый пакет не в счёт", () => {
     const s = summarizeIncome({
       paid: [],
       unpaid: [
         { amount: 300000, kind: "debt" }, // долг за проведённые
         { amount: 100000, kind: "manual" }, // ручной счёт — тоже обязательство
         { amount: 250000, kind: "advance" }, // предоплата за следующее занятие
-        { amount: 1800000, kind: "package:8" }, // предложение пакета
+        { amount: 1800000, kind: "package:8" }, // старое предложение пакета — не обязательство
       ],
       studentsActive: [],
       now: NOW,
     });
     expect(s.debtKopecks).toBe(400000);
     expect(s.advanceKopecks).toBe(250000);
-    expect(s.packageOfferKopecks).toBe(1800000);
-    expect(s.outstandingKopecks).toBe(2450000); // всего выставлено — по-прежнему сумма
+    expect(s.outstandingKopecks).toBe(650000); // долг + аванс; предложение пакета не входит
   });
 
   it("6 месяцев в графике, последний — текущий; оплата без даты идёт только в total", () => {

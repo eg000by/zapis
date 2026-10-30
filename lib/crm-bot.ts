@@ -571,8 +571,7 @@ export async function showPayments(
     const out = summarizeOutstanding(unpaid);
     lines.push(
       `\nДолг: <b>${rub(out.debtKopecks)} ₽</b>` +
-        (out.advanceKopecks > 0 ? ` · вперёд: ${rub(out.advanceKopecks)} ₽` : "") +
-        (out.packageKopecks > 0 ? ` · одним платежом: ${rub(out.packageKopecks)} ₽` : "")
+        (out.advanceKopecks > 0 ? ` · вперёд: ${rub(out.advanceKopecks)} ₽` : "")
     );
 
     // Неоплаченные — целиком и с кнопками: это единственное, что требует действий.

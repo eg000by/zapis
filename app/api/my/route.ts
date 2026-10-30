@@ -3,17 +3,11 @@ import { decodeToken, contactKey } from "@/lib/link";
 import { listContactEvents, nextOccurrencesForContact } from "@/lib/google";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
 import { getGroup, listGroupMembers, GROUP_LIMIT } from "@/lib/groups";
-import {
-  findPackageInvoice,
-  isPackageKind,
-  outstandingPayments,
-  packageLessonsOf,
-  paidPayments,
-} from "@/lib/payments";
+import { isPackageKind, outstandingPayments, paidPayments } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { getPayMethod, getSbpDetails } from "@/lib/settings";
 import { botUsername } from "@/lib/telegram";
-import { detectExamTariff, packageSavings } from "@/lib/config";
+import { detectExamTariff } from "@/lib/config";
 
 // Пустой блок оплат/баланса — когда ученика нет в CRM или БД недоступна.
 const NO_BILLING = {
@@ -22,7 +16,6 @@ const NO_BILLING = {
   meetLink: "",
   boardLink: "",
   payHint: "",
-  packageOffer: null,
   paidHistory: [],
   lessonPriceKopecks: 0,
   tgNotify: null,
@@ -45,18 +38,6 @@ const NO_BILLING = {
     // Ближайшее занятие уже закрыто балансом — кабинет показывает это явно, иначе
     // оплата вперёд выглядит как «деньги ушли, а ничего не изменилось».
     nextPaid: boolean;
-  } | null;
-  // Пакет занятий для экзаменационных учеников (ОГЭ/ЕГЭ) — второй вариант оплаты
-  // ТОГО ЖЕ счёта: оплатив пакет, ученик закрывает и текущий поштучный счёт.
-  packageOffer: {
-    exam: boolean; // пакет ОГЭ/ЕГЭ со скидкой (иначе — занятия месяца по ставке)
-    label: string;
-    lessons: number;
-    amountKopecks: number;
-    perLessonKopecks: number;
-    savingsKopecks: number;
-    savingsPercent: number;
-    payLink: string; // ссылка ЮKassa существующего счёта (в СБП-режиме пусто)
   } | null;
   // История оплат — чтобы «я же платил» проверялось учеником, а не перепиской.
   paidHistory: { id: string; amountKopecks: number; note: string; paidAt: string | null }[];
@@ -140,42 +121,8 @@ export async function GET(req: Request) {
           const method = await getPayMethod().catch(() => "yookassa" as const);
           const payHint = method === "sbp" ? await getSbpDetails().catch(() => "") : "";
 
-          // Оплата вперёд одним платежом — второй вариант оплаты ТОГО ЖЕ счёта:
-          // у экзаменационных (ОГЭ/ЕГЭ) это пакет со скидкой, у остальных — занятия
-          // месяца по ставке. Показываем только когда счёт-предложение уже выставлен
-          // (ensureAutoInvoices создаёт его при наличии подтверждённых занятий). Цену и
-          // число занятий берём из САМОГО счёта, а не из конфига: по ссылке ЮKassa
-          // спишется именно сумма счёта. Выгоду считаем от фактической ставки ученика
-          // (она может быть задана индивидуально) — иначе «старая цена» не сходится со
-          // счетами рядом; у обычного ученика скидки нет и выгода выйдет нулевой.
-          // У участника группы экзаменационного пакета нет: цена занятия там своя,
-          // и «скидка от индивидуального тарифа» была бы неправдой (см. autobill).
+          // Тариф предмета — цена занятия по умолчанию, если ставка не задана.
           const tariff = group ? null : detectExamTariff(student?.subject || "");
-          let packageOffer = null as (typeof NO_BILLING)["packageOffer"];
-          const pkgInvoice = findPackageInvoice(rows);
-          if (pkgInvoice) {
-            const lessons = packageLessonsOf(pkgInvoice.kind, tariff?.packageLessons ?? 0);
-            const perLessonKopecks = balance?.rateKopecks || tariff?.hourlyKopecks || 0;
-            const sav = packageSavings({
-              hourlyKopecks: perLessonKopecks,
-              lessons,
-              packageKopecks: pkgInvoice.amountKopecks,
-            });
-            // Число занятий определить нечем (старая строка kind="package" у обычного
-            // предмета) — предложение не показываем, чтобы не врать в подписи.
-            if (lessons > 0) {
-              packageOffer = {
-                exam: !!tariff,
-                label: tariff?.label ?? "",
-                lessons,
-                amountKopecks: pkgInvoice.amountKopecks,
-                perLessonKopecks,
-                savingsKopecks: sav.kopecks,
-                savingsPercent: sav.percent,
-                payLink: method === "sbp" ? "" : pkgInvoice.payLink || "",
-              };
-            }
-          }
           // История оплат (последние) — best-effort, для блока «оплачено ранее».
           const history = await paidPayments(studentId, 10).catch((e) => {
             console.error("/api/my paid history failed", e);
@@ -218,7 +165,6 @@ export async function GET(req: Request) {
                 }
               : null,
             payHint,
-            packageOffer,
             paidHistory: history.map((p) => ({
               id: p.id,
               amountKopecks: p.amountKopecks,
@@ -233,7 +179,8 @@ export async function GET(req: Request) {
                 : group
                   ? group.rateKopecks
                   : student?.rateKopecks || tariff?.hourlyKopecks || 0,
-            // Пакетные счета показываем отдельной карточкой, из общего списка исключаем.
+            // Пакетов больше нет; старые неоплаченные предложения снимает
+            // ensureAutoInvoices, а до того они ученику не показываются.
             payments: rows
               .filter((p) => !isPackageKind(p.kind))
               .map((p) => ({
@@ -263,7 +210,7 @@ export async function GET(req: Request) {
     ]);
 
     // Пока у ученика нет ПОДТВЕРЖДЁННЫХ занятий, ничего «занятийного» не отдаём:
-    // ни ссылку на Телемост, ни счета, ни баланс, ни пакет. Заявка в статусе
+    // ни ссылку на Телемост, ни счета, ни баланс. Заявка в статусе
     // «ждёт подтверждения» сюда не считается. Гейт именно на сервере: скрывать это
     // только в вёрстке — значит отдавать постоянную ссылку на занятие и суммы
     // счетов любому, кто открыл кабинет по ссылке и ещё ничего не подтвердил.
@@ -275,7 +222,6 @@ export async function GET(req: Request) {
       meetLink: hasConfirmed ? billing.meetLink : "",
       boardLink: hasConfirmed ? billing.boardLink : "",
       payHint: hasConfirmed ? billing.payHint : "",
-      packageOffer: hasConfirmed ? billing.packageOffer : null,
       paidHistory: hasConfirmed ? billing.paidHistory : [],
       // Кнопка уведомлений — уже с первой заявкой, а не с первым подтверждением:
       // иначе само «запись подтверждена» новому ученику прийти не могло бы никогда.

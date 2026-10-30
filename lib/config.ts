@@ -53,33 +53,13 @@ export function dayWindow(weekday: number): { start: number; end: number } | nul
 // Предметы для выбора в форме записи.
 export const SUBJECTS = ["Питон", "Фронтенд", "ОГЭ информатика", "ЕГЭ информатика", "Другое"];
 
-// Тарифы подготовки к экзаменам (ОГЭ/ЕГЭ по информатике). У экзаменационных учеников
-// два варианта оплаты в кабинете: поштучно по часовой ставке и пакет из packageLessons
-// занятий со скидкой. Пакет тарифицируется не деньгами÷ставку, а ровно packageLessons
-// часами (иначе скидка «съела» бы часть занятий).
-//
-// Пакет НЕ называется «месяцем»: 8 занятий при одном занятии в неделю — это два месяца,
-// а не месяц. Везде (кабинет, счёт, бот) он называется по числу занятий.
+// Тарифы подготовки к экзаменам (ОГЭ/ЕГЭ по информатике): цена занятия по умолчанию,
+// если ученику не задана своя ставка. Пакетов со скидкой нет — оплата поштучная.
 export interface ExamTariff {
   kind: "oge" | "ege";
   label: string; // «ОГЭ» / «ЕГЭ» — для подписей в кабинете
   subjects: string[]; // канонические названия предмета (из SUBJECTS) — якорь тарифа
   hourlyKopecks: number; // цена одного занятия (часа)
-  packageLessons: number; // занятий в пакете
-  packageKopecks: number; // цена пакета (= hourly × lessons − PACKAGE_DISCOUNT_PERCENT)
-}
-
-// Скидка пакета против поштучной оплаты. Цены тарифов ниже посчитаны от неё.
-export const PACKAGE_DISCOUNT_PERCENT = 15;
-
-// Цена пакета по часовой ставке и числу занятий, со скидкой PACKAGE_DISCOUNT_PERCENT.
-export function packagePrice(hourlyKopecks: number, lessons: number): number {
-  return Math.round((hourlyKopecks * lessons * (100 - PACKAGE_DISCOUNT_PERCENT)) / 100);
-}
-
-// Название пакета для ученика и счёта: «пакет из 8 занятий».
-export function packageTitle(lessons: number): string {
-  return `пакет из ${lessons} занятий`;
 }
 
 export const EXAM_TARIFFS: ExamTariff[] = [
@@ -88,26 +68,22 @@ export const EXAM_TARIFFS: ExamTariff[] = [
     label: "ЕГЭ",
     subjects: ["ЕГЭ информатика"],
     hourlyKopecks: 250000,
-    packageLessons: 8,
-    packageKopecks: packagePrice(250000, 8), // 17 000 ₽ вместо 20 000 ₽
   },
   {
     kind: "oge",
     label: "ОГЭ",
     subjects: ["ОГЭ информатика"],
     hourlyKopecks: 120000,
-    packageLessons: 8,
-    packageKopecks: packagePrice(120000, 8), // 8 160 ₽ вместо 9 600 ₽
   },
 ];
 
 // Определяет экзаменационный тариф по предмету ученика.
-// null — обычный предмет (часовая ставка; пакета со скидкой нет).
+// null — обычный предмет (ставка задаётся ученику).
 //
 // Предмет — свободный текст (в боте есть «Другое»), поэтому проверять вхождение
 // подстроки нельзя: «Не ЕГЭ, просто информатика» молча включило бы экзаменационную
-// ставку, поштучный автосчёт и пакет. Экзаменационным считаем только предмет из
-// канонического списка тарифа либо начинающийся с «ЕГЭ»/«ОГЭ» отдельным словом.
+// ставку. Экзаменационным считаем только предмет из канонического списка тарифа
+// либо начинающийся с «ЕГЭ»/«ОГЭ» отдельным словом.
 export function detectExamTariff(subject: string): ExamTariff | null {
   const s = (subject || "").trim().toLowerCase();
   if (!s) return null;
@@ -120,20 +96,6 @@ export function detectExamTariff(subject: string): ExamTariff | null {
   if (head === "егэ") return EXAM_TARIFFS.find((t) => t.kind === "ege") ?? null;
   if (head === "огэ") return EXAM_TARIFFS.find((t) => t.kind === "oge") ?? null;
   return null;
-}
-
-// Экономия пакета против поштучной оплаты — по ФАКТИЧЕСКОЙ ставке ученика и цене
-// уже выставленного счёта (ставку преподаватель может задать индивидуально, а цена
-// пакета в счёте зафиксирована на момент выставления). Если выгоды нет — нули.
-export function packageSavings(input: {
-  hourlyKopecks: number;
-  lessons: number;
-  packageKopecks: number;
-}): { fullKopecks: number; kopecks: number; percent: number } {
-  const fullKopecks = input.hourlyKopecks * input.lessons;
-  const kopecks = fullKopecks - input.packageKopecks;
-  if (kopecks <= 0 || fullKopecks <= 0) return { fullKopecks, kopecks: 0, percent: 0 };
-  return { fullKopecks, kopecks, percent: Math.round((kopecks / fullKopecks) * 100) };
 }
 
 // Telegram преподавателя для связи с учениками (без «@»). Показывается подписью на

@@ -16,7 +16,6 @@ export interface IncomeStats {
   // Разбор неоплаченного по смыслу: долг за проведённые занятия vs предоплата.
   debtKopecks: number; // счета за уже проведённые занятия + ручные
   advanceKopecks: number; // автосчета «вперёд» — предоплата, не задолженность
-  packageOfferKopecks: number; // предложено оплатить вперёд одним платежом (пакет/месяц)
   activeStudents: number;
   paidCount: number; // число оплаченных счетов
   // Ожидаемый доход за текущий месяц: все занятия месяца (по календарю) × ставка
@@ -106,7 +105,6 @@ export function summarizeIncome(input: {
     outstandingKopecks: outstanding.totalKopecks,
     debtKopecks: outstanding.debtKopecks,
     advanceKopecks: outstanding.advanceKopecks,
-    packageOfferKopecks: outstanding.packageKopecks,
     activeStudents: input.studentsActive.filter(Boolean).length,
     paidCount: input.paid.length,
     expectedMonthKopecks: input.expectedMonthKopecks ?? null,
@@ -163,7 +161,7 @@ export async function computeIncomeStats(now = new Date()): Promise<IncomeStats>
 
 // ── Должники ───────────────────────────────────────────────────────────────
 // Кто и сколько должен — одним экраном. Долг = счета за уже проведённые занятия
-// и ручные счета преподавателя; аванс и предложенный пакет долгом не считаются
+// и ручные счета преподавателя; аванс и старое предложение пакета долгом не считаются
 // (та же семантика, что в карточке ученика и аналитике).
 export interface DebtorRow {
   studentId: string;
@@ -172,7 +170,6 @@ export interface DebtorRow {
   active: boolean;
   debtKopecks: number;
   advanceKopecks: number;
-  packageKopecks: number;
   oldestAt: Date | null; // дата самого старого неоплаченного счёта-долга
   invoices: number; // сколько счетов-долгов открыто
 }
@@ -197,17 +194,16 @@ export function groupDebtors(
         active: s.active,
         debtKopecks: 0,
         advanceKopecks: 0,
-        packageKopecks: 0,
         oldestAt: null,
         invoices: 0,
       };
+    if (isPackageKind(r.kind)) continue;
     if (isDebtKind(r.kind)) {
       row.debtKopecks += r.amountKopecks;
       row.invoices++;
       const at = r.createdAt ? new Date(r.createdAt) : null;
       if (at && (!row.oldestAt || at < row.oldestAt)) row.oldestAt = at;
-    } else if (isPackageKind(r.kind)) row.packageKopecks += r.amountKopecks;
-    else row.advanceKopecks += r.amountKopecks;
+    } else row.advanceKopecks += r.amountKopecks;
     acc.set(r.studentId, row);
   }
   return [...acc.values()]
