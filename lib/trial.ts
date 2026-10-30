@@ -116,10 +116,8 @@ export function formatTrialWindows(
   for (const d of days) {
     const picked = useAll ? d.slots : d.slots.filter((s) => s.near);
     if (!picked.length) continue;
-    // Родителю — только день недели: на странице ровно 7 дат, дни не повторяются, а
-    // даты видны тебе в шапке экрана. «Пробное» в тексте не пишем — сообщение то же
-    // и для обычного ученика.
-    lines.push(`${d.weekday} — ${picked.map((s) => s.time).join(", ")}`);
+    // «Пробное» в тексте не пишем — сообщение то же и для обычного ученика.
+    lines.push(`${d.label} — ${picked.map((s) => s.time).join(", ")}`);
     slots.push(...picked);
   }
   const text = lines.length
