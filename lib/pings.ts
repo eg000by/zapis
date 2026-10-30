@@ -1,7 +1,7 @@
 // Дедупликация вопросов «как прошло занятие?»: по инстансу календаря пишем отметку,
 // что сообщение уже отправлено, — pulse-крон опрашивает окно в сутки и без этого
 // спрашивал бы об одном занятии при каждом запуске.
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { db } from "./db";
 import { lessonPings } from "./schema";
 
@@ -44,4 +44,27 @@ export async function claimOnce(key: string): Promise<boolean> {
 // не удалась).
 export async function releaseClaim(key: string): Promise<void> {
   await db().delete(lessonPings).where(eq(lessonPings.instanceId, key));
+}
+
+// Аренда действия: как claimOnce, но «занятость» протухает через ttlMs. Нужна там,
+// где упавший на полпути прогон (таймаут функции, деплой) иначе держал бы отметку
+// вечно и действие не случилось бы никогда. Свежую аренду чужого прогона не
+// перехватываем — поэтому ttlMs берётся с запасом больше длительности прогона.
+export async function claimLease(key: string, ttlMs: number): Promise<boolean> {
+  const rows = await db()
+    .insert(lessonPings)
+    .values({ instanceId: key })
+    .onConflictDoUpdate({
+      target: lessonPings.instanceId,
+      set: { createdAt: new Date() },
+      setWhere: lt(lessonPings.createdAt, new Date(Date.now() - ttlMs)),
+    })
+    .returning({ id: lessonPings.instanceId });
+  return rows.length > 0;
+}
+
+// Ученик нажал в кабинете «Не смогу прийти» на это занятие (метку ставит
+// /api/absence). Напоминать ему и звать подключаться после этого — странно.
+export function absenceKey(studentId: string, start: Date): string {
+  return `skip:${studentId}:${start.toISOString()}`;
 }

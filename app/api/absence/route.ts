@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { decodeToken, contactKey } from "@/lib/link";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
 import { getGroup } from "@/lib/groups";
-import { pingSent, recordPing } from "@/lib/pings";
+import { absenceKey, pingSent, recordPing } from "@/lib/pings";
 import { escapeHtml, sendOwner } from "@/lib/telegram";
 import { formatMsk } from "@/lib/slots";
 
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       : await getStudentByContactKey(contactKey(decoded.info));
     if (!student) return NextResponse.json({ error: "Ученик не найден" }, { status: 404 });
 
-    const key = `skip:${student.id}:${start.toISOString()}`;
+    const key = absenceKey(student.id, start);
     if (await pingSent(key)) return NextResponse.json({ ok: true, already: true });
 
     const group = student.groupId ? await getGroup(student.groupId) : null;

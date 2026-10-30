@@ -1380,8 +1380,9 @@ export default function BookingClient({
 
   // Уведомления в Telegram. Бот не может написать первым — ученик подключается сам по
   // deep-link, и /start привязывает его чат. Подключённому кнопку не показываем.
+  // Видна уже с первой заявкой: подтверждение записи приходит как раз туда.
   const tgCard =
-    hasConfirmedLessons && tgNotify ? (
+    my && my.length > 0 && tgNotify ? (
       tgNotify.connected ? (
         <div className="card panel-tg on">
           <Icon name="check" /> Уведомления в Telegram подключены
@@ -1391,7 +1392,11 @@ export default function BookingClient({
           <b>
             <Icon name="bell" /> Подключить уведомления в Telegram →
           </b>
-          <small>Напомним о занятии и пришлём ссылку</small>
+          <small>
+            {hasConfirmedLessons
+              ? "Напомним о занятии и пришлём ссылку"
+              : "Сообщим, как только запись подтвердят"}
+          </small>
         </a>
       )
     ) : null;

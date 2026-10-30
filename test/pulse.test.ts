@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/cron/pulse/route";
 import { listDayOccurrences } from "@/lib/google";
-import { pingSent, recordPing } from "@/lib/pings";
+import { claimLease, pingSent, recordPing, releaseClaim } from "@/lib/pings";
 import { sendOwner } from "@/lib/telegram";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { recolorStudent } from "@/lib/coloring";
@@ -15,7 +15,9 @@ vi.mock("@/lib/coloring", () => ({ recolorStudent: vi.fn(async () => {}) }));
 vi.mock("@/lib/panel", () => ({ refreshPanel: vi.fn(async () => {}) }));
 vi.mock("@/lib/pings", () => ({
   pingSent: vi.fn(async () => false),
+  claimLease: vi.fn(async () => true),
   recordPing: vi.fn(async () => {}),
+  releaseClaim: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/autobill", () => ({ ensureAutoInvoices: vi.fn(async () => null) }));
 vi.mock("@/lib/groups", () => ({ activeMembers: vi.fn(async () => []) }));
@@ -58,6 +60,7 @@ beforeEach(() => {
   delete process.env.CRON_SECRET;
   vi.mocked(listDayOccurrences).mockResolvedValue([]);
   vi.mocked(pingSent).mockResolvedValue(false);
+  vi.mocked(claimLease).mockResolvedValue(true);
 });
 
 describe("/api/cron/pulse — «как прошло занятие?»", () => {
@@ -118,7 +121,7 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     const res = await call();
     expect(await res.json()).toMatchObject({ sent: 0 });
     expect(sendOwner).not.toHaveBeenCalled();
-    expect(recordPing).not.toHaveBeenCalled();
+    expect(claimLease).not.toHaveBeenCalled();
     expect(ensureAutoInvoices).not.toHaveBeenCalled(); // счёт «вперёд» тут ни при чём
   });
 
@@ -129,6 +132,16 @@ describe("/api/cron/pulse — «как прошло занятие?»", () => {
     const res = await call();
     expect(await res.json()).toMatchObject({ sent: 0 });
     expect(sendOwner).not.toHaveBeenCalled();
+  });
+
+  it("вопрос не ушёл — отметку снимаем, следующий прогон спросит снова", async () => {
+    vi.mocked(listDayOccurrences).mockResolvedValue([occ("2026-07-12T07:00:00.000Z")] as any);
+    vi.mocked(sendOwner).mockRejectedValueOnce(new Error("Telegram недоступен"));
+
+    const res = await call();
+    expect(await res.json()).toMatchObject({ sent: 0 });
+    expect(releaseClaim).toHaveBeenCalledWith("lock:ev1_a");
+    expect(recordPing).not.toHaveBeenCalled();
   });
 
   it("уже помечено пропуском (серое) — не спрашиваем", async () => {

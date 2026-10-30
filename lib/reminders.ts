@@ -15,7 +15,8 @@ import { listDayOccurrences, type DayOccurrence } from "./google";
 import { getStudent } from "./students";
 import { activeMembers } from "./groups";
 import { notifyStudent } from "./notify";
-import { pingSent, recordPing } from "./pings";
+import { absenceKey, pingSent } from "./pings";
+import { sendOnce } from "./once";
 import { MSK_OFFSET_MINUTES, MISSED_COLOR_ID } from "./config";
 
 export const EVENING_HOUR_MSK = 19; // накануне — о завтрашних утренних занятиях
@@ -104,17 +105,33 @@ export async function sendLessonReminders(now: Date): Promise<{ reminders: numbe
   let reminders = 0;
   for (const [key, g] of groups) {
     try {
-      if (await pingSent(`rem:${key}`)) continue;
+      // Неподключённому отметку не ставим: подключит уведомления до отсечки —
+      // напоминание всё-таки придёт.
       const s = await getStudent(g.studentId);
       if (!s?.tgChatId) continue;
 
-      const times = g.items.map((o) => hmMsk(o.start)).join(", ");
-      const first = g.items[0].start;
-      const when = dayWord(now, first) || dateMsk(first);
-      const word = g.items.length > 1 ? "занятия" : "занятие";
-      await notifyStudent(s, `🔔 Напоминание: ${when} ${word} в <b>${times}</b> (МСК).`);
-      await recordPing(`rem:${key}`);
-      reminders++;
+      let delivered = false;
+      await sendOnce(`rem:${key}`, async () => {
+        // «Не смогу прийти» смотрим только здесь — по тому, что действительно
+        // уходит, а не по каждому занятию в окне на каждом прогоне.
+        const skipped = await Promise.all(
+          g.items.map((o) => pingSent(absenceKey(g.studentId, o.start)))
+        );
+        const items = g.items.filter((_, i) => !skipped[i]);
+        if (!items.length) return; // предупредил обо всём — напоминать не о чем
+
+        const times = items.map((o) => hmMsk(o.start)).join(", ");
+        const first = items[0].start;
+        const when = dayWord(now, first) || dateMsk(first);
+        const word = items.length > 1 ? "занятия" : "занятие";
+        const ok = await notifyStudent(s, `🔔 Напоминание: ${when} ${word} в <b>${times}</b> (МСК).`);
+        // Не дошло (сеть, 429) — бросаем: sendOnce снимет аренду, и следующий прогон
+        // повторит, пока не вышла отсечка. Заблокировал бота — чат уже отвязан, и
+        // повтор просто не найдёт, куда писать.
+        if (!ok) throw new Error("reminder not delivered");
+        delivered = true;
+      });
+      if (delivered) reminders++;
     } catch (e) {
       console.error("reminder failed", key, e);
     }

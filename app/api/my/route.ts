@@ -277,7 +277,10 @@ export async function GET(req: Request) {
       payHint: hasConfirmed ? billing.payHint : "",
       packageOffer: hasConfirmed ? billing.packageOffer : null,
       paidHistory: hasConfirmed ? billing.paidHistory : [],
-      tgNotify: hasConfirmed ? billing.tgNotify : null,
+      // Кнопка уведомлений — уже с первой заявкой, а не с первым подтверждением:
+      // иначе само «запись подтверждена» новому ученику прийти не могло бы никогда.
+      // Ничего «занятийного» в ней нет — только привязка чата к тому, кто записался.
+      tgNotify: events.length ? billing.tgNotify : null,
       nextLesson: hasConfirmed ? upcoming[0] || null : null,
       upcoming: hasConfirmed ? upcoming : [],
       // Группа — не «занятийные» данные: даже до первого подтверждённого занятия

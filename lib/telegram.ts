@@ -6,11 +6,12 @@ function token(): string {
   return t;
 }
 
-async function api(method: string, body: unknown): Promise<any> {
+async function api(method: string, body: unknown, opts: { timeoutMs?: number } = {}): Promise<any> {
   const res = await fetch(`https://api.telegram.org/bot${token()}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    ...(opts.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
   });
   const data = await res.json();
   if (!data.ok && !isNotModified(data)) {
@@ -156,14 +157,32 @@ export async function sendTo(
   text: string,
   replyMarkup?: unknown
 ): Promise<{ message_id?: number } | null> {
-  const data = await api("sendMessage", {
+  const data = await sendMessageRaw(chatId, text, replyMarkup);
+  return data?.result ?? null;
+}
+
+// То же, но с сырым ответом Telegram: по нему видно, почему не доставилось.
+export async function sendMessageRaw(
+  chatId: number | string,
+  text: string,
+  replyMarkup?: unknown
+): Promise<any> {
+  return api("sendMessage", {
     chat_id: chatId,
     text: clampMessage(text),
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return data?.result ?? null;
+}
+
+// В этот чат писать больше некуда: человек заблокировал бота или удалил аккаунт
+// (403), либо такого чата нет вовсе. Повтор тут не поможет — в отличие от сетевого
+// сбоя или 429, которые проходят сами.
+export function isChatGone(data: any): boolean {
+  if (!data || data.ok) return false;
+  if (data.error_code === 403) return true;
+  return /chat not found/i.test(String(data.description || ""));
 }
 
 // Закрепляет сообщение в чате (в личном чате с ботом права не нужны).
@@ -191,19 +210,29 @@ export async function sendOwner(
 }
 
 // Username бота — для deep-link t.me/<бот>?start=…. Явный TELEGRAM_BOT_USERNAME из env
-// либо getMe (кэшируется на жизнь лямбды). Пустая строка — узнать не удалось.
-let cachedUsername: string | null = null;
+// либо getMe. Пустая строка — узнать не удалось.
+//
+// Удача кэшируется на жизнь лямбды, неудача — на BOT_USERNAME_RETRY_MS. Раньше один
+// сбой getMe запоминался навсегда, и кнопка подключения уведомлений пропадала из
+// кабинета до холодного старта; без кэша неудачи же каждый кабинет во время сбоя
+// Telegram ждал бы свой getMe. Сам getMe — с таймаутом: кабинет не должен висеть.
+const BOT_USERNAME_RETRY_MS = 60000;
+const GET_ME_TIMEOUT_MS = 3000;
+let cachedUsername = "";
+let usernameFailedAt = 0;
 export async function botUsername(): Promise<string> {
   const explicit = (process.env.TELEGRAM_BOT_USERNAME || "").replace(/^@/, "");
   if (explicit) return explicit;
-  if (cachedUsername != null) return cachedUsername;
+  if (cachedUsername) return cachedUsername;
+  if (usernameFailedAt && Date.now() - usernameFailedAt < BOT_USERNAME_RETRY_MS) return "";
   try {
-    const data = await api("getMe", {});
+    const data = await api("getMe", {}, { timeoutMs: GET_ME_TIMEOUT_MS });
     cachedUsername = String(data?.result?.username || "");
   } catch {
     cachedUsername = "";
   }
-  return cachedUsername ?? "";
+  usernameFailedAt = cachedUsername ? 0 : Date.now();
+  return cachedUsername;
 }
 
 // ── Постоянное меню ─────────────────────────────────────────────────────────

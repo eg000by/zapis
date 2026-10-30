@@ -5,14 +5,15 @@
 // а не по точному моменту: занятие попадает в уведомление, если начинается в ближайшие
 // UPCOMING_LEAD_MINUTES и по нему ещё не писали. Дедупликация — та же таблица
 // lesson_pings с префиксом soon: (вопрос «как прошло» пишется по чистому instanceId,
-// так что ключи не сталкиваются). Пропущенный прогон не рассылает задним числом:
-// уже начавшееся занятие в окно не входит.
-import { listDayOccurrences } from "./google";
+// так что ключи не сталкиваются; одновременные прогоны разводит sendOnce, lib/once.ts).
+// Пропущенный прогон не рассылает задним числом: уже начавшееся занятие в окно не входит.
+import { listDayOccurrences, type DayOccurrence } from "./google";
 import { getStudent } from "./students";
 import { activeMembers, getGroup } from "./groups";
 import type { Student } from "./schema";
 import { listStudentLessons } from "./lessons";
-import { pingSent, recordPing } from "./pings";
+import { absenceKey, pingSent } from "./pings";
+import { sendOnce } from "./once";
 import { notifyStudent } from "./notify";
 import { escapeHtml, sendOwner } from "./telegram";
 import { formatMskRange } from "./slots";
@@ -83,55 +84,69 @@ export async function sendUpcomingLessonAlerts(now: Date): Promise<{ sent: numbe
     try {
       if (!o.studentId && !o.groupId) continue;
       if (o.colorId === MISSED_COLOR_ID) continue; // помечено пропуском заранее
-      const key = `soon:${o.instanceId}`;
-      if (await pingSent(key)) continue;
-
-      // Групповое занятие касается всех участников: преподавателю пишем один раз,
-      // ученикам — каждому. Ссылка на занятие у группы своя, общая.
-      const group = o.groupId ? await getGroup(o.groupId).catch(() => null) : null;
-      const student = group ? null : await getStudent(o.studentId).catch(() => null);
-      const members: Student[] = group
-        ? await activeMembers(group.id).catch(() => [])
-        : student
-          ? [student]
-          : [];
-      const meet = group ? group.meetLink : student?.meetLink || "";
-      // Доска — такая же рабочая ссылка, как звонок: без неё занятие не начать.
-      const board = group ? group.boardLink : student?.boardLink || "";
-
-      // Сколько осталось — НЕ пишем: прогон крона может опоздать или прийти раньше,
-      // и «через 45 минут» окажется враньём. Время начала верно всегда.
-      const meetLine = meet
-        ? `🎥 Звонок: ${meet}`
-        : "⚠️ Ссылка на звонок не задана — добавьте в карточке ученика.";
-      const boardLine = board ? `\n🧩 Доска: ${board}` : "";
-      await sendOwner(
-        `⏰ <b>Скоро занятие</b>\n\n` +
-          `🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(o.subject)}\n` +
-          `🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n` +
-          `${meetLine}${boardLine}\n\n` +
-          `${o.groupId ? `👥 Участников: ${members.length}` : await previousLessonLine(o.studentId, now)}`
-      );
-
-      // Ученикам — то же напоминание и та же ссылка (кому подключены уведомления).
-      const contact = teacherTgUrl();
-      for (const m of members) {
-        if (!m.tgChatId) continue;
-        await notifyStudent(
-          m,
-          `⏰ <b>Скоро занятие</b>\n\n` +
-            `Начало в ${hmMsk(o.start)} (МСК).\n` +
-            (meet ? `🎥 Подключиться: ${meet}\n` : "") +
-            (board ? `🧩 Доска: ${board}\n` : "") +
-            (contact ? `\nВопрос преподавателю: ${contact}` : "")
-        );
-      }
-
-      await recordPing(key);
-      sent++;
+      const done = await sendOnce(`soon:${o.instanceId}`, () => alertOccurrence(o, now));
+      if (done) sent++;
     } catch (e) {
       console.error("upcoming: occurrence failed", o.instanceId, e);
     }
   }
   return { sent };
+}
+
+// Одно «Скоро занятие»: преподавателю и подключённым ученикам. Бросает, если не
+// удалось написать преподавателю, — тогда sendOnce даст следующему прогону повторить.
+async function alertOccurrence(o: DayOccurrence, now: Date): Promise<void> {
+  // Групповое занятие касается всех участников: преподавателю пишем один раз,
+  // ученикам — каждому. Ссылка на занятие у группы своя, общая.
+  const group = o.groupId ? await getGroup(o.groupId).catch(() => null) : null;
+  const student = group ? null : await getStudent(o.studentId).catch(() => null);
+  const members: Student[] = group
+    ? await activeMembers(group.id).catch(() => [])
+    : student
+      ? [student]
+      : [];
+  const meet = group ? group.meetLink : student?.meetLink || "";
+  // Доска — такая же рабочая ссылка, как звонок: без неё занятие не начать.
+  const board = group ? group.boardLink : student?.boardLink || "";
+
+  // Кто нажал в кабинете «Не смогу прийти»: преподавателю — знать, кого не ждать,
+  // самому ученику — не звать подключаться.
+  const absentFlags = await Promise.all(
+    members.map((m) => pingSent(absenceKey(m.id, o.start)).catch(() => false))
+  );
+  const absent = members.filter((_, i) => absentFlags[i]);
+  const absentLine = absent.length
+    ? `\n🙈 Не смогут: ${absent.map((m) => escapeHtml(m.name)).join(", ")}`
+    : "";
+
+  // Сколько осталось — НЕ пишем: прогон крона может опоздать или прийти раньше,
+  // и «через 45 минут» окажется враньём. Время начала верно всегда.
+  const meetLine = meet
+    ? `🎥 Звонок: ${meet}`
+    : "⚠️ Ссылка на звонок не задана — добавьте в карточке ученика.";
+  const boardLine = board ? `\n🧩 Доска: ${board}` : "";
+  await sendOwner(
+    `⏰ <b>Скоро занятие</b>\n\n` +
+      `🧑‍🎓 ${escapeHtml(o.student || "?")} · ${escapeHtml(o.subject)}\n` +
+      `🕒 ${escapeHtml(formatMskRange(o.start.toISOString(), o.hours))}\n` +
+      `${meetLine}${boardLine}\n\n` +
+      `${o.groupId ? `👥 Участников: ${members.length}` : await previousLessonLine(o.studentId, now)}` +
+      absentLine
+  );
+
+  // Ученикам — то же напоминание и та же ссылка (кому подключены уведомления).
+  // Сбой у одного ученика ничего не бросает: преподавателю уже написали, и повтор
+  // прогона прислал бы ему копию.
+  const contact = teacherTgUrl();
+  for (const [i, m] of members.entries()) {
+    if (!m.tgChatId || absentFlags[i]) continue;
+    await notifyStudent(
+      m,
+      `⏰ <b>Скоро занятие</b>\n\n` +
+        `Начало в ${hmMsk(o.start)} (МСК).\n` +
+        (meet ? `🎥 Подключиться: ${meet}\n` : "") +
+        (board ? `🧩 Доска: ${board}\n` : "") +
+        (contact ? `\nВопрос преподавателю: ${contact}` : "")
+    );
+  }
 }

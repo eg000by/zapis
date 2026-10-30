@@ -55,7 +55,7 @@ import {
   showGroupsList,
   submitGroupSubject,
 } from "@/lib/group-bot";
-import { getStudent, getStudentByTgChatId, updateStudent } from "@/lib/students";
+import { clearTgChat, getStudent, getStudentByTgChatId, updateStudent } from "@/lib/students";
 import {
   applyPendingInput,
   cancelPending,
@@ -666,11 +666,13 @@ async function handleMessage(msg: any): Promise<NextResponse> {
 
   if (!isOwner(chatId)) {
     // Отключение уведомлений учеником: снимаем привязку чата, писать больше некуда.
-    // Обратно — той же кнопкой в кабинете, поэтому ничего не теряется.
+    // Обратно — той же кнопкой в кабинете, поэтому ничего не теряется. Отвязываем
+    // чат от ВСЕХ учеников: один Telegram на нескольких детей — обычное дело, и
+    // «больше писать не буду» должно значить «никому из них».
     if (text === "/stop") {
       const s = await getStudentByTgChatId(String(chatId)).catch(() => null);
       if (s) {
-        await updateStudent(s.id, { tgChatId: "" });
+        await clearTgChat(String(chatId));
         await sendTo(
           chatId,
           "🔕 <b>Уведомления отключены</b>\n\nБольше писать не буду. Включить обратно — кнопкой «Уведомления в Telegram» в личном кабинете."
