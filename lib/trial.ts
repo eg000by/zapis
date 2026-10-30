@@ -116,11 +116,14 @@ export function formatTrialWindows(
   for (const d of days) {
     const picked = useAll ? d.slots : d.slots.filter((s) => s.near);
     if (!picked.length) continue;
-    lines.push(`${d.label} — ${picked.map((s) => s.time).join(", ")}`);
+    // Родителю — только день недели: на странице ровно 7 дат, дни не повторяются, а
+    // даты видны тебе в шапке экрана. «Пробное» в тексте не пишем — сообщение то же
+    // и для обычного ученика.
+    lines.push(`${d.weekday} — ${picked.map((s) => s.time).join(", ")}`);
     slots.push(...picked);
   }
   const text = lines.length
-    ? `Свободное время для пробного занятия (МСК):\n${lines.join("\n")}`
+    ? `Свободное время (МСК):\n${lines.join("\n")}`
     : "";
   return { text, slots, nearCount, fellBack };
 }

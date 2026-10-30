@@ -243,6 +243,17 @@ export const fakeCalendar = {
         events.set(eventId, ev);
       }
       const body = structuredClone(requestBody);
+      // Как настоящий Google: смена правила серии теряет отмены отдельных наступлений —
+      // удалённые занятия возвращаются (закрепить отмену можно только EXDATE).
+      if (
+        "recurrence" in body &&
+        isMaster(ev) &&
+        JSON.stringify(body.recurrence) !== JSON.stringify(ev.recurrence)
+      ) {
+        for (const [id, e] of events) {
+          if (e.recurringEventId === ev.id && e.status === "cancelled") events.delete(id);
+        }
+      }
       for (const k of ["summary", "description", "status", "recurrence"] as const) {
         if (k in body) (ev as any)[k] = body[k];
       }
@@ -327,12 +338,19 @@ export const fakeCalendar = {
       return { data: { items: structuredClone(items) } };
     },
 
-    async instances({ eventId, timeMin, timeMax, maxResults }: any) {
+    async instances({ eventId, timeMin, timeMax, maxResults, showDeleted }: any) {
       const master = events.get(eventId);
       if (!master || !isMaster(master)) notFound();
       // Окно фильтрует по ТЕКУЩЕМУ времени инстанса (перенесённый инстанс «уезжает»
       // из окна своего исходного времени) — как в реальном API.
       let items = expand(master!).filter((i) => inWindow(i, timeMin, timeMax));
+      // showDeleted — плюс отменённые наступления (cancelled-исключения).
+      if (showDeleted) {
+        for (const e of events.values()) {
+          if (e.recurringEventId === eventId && e.status === "cancelled" && inWindow(e, timeMin, timeMax))
+            items.push(structuredClone(e) as InstanceItem);
+        }
+      }
       if (maxResults) items = items.slice(0, maxResults);
       return { data: { items: structuredClone(items) } };
     },

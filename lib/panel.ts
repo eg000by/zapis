@@ -4,7 +4,8 @@
 // Почему закреп, а не сообщение: экраны бота уплывают вверх вместе с перепиской, а
 // закреплённое видно в шапке чата всегда. Кнопка «Сегодня» показывает панель заново
 // внизу (и снова закрепляет) — чтобы ответ был там, куда смотришь.
-import { listDayOccurrences } from "./google";
+import { listDayOccurrences, type DayOccurrence } from "./google";
+import { recentLessonNotes } from "./lessons";
 import { listDebtors } from "./stats";
 import { getSetting, setSetting } from "./settings";
 import {
@@ -50,6 +51,34 @@ function dayTitle(d: Date): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+const NOTE_PREVIEW = 160;
+
+function notePreview(n: string): string {
+  const flat = n.replace(/\s+/g, " ").trim();
+  return flat.length > NOTE_PREVIEW ? `${flat.slice(0, NOTE_PREVIEW - 1)}…` : flat;
+}
+
+// Последняя заметка ученика ДО каждого сегодняшнего занятия (instanceId → текст):
+// открыл панель утром — и видно, на чём остановились и что делать сегодня. У групп
+// заметок нет (их пишут ученикам), поэтому только индивидуальные занятия. Сбой БД
+// панель не роняет — просто без заметок.
+async function lastNotes(occ: DayOccurrence[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const solo = occ.filter((o) => o.studentId && !o.groupId);
+  if (!solo.length) return out;
+  try {
+    const latest = solo.reduce((t, o) => Math.max(t, o.start.getTime()), 0);
+    const notes = await recentLessonNotes([...new Set(solo.map((o) => o.studentId))], new Date(latest));
+    for (const o of solo) {
+      const hit = notes.find((n) => n.studentId === o.studentId && n.start.getTime() < o.start.getTime());
+      if (hit) out.set(o.instanceId, hit.note);
+    }
+  } catch (e) {
+    console.error("panel: notes failed", e);
+  }
+  return out;
+}
+
 // Текст и кнопки панели. Считается из тех же источников, что и остальные экраны:
 // занятия — из календаря, долги — из балансового прохода.
 export async function renderPanel(now = new Date()): Promise<{ text: string; keyboard: unknown }> {
@@ -71,10 +100,13 @@ export async function renderPanel(now = new Date()): Promise<{ text: string; key
   } else {
     const done = occ.filter((o) => o.start.getTime() <= now.getTime()).length;
     lines.push(`\n<b>Занятия</b> · ${done} из ${occ.length} позади`);
+    const notes = await lastNotes(occ);
     for (const o of occ) {
       const past = o.start.getTime() <= now.getTime();
       const who = o.groupId ? `👥 ${o.student || "группа"}` : `🧑‍🎓 ${o.student || "?"}`;
       lines.push(`${past ? "✓" : "•"} ${hm(o.start)} ${escapeHtml(who)}`);
+      const note = notes.get(o.instanceId);
+      if (note) lines.push(`    📝 <i>${escapeHtml(notePreview(note))}</i>`);
     }
   }
 

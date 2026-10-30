@@ -1214,17 +1214,23 @@ describe("отчёт «🏁 Занятие завершилось» меняет
   it("📝 из отчёта — вопрос сразу закрыт «Проведено», заметка просится отдельно", async () => {
     const crm = await import("@/lib/crm-bot");
     vi.mocked(crm.promptReportLessonNote).mockResolvedValueOnce(true as never);
+    vi.mocked(unmarkLessonMissed).mockClear();
     await tgCallback("lrep:ev_1", { text: REPORT });
     expect(crm.promptReportLessonNote).toHaveBeenCalledWith(111222333, "ev_1");
     expect(lastEdit()[2]).toMatch(/✅ Проведено$/);
+    // «Проведено» — по-настоящему: серая отметка пропуска снимается, как у «✅ Прошло».
+    expect(unmarkLessonMissed).toHaveBeenCalledWith("ev_1");
   });
 
   it("📝 с экрана «Занятия» — сам экран не трогаем", async () => {
     const crm = await import("@/lib/crm-bot");
     vi.mocked(crm.promptReportLessonNote).mockResolvedValueOnce(true as never);
     vi.mocked(editMessageText).mockClear();
+    vi.mocked(unmarkLessonMissed).mockClear();
     await tgCallback("lrep:ev_1", { text: "📅 Занятия — Стас\n\n…" });
     expect(editMessageText).not.toHaveBeenCalled();
+    // Заметка к занятию из списка статус не меняет: пропуск можно и описать.
+    expect(unmarkLessonMissed).not.toHaveBeenCalled();
   });
 
   it("«↩️ Изменить» возвращает вопрос и кнопки", async () => {

@@ -70,6 +70,78 @@ describe("deleteFutureEventsForContact", () => {
     expect(rrule).not.toContain("COUNT");
   });
 
+  it("уже закончившуюся серию не продлевает (старое расписание не оживает)", async () => {
+    const { deleteFutureEventsForContact } = await import("@/lib/google");
+    // Серия закончилась 23 июня (расписание переехало), а «сейчас» — 12 июля.
+    const ended = seed({
+      start: { dateTime: "2026-06-02T06:00:00.000Z" },
+      end: { dateTime: "2026-06-02T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;UNTIL=20260624T000000Z"],
+    });
+    const endedByCount = seed({
+      start: { dateTime: "2026-06-03T06:00:00.000Z" },
+      end: { dateTime: "2026-06-03T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;COUNT=3"],
+    });
+    const n = await deleteFutureEventsForContact(KEY);
+    expect(n).toBe(0);
+    expect(getStored(ended.id)?.recurrence).toEqual(["RRULE:FREQ=WEEKLY;UNTIL=20260624T000000Z"]);
+    expect(getStored(endedByCount.id)?.recurrence).toEqual(["RRULE:FREQ=WEEKLY;COUNT=3"]);
+  });
+
+  it("truncateSeriesAt: закончившуюся серию не трогает", async () => {
+    const { truncateSeriesAt } = await import("@/lib/google");
+    const ended = seed({
+      start: { dateTime: "2026-06-02T06:00:00.000Z" },
+      end: { dateTime: "2026-06-02T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;UNTIL=20260624T000000Z"],
+    });
+    expect(await truncateSeriesAt(ended.id, NOW)).toBe(false);
+    expect(getStored(ended.id)?.recurrence).toEqual(["RRULE:FREQ=WEEKLY;UNTIL=20260624T000000Z"]);
+  });
+
+  it("отменённое раньше занятие при архиве не оживает (Google теряет отмены при смене правила)", async () => {
+    const { deleteFutureEventsForContact, calendarClient, CALENDAR_ID } = await import("@/lib/google");
+    const series = seed({
+      start: { dateTime: "2026-06-23T06:00:00.000Z" },
+      end: { dateTime: "2026-06-23T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;COUNT=26"],
+    });
+    // 30 июня занятие отменили (удалили одно наступление).
+    const cancelled = instanceIdFor(series.id, "2026-06-30T06:00:00.000Z");
+    await calendarClient().events.delete({ calendarId: CALENDAR_ID, eventId: cancelled });
+
+    await deleteFutureEventsForContact(KEY);
+
+    const list = await calendarClient().events.list({
+      calendarId: CALENDAR_ID,
+      singleEvents: true,
+      timeMin: "2026-06-01T00:00:00.000Z",
+      timeMax: "2026-08-01T00:00:00.000Z",
+    });
+    const starts = (list.data.items || []).map((i) => i.start?.dateTime);
+    expect(starts).toEqual(["2026-06-23T06:00:00.000Z", "2026-07-07T06:00:00.000Z"]);
+    expect(getStored(series.id)?.recurrence).toContain("EXDATE;TZID=Europe/Moscow:20260630T090000");
+  });
+
+  it("продление серии тоже не оживляет отменённое занятие", async () => {
+    const { extendSeries, calendarClient, CALENDAR_ID } = await import("@/lib/google");
+    const series = seed({
+      start: { dateTime: "2026-07-07T06:00:00.000Z" },
+      end: { dateTime: "2026-07-07T07:00:00.000Z" },
+      recurrence: ["RRULE:FREQ=WEEKLY;COUNT=3"],
+    });
+    await calendarClient().events.delete({
+      calendarId: CALENDAR_ID,
+      eventId: instanceIdFor(series.id, "2026-07-14T06:00:00.000Z"),
+    });
+    await extendSeries(series.id, 2);
+    const list = await calendarClient().events.instances({ calendarId: CALENDAR_ID, eventId: series.id });
+    const starts = (list.data.items || []).map((i) => i.start?.dateTime);
+    expect(starts).not.toContain("2026-07-14T06:00:00.000Z");
+    expect(starts).toHaveLength(4); // 5 недель минус отменённая
+  });
+
   it("чужие события (другой contactKey / не наши) не трогает", async () => {
     const { deleteFutureEventsForContact } = await import("@/lib/google");
     const foreign = seed({

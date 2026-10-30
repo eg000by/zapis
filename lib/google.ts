@@ -1,5 +1,6 @@
 // Клиент Google Calendar через сервисный аккаунт.
 import { google, calendar_v3 } from "googleapis";
+import { MSK_OFFSET_MINUTES, TIMEZONE } from "./config";
 
 export const CALENDAR_ID = process.env.CALENDAR_ID || "primary";
 
@@ -433,6 +434,51 @@ export function extendRrule(rrule: string, weeks: number): string | null {
 
 // Продлевает серию занятий на weeks недель. Возвращает ISO последнего наступления
 // после продления (null — событие не найдено, это не серия или правило бесконечное).
+// «Стеночное» время МСК для EXDATE: "20261019T172000" (тот же формат, что у
+// buildRecurrence, — EXDATE;TZID=Europe/Moscow).
+function mskWallStamp(ms: number): string {
+  const d = new Date(ms + MSK_OFFSET_MINUTES * 60000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`
+  );
+}
+
+// Меняет правило повтора серии, не воскрешая отменённые занятия. Google при смене
+// RRULE теряет отмены отдельных наступлений, и удалённые раньше занятия возвращаются
+// в календарь: так архив вернул ученику отменённые занятия, бот счёл их проведёнными
+// и выставил за них долг. Поэтому все отмены в том же запросе закрепляем в самой
+// серии через EXDATE: его смена правила не трогает.
+async function patchSeriesRule(eventId: string, recurrence: string[]): Promise<void> {
+  const cal = calendarClient();
+  const res = await cal.events.instances({
+    calendarId: CALENDAR_ID,
+    eventId,
+    showDeleted: true,
+    maxResults: 2500,
+  });
+  const known = new Set(
+    recurrence
+      .filter((r) => /^EXDATE/i.test(r))
+      .flatMap((r) => r.slice(r.indexOf(":") + 1).split(","))
+      .map((x) => x.trim())
+  );
+  const stamps: string[] = [];
+  for (const i of res.data.items || []) {
+    if (i.status !== "cancelled") continue;
+    const iso = i.originalStartTime?.dateTime || i.start?.dateTime;
+    if (!iso) continue;
+    const stamp = mskWallStamp(new Date(iso).getTime());
+    if (!known.has(stamp)) {
+      known.add(stamp);
+      stamps.push(stamp);
+    }
+  }
+  const next = stamps.length ? [...recurrence, `EXDATE;TZID=${TIMEZONE}:${stamps.join(",")}`] : recurrence;
+  await cal.events.patch({ calendarId: CALENDAR_ID, eventId, requestBody: { recurrence: next } });
+}
+
 export async function extendSeries(eventId: string, weeks: number): Promise<string | null> {
   const cal = calendarClient();
   const res = await cal.events.get({ calendarId: CALENDAR_ID, eventId });
@@ -447,7 +493,7 @@ export async function extendSeries(eventId: string, weeks: number): Promise<stri
     return next;
   });
   if (!touched) return null;
-  await cal.events.patch({ calendarId: CALENDAR_ID, eventId, requestBody: { recurrence } });
+  await patchSeriesRule(eventId, recurrence);
   return lastOccurrenceOf(eventId, new Date());
 }
 
@@ -479,6 +525,20 @@ function truncateRrule(rrule: string, stamp: string): string {
   return `RRULE:${parts.join(";")}`;
 }
 
+// Есть ли у серии живые наступления после `at`. Закончившуюся серию «обрезать до
+// сейчас» нельзя: UNTIL=сейчас её бы ПРОДЛИЛ, и ожили бы давно снятые занятия. Так
+// архив воскресил старые серии ученика, чьё расписание раньше переезжало: за месяц
+// появились занятия без цвета в прежнее время, и все они ушли в долг.
+async function seriesContinuesAfter(eventId: string, at: Date): Promise<boolean> {
+  const res = await calendarClient().events.instances({
+    calendarId: CALENDAR_ID,
+    eventId,
+    timeMin: at.toISOString(),
+    maxResults: 5,
+  });
+  return (res.data.items || []).some((i) => i.status !== "cancelled");
+}
+
 // Обрезает уже идущую серию по времени `at`: будущие наступления пропадают, прошлые
 // остаются историей. Это единственный способ «закончить» серию, не стирая проведённые
 // занятия: у повторяющегося события прошлое порождается тем же правилом, что и будущее,
@@ -489,14 +549,12 @@ export async function truncateSeriesAt(eventId: string, at: Date): Promise<boole
   const ev = (await cal.events.get({ calendarId: CALENDAR_ID, eventId })).data;
   const recurrence = ev.recurrence || [];
   if (!recurrence.length) return false;
+  if (!(await seriesContinuesAfter(eventId, at))) return false;
   const stamp = utcRuleStamp(at);
-  await cal.events.patch({
-    calendarId: CALENDAR_ID,
+  await patchSeriesRule(
     eventId,
-    requestBody: {
-      recurrence: recurrence.map((r) => (/^RRULE:/i.test(r) ? truncateRrule(r, stamp) : r)),
-    },
-  });
+    recurrence.map((r) => (/^RRULE:/i.test(r) ? truncateRrule(r, stamp) : r))
+  );
   return true;
 }
 
@@ -536,12 +594,14 @@ export async function deleteFutureEventsForContact(key: string): Promise<number>
         affected++;
         continue;
       }
-      // Серия уже идёт: обрезаем будущие наступления, прошлые оставляем.
+      // Серия уже идёт: обрезаем будущие наступления, прошлые оставляем. Уже
+      // закончившуюся не трогаем — новый UNTIL её бы продлил (см. seriesContinuesAfter).
+      if (!(await seriesContinuesAfter(ev.id, new Date(now)))) continue;
       const stamp = utcRuleStamp(new Date(now));
       const recurrence = (ev.recurrence || []).map((r) =>
         /^RRULE:/i.test(r) ? truncateRrule(r, stamp) : r
       );
-      await cal.events.patch({ calendarId: CALENDAR_ID, eventId: ev.id, requestBody: { recurrence } });
+      await patchSeriesRule(ev.id, recurrence);
       affected++;
     } catch (e) {
       console.error("deleteFutureEventsForContact failed", ev.id, e);
