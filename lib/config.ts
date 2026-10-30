@@ -57,7 +57,6 @@ export const SUBJECTS = ["Питон", "Фронтенд", "ОГЭ информ�
 // если ученику не задана своя ставка. Пакетов со скидкой нет — оплата поштучная.
 export interface ExamTariff {
   kind: "oge" | "ege";
-  label: string; // «ОГЭ» / «ЕГЭ» — для подписей в кабинете
   subjects: string[]; // канонические названия предмета (из SUBJECTS) — якорь тарифа
   hourlyKopecks: number; // цена одного занятия (часа)
 }
@@ -65,13 +64,11 @@ export interface ExamTariff {
 export const EXAM_TARIFFS: ExamTariff[] = [
   {
     kind: "ege",
-    label: "ЕГЭ",
     subjects: ["ЕГЭ информатика"],
     hourlyKopecks: 250000,
   },
   {
     kind: "oge",
-    label: "ОГЭ",
     subjects: ["ОГЭ информатика"],
     hourlyKopecks: 120000,
   },

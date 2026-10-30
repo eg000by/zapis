@@ -54,7 +54,7 @@ export async function POST(req: Request) {
       // Тот же сервис, что и кнопка архива в боте: уход в архив снимает будущие
       // занятия с календаря (паритет поверхностей, см. lib/students.ts).
       await setStudentArchived(studentId, String(form.get("active")) !== "1");
-      // Счета «вперёд» и пакет у ученика в архиве снимаются (см. autobill).
+      // Счёт «вперёд» у ученика в архиве снимается (см. autobill).
       const s = await getStudent(studentId);
       await ensureAutoInvoices(studentId, s?.name || "", s).catch((e) =>
         console.error("admin archive: autobill failed", studentId, e)

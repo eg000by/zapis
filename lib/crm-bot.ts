@@ -559,13 +559,14 @@ export async function showPayments(
     return;
   }
   const pays = await listStudentPayments(s.id);
-  const unpaid = pays.filter((p) => p.status !== "paid");
+  // Снятые (canceled) счета не показываем вовсе: это не долг и не история оплат.
+  const unpaid = pays.filter((p) => p.status === "unpaid");
   const paid = pays.filter((p) => p.status === "paid");
 
   const lines = [`💳 <b>Счета — ${escapeHtml(s.name)}</b>`];
   const rows: TgButton[][] = [[{ text: "➕ Новый счёт", data: `newp:${s.id}` }]];
 
-  if (!pays.length) {
+  if (!unpaid.length && !paid.length) {
     lines.push("\nСчетов нет. Создать счёт можно на сайте /admin.");
   } else {
     const out = summarizeOutstanding(unpaid);

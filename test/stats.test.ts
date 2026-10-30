@@ -27,21 +27,20 @@ describe("summarizeIncome — сводка доходов", () => {
     expect(s.paidCount).toBe(3);
   });
 
-  it("долгом считаются только счета за проведённые; аванс отдельно, старый пакет не в счёт", () => {
+  it("долгом считаются только счета за проведённые; аванс отдельно", () => {
     const s = summarizeIncome({
       paid: [],
       unpaid: [
         { amount: 300000, kind: "debt" }, // долг за проведённые
         { amount: 100000, kind: "manual" }, // ручной счёт — тоже обязательство
         { amount: 250000, kind: "advance" }, // предоплата за следующее занятие
-        { amount: 1800000, kind: "package:8" }, // старое предложение пакета — не обязательство
       ],
       studentsActive: [],
       now: NOW,
     });
     expect(s.debtKopecks).toBe(400000);
     expect(s.advanceKopecks).toBe(250000);
-    expect(s.outstandingKopecks).toBe(650000); // долг + аванс; предложение пакета не входит
+    expect(s.outstandingKopecks).toBe(650000); // всего выставлено — долг + аванс
   });
 
   it("6 месяцев в графике, последний — текущий; оплата без даты идёт только в total", () => {
@@ -133,17 +132,16 @@ describe("groupDebtors — кто и сколько должен", () => {
     { id: "s3", name: "Вика", subject: "Фронтенд", active: false },
   ];
 
-  it("долгом считаются счета за проведённые и ручные; аванс и пакет — нет", () => {
+  it("долгом считаются счета за проведённые и ручные; аванс — нет", () => {
     const rows = groupDebtors(
       [
         { studentId: "s1", kind: "debt", amountKopecks: 300000, createdAt: "2026-07-01T10:00:00Z" },
         { studentId: "s1", kind: "manual", amountKopecks: 100000, createdAt: "2026-07-05T10:00:00Z" },
         { studentId: "s2", kind: "advance", amountKopecks: 250000, createdAt: null },
-        { studentId: "s2", kind: "package:8", amountKopecks: 1700000, createdAt: null },
       ],
       studentRows
     );
-    // У Бори только аванс и пакет — он не должник.
+    // У Бори только аванс — он не должник.
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: "Аня", debtKopecks: 400000, invoices: 2 });
     // Возраст долга — по самому старому счёту.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { detectExamTariff } from "@/lib/config";
 import { nextLessonCostKopecks, planAutoInvoices } from "@/lib/autobill";
-import { isPackageKind, packageLessonsOf } from "@/lib/payments";
+import { packageLessonsOf, splitPaidHours } from "@/lib/payments";
 import type { StudentBalance } from "@/lib/balance";
 
 describe("detectExamTariff — тариф по предмету", () => {
@@ -87,36 +87,42 @@ describe("nextLessonCostKopecks — «вперёд» = ровно одно бл�
 
 describe("packageLessonsOf — число занятий старого пакета хранится в самом счёте", () => {
   it("kind несёт число занятий", () => {
-    expect(packageLessonsOf("package:8", 99)).toBe(8);
-    expect(isPackageKind("package:8")).toBe(true);
+    expect(packageLessonsOf("package:8")).toBe(8);
   });
 
-  it("старые строки kind=\"package\" читаются с запасным числом из тарифа", () => {
-    expect(isPackageKind("package")).toBe(true);
-    expect(packageLessonsOf("package", 8)).toBe(8);
-  });
-
-  it("обычные счета пакетами не считаются", () => {
-    expect(isPackageKind("manual")).toBe(false);
-    expect(isPackageKind("advance")).toBe(false);
+  it("строка без числа и обычные счета — 0 (считаются деньгами)", () => {
+    expect(packageLessonsOf("package")).toBe(0);
+    expect(packageLessonsOf("manual")).toBe(0);
+    expect(packageLessonsOf("advance")).toBe(0);
   });
 });
 
-describe("planAutoInvoices — старое предложение пакета не гасит поштучные счета", () => {
-  it("неоплаченный package не входит в billedManual (долг остаётся)", () => {
-    const actions = planAutoInvoices({
-      debtKopecks: 250000,
-      advanceKopecks: 250000,
-      openInvoices: [{ id: "pkg", kind: "package:8", amountKopecks: 1800000 }],
+describe("splitPaidHours — оплаченные часы", () => {
+  it("обычные оплаты — деньги÷ставку, остаток копеек не теряется", () => {
+    expect(splitPaidHours([{ amount: 250000, kind: "debt" }, { amount: 100000, kind: "manual" }], 120000)).toEqual({
+      paidHours: 2, // 3 500 ₽ / 1 200 ₽ = 2 полных часа
+      moneyKopecks: 350000,
+      packageHours: 0,
+      packageKopecks: 0,
     });
-    // Пакет игнорируется как «уже выставленный» — оба автосчёта создаются.
-    expect(actions).toEqual([
-      { action: "create", kind: "debt", amountKopecks: 250000 },
-      { action: "create", kind: "advance", amountKopecks: 250000 },
-    ]);
   });
 
-  it("обычный ручной счёт по-прежнему гасит долг", () => {
+  it("старый оплаченный пакет кредитует свои часы, а не деньги÷ставку", () => {
+    expect(splitPaidHours([{ amount: 816000, kind: "package:8" }, { amount: 120000, kind: "advance" }], 120000)).toEqual({
+      paidHours: 9, // 8 по пакету + 1 за аванс
+      moneyKopecks: 120000,
+      packageHours: 8,
+      packageKopecks: 816000,
+    });
+  });
+
+  it("пакет без числа занятий — обычные деньги", () => {
+    expect(splitPaidHours([{ amount: 240000, kind: "package" }], 120000).paidHours).toBe(2);
+  });
+});
+
+describe("planAutoInvoices — ручные счета", () => {
+  it("обычный ручной счёт гасит долг", () => {
     const actions = planAutoInvoices({
       debtKopecks: 250000,
       advanceKopecks: 0,

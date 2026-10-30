@@ -4,14 +4,10 @@
 // Вызывается при открытии кабинета (/api/my) и после занятия (pulse) —
 // идемпотентно: суммы сверяются и обновляются, лишние автосчета удаляются,
 // при нуле — счёт снимается.
-//
-// Пакетов («N занятий одним платежом») больше нет: их никто не оплачивал. Висящие
-// с тех пор неоплаченные предложения (kind=package:N) снимаются при сверке.
 import { computeStudentBalance, type StudentBalance } from "./balance";
 import {
   createPayment,
   deletePayment,
-  isPackageKind,
   outstandingPayments,
   updatePayment,
 } from "./payments";
@@ -44,10 +40,9 @@ export function planAutoInvoices(input: {
   const actions: AutoAction[] = [];
 
   // Ручные неоплаченные счета считаем уже выставленными: сначала они покрывают долг,
-  // остаток — занятия «вперёд». Старые пакетные предложения (kind=package) сюда НЕ
-  // входят: это не выставленный долг, они снимаются при сверке.
+  // остаток — занятия «вперёд».
   const billedManual = input.openInvoices
-    .filter((p) => p.kind !== "debt" && p.kind !== "advance" && !isPackageKind(p.kind))
+    .filter((p) => p.kind !== "debt" && p.kind !== "advance")
     .reduce((s, p) => s + p.amountKopecks, 0);
   const debtTarget = Math.max(0, input.debtKopecks - billedManual);
   const manualLeft = Math.max(0, billedManual - input.debtKopecks);
@@ -115,7 +110,7 @@ export async function ensureAutoInvoices(
   // Ручные счета не трогаем — их выставил преподаватель осознанно.
   if (student?.trial) {
     for (const p of await outstandingPayments(studentId)) {
-      if (p.kind === "debt" || p.kind === "advance" || isPackageKind(p.kind)) {
+      if (p.kind === "debt" || p.kind === "advance") {
         await deletePayment(p.id);
       }
     }
@@ -157,14 +152,6 @@ export async function ensureAutoInvoices(
     }
   }
 
-  // Пакетов больше нет — неоплаченные предложения, оставшиеся с тех пор, снимаем.
-  let pkgChanged = false;
-  for (const p of open) {
-    if (!isPackageKind(p.kind)) continue;
-    await deletePayment(p.id);
-    pkgChanged = true;
-  }
-
   // Способ оплаты: «ЮKassa» — счетам генерируются ссылки; «СБП-перевод» — ссылки не
   // создаются (комиссия провайдера не нужна), в кабинете показываются реквизиты,
   // оплату преподаватель отмечает вручную.
@@ -172,7 +159,7 @@ export async function ensureAutoInvoices(
 
   // Ссылки на оплату: каждому неоплаченному счёту без ссылки — платёж ЮKassa.
   if (method === "yookassa" && yookassaConfigured()) {
-    const fresh = actions.length || pkgChanged ? await outstandingPayments(studentId) : open;
+    const fresh = actions.length ? await outstandingPayments(studentId) : open;
     for (const p of fresh) {
       if (p.payLink) continue;
       try {

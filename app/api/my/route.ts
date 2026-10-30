@@ -3,7 +3,7 @@ import { decodeToken, contactKey } from "@/lib/link";
 import { listContactEvents, nextOccurrencesForContact } from "@/lib/google";
 import { getStudent, getStudentByContactKey } from "@/lib/students";
 import { getGroup, listGroupMembers, GROUP_LIMIT } from "@/lib/groups";
-import { isPackageKind, outstandingPayments, paidPayments } from "@/lib/payments";
+import { outstandingPayments, paidPayments } from "@/lib/payments";
 import { ensureAutoInvoices } from "@/lib/autobill";
 import { getPayMethod, getSbpDetails } from "@/lib/settings";
 import { botUsername } from "@/lib/telegram";
@@ -179,17 +179,13 @@ export async function GET(req: Request) {
                 : group
                   ? group.rateKopecks
                   : student?.rateKopecks || tariff?.hourlyKopecks || 0,
-            // Пакетов больше нет; старые неоплаченные предложения снимает
-            // ensureAutoInvoices, а до того они ученику не показываются.
-            payments: rows
-              .filter((p) => !isPackageKind(p.kind))
-              .map((p) => ({
-                id: p.id,
-                amountKopecks: p.amountKopecks,
-                note: p.note,
-                payLink: method === "sbp" ? "" : p.payLink,
-                kind: p.kind,
-              })),
+            payments: rows.map((p) => ({
+              id: p.id,
+              amountKopecks: p.amountKopecks,
+              note: p.note,
+              payLink: method === "sbp" ? "" : p.payLink,
+              kind: p.kind,
+            })),
             balance: balance
               ? {
                   debtKopecks: balance.debtKopecks,

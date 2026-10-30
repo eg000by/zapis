@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { groups, payments, students } from "./schema";
 import { FREE_COLOR_ID, MISSED_COLOR_ID, MSK_OFFSET_MINUTES } from "./config";
-import { isDebtKind, isPackageKind, summarizeOutstanding } from "./payments";
+import { isDebtKind, summarizeOutstanding } from "./payments";
 import { fetchBusy, listDayOccurrences } from "./google";
 import { buildWeek, weekWindowBounds, type DaySlots } from "./slots";
 
@@ -161,7 +161,7 @@ export async function computeIncomeStats(now = new Date()): Promise<IncomeStats>
 
 // ── Должники ───────────────────────────────────────────────────────────────
 // Кто и сколько должен — одним экраном. Долг = счета за уже проведённые занятия
-// и ручные счета преподавателя; аванс и старое предложение пакета долгом не считаются
+// и ручные счета преподавателя; аванс долгом не считается
 // (та же семантика, что в карточке ученика и аналитике).
 export interface DebtorRow {
   studentId: string;
@@ -197,7 +197,6 @@ export function groupDebtors(
         oldestAt: null,
         invoices: 0,
       };
-    if (isPackageKind(r.kind)) continue;
     if (isDebtKind(r.kind)) {
       row.debtKopecks += r.amountKopecks;
       row.invoices++;

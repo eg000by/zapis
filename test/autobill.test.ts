@@ -14,7 +14,6 @@ vi.mock("@/lib/balance", () => ({ computeStudentBalance: vi.fn(async () => null)
 vi.mock("@/lib/payments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payments")>();
   return {
-    isPackageKind: actual.isPackageKind,
     packageLessonsOf: actual.packageLessonsOf,
     createPayment: vi.fn(async () => ({ id: "new" })),
     deletePayment: vi.fn(async () => {}),
@@ -158,7 +157,6 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     vi.mocked(outstandingPayments).mockResolvedValue([
       { id: "d1", kind: "debt", amountKopecks: 300000, payLink: "" },
       { id: "a1", kind: "advance", amountKopecks: 150000, payLink: "" },
-      { id: "pk", kind: "package:4", amountKopecks: 600000, payLink: "" },
       { id: "m1", kind: "manual", amountKopecks: 100000, payLink: "" },
     ] as any);
 
@@ -168,7 +166,7 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     expect(createPayment).not.toHaveBeenCalled();
     expect(updatePayment).not.toHaveBeenCalled();
     // Ручной счёт выставил преподаватель осознанно — его не трогаем.
-    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["d1", "a1", "pk"]);
+    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["d1", "a1"]);
   });
 
   it("создаёт счёт на долг с человекочитаемой заметкой", async () => {
@@ -213,30 +211,17 @@ describe("ensureAutoInvoices — применение к счетам", () => {
     expect(createPayment).toHaveBeenCalledWith(expect.objectContaining({ kind: "advance" }));
   });
 
-  it("ученик в архиве: «вперёд» и пакет снимаются, долг остаётся", async () => {
+  it("ученик в архиве: «вперёд» снимается, долг остаётся", async () => {
     mockBalance({ debtKopecks: 120000, debtHours: 1, items: [mk(-3, false, true), mk(2, false)] });
     vi.mocked(outstandingPayments).mockResolvedValue([
       { id: "a1", kind: "advance", amountKopecks: 120000, payLink: "" },
-      { id: "pk", kind: "package:8", amountKopecks: 816000, payLink: "" },
     ] as any);
     const archived = { id: "stu-1", subject: "ОГЭ информатика", rateKopecks: 120000, active: false } as any;
     await ensureAutoInvoices("stu-1", "Дима", archived);
 
-    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0]).sort()).toEqual(["a1", "pk"]);
+    expect(vi.mocked(deletePayment).mock.calls.map((c) => c[0])).toEqual(["a1"]);
     expect(createPayment).toHaveBeenCalledTimes(1);
     expect(createPayment).toHaveBeenCalledWith(expect.objectContaining({ kind: "debt", amountKopecks: 120000 }));
-  });
-
-  it("висящее с прошлых времён предложение пакета снимается", async () => {
-    mockBalance({ debtKopecks: 0, debtHours: 0, items: [mk(2, false), mk(9, false)] });
-    vi.mocked(outstandingPayments).mockResolvedValue([
-      { id: "pk", kind: "package:8", amountKopecks: 1700000, payLink: "https://old" },
-    ] as any);
-    const ege = { id: "stu-1", subject: "ЕГЭ информатика", rateKopecks: 150000 } as any;
-    await ensureAutoInvoices("stu-1", "Милена", ege);
-
-    expect(deletePayment).toHaveBeenCalledWith("pk");
-    expect(updatePayment).not.toHaveBeenCalled();
   });
 
   it("ближайшее занятие оплачено вперёд — счёт «вперёд» снимается, нового нет", async () => {

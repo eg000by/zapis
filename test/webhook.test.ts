@@ -122,6 +122,34 @@ describe("/api/payments/webhook — ЮKassa", () => {
     const res = await call(EVENT);
     expect(res.status).toBe(200);
     expect(setPaymentStatus).not.toHaveBeenCalled();
+    expect(sendOwner).not.toHaveBeenCalled();
+  });
+
+  it("наш платёж, но счёт уже удалён — 200 и предупреждение владельцу", async () => {
+    vi.mocked(getYkPayment).mockResolvedValue(ykPayment({ amountKopecks: 816000 }));
+    const res = await call(EVENT);
+    expect(res.status).toBe(200);
+    expect(setPaymentStatus).not.toHaveBeenCalled();
+    expect(vi.mocked(sendOwner).mock.calls[0][0]).toContain("Оплата по удалённому счёту");
+    expect(vi.mocked(sendOwner).mock.calls[0][0]).toMatch(/8\s160 ₽/);
+  });
+
+  it("удалённый счёт, но платёж не прошёл — без предупреждения", async () => {
+    vi.mocked(getYkPayment).mockResolvedValue(ykPayment({ status: "canceled" }));
+    await call(EVENT);
+    expect(sendOwner).not.toHaveBeenCalled();
+  });
+
+  it("оплата старого (отменённого) предложения пакета засчитывается", async () => {
+    vi.mocked(getYkPayment).mockResolvedValue(ykPayment({ amountKopecks: 816000 }));
+    vi.mocked(getPayment).mockResolvedValue({
+      ...OUR,
+      status: "canceled",
+      kind: "package:8",
+      amountKopecks: 816000,
+    } as any);
+    await call(EVENT);
+    expect(setPaymentStatus).toHaveBeenCalledWith("p1", "paid");
   });
 
   it("счёт находится и по providerPaymentId (если metadata потерялась)", async () => {

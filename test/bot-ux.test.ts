@@ -529,8 +529,8 @@ describe("planSettle", () => {
     amountKopecks,
   });
 
-  it("гасит долг и ручные счета, но не аванс и не пакет", () => {
-    const rows = [p("a", "debt", 100000), p("b", "manual", 50000), p("c", "advance", 150000), p("d", "package:8", 1200000)];
+  it("гасит долг и ручные счета, но не аванс", () => {
+    const rows = [p("a", "debt", 100000), p("b", "manual", 50000), p("c", "advance", 150000)];
     expect(planSettle(rows, 150000)).toEqual({ ids: ["a", "b"] });
   });
 

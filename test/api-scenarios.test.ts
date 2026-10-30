@@ -66,7 +66,6 @@ vi.mock("@/lib/payments", async (importOriginal) => {
   // Чистые хелперы вида счёта (package:N) — настоящие, запросов в БД в них нет.
   const actual = await importOriginal<typeof import("@/lib/payments")>();
   return {
-    isPackageKind: actual.isPackageKind,
     packageLessonsOf: actual.packageLessonsOf,
     outstandingPayments: vi.fn(async () => []),
     paidPayments: vi.fn(async () => []),

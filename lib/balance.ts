@@ -114,12 +114,8 @@ export async function computeStudentBalance(
   const rateKopecks = group ? group.rateKopecks : s.rateKopecks;
   if (rateKopecks <= 0) return null;
 
-  // Пакетные оплаты (package:N, пакеты убраны) кредитуют фиксированные часы.
-  const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(
-    s.id,
-    rateKopecks,
-    0
-  );
+  // Оплаченный package:N (пакеты убраны, но старые оплаты в силе) — ровно N часов.
+  const { paidHours, moneyKopecks, packageKopecks } = await paidHoursBreakdown(s.id, rateKopecks);
   // Пропущенные (серые) и бесплатные (пробные) занятия не тарифицируются.
   //
   // У группы занятие одно на всех, и цвет события про пропуск одного участника

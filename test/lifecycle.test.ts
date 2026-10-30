@@ -31,7 +31,6 @@ const { store } = vi.hoisted(() => ({ store: { rows: [] as Row[], seq: 0 } }));
 vi.mock("@/lib/payments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/payments")>();
   return {
-    isPackageKind: actual.isPackageKind,
     packageLessonsOf: actual.packageLessonsOf,
     summarizeOutstanding: actual.summarizeOutstanding,
     createPayment: vi.fn(async (input: any) => {
@@ -69,31 +68,15 @@ vi.mock("@/lib/payments", async (importOriginal) => {
         row.paidAt = status === "paid" ? new Date() : null;
       }
     }),
-    // Тот же расчёт, что в БД-версии: пакетные счета кредитуют свои часы,
-    // остальные — деньги ÷ ставку.
-    paidHoursBreakdown: vi.fn(async (studentId: string, rate: number, fallback: number) => {
-      let moneyKopecks = 0;
-      let packageKopecks = 0;
-      let packageHours = 0;
-      for (const r of store.rows) {
-        if (r.studentId !== studentId || r.status !== "paid") continue;
-        const lessons = actual.isPackageKind(r.kind)
-          ? actual.packageLessonsOf(r.kind, fallback)
-          : 0;
-        if (lessons > 0) {
-          packageHours += lessons;
-          packageKopecks += r.amountKopecks;
-        } else {
-          moneyKopecks += r.amountKopecks;
-        }
-      }
-      return {
-        paidHours: (rate > 0 ? Math.floor(moneyKopecks / rate) : 0) + packageHours,
-        moneyKopecks,
-        packageHours,
-        packageKopecks,
-      };
-    }),
+    // Настоящий расчёт (splitPaidHours) по строкам хранилища вместо БД.
+    paidHoursBreakdown: vi.fn(async (studentId: string, rate: number) =>
+      actual.splitPaidHours(
+        store.rows
+          .filter((r) => r.studentId === studentId && r.status === "paid")
+          .map((r) => ({ amount: r.amountKopecks, kind: r.kind })),
+        rate
+      )
+    ),
   };
 });
 
@@ -264,6 +247,27 @@ describe("месяц из жизни ученика — сквозной сце�
     await recolorStudent(STUDENT.id);
     expect(colorOf(1)).toBe("10");
     expect(invoices().some((i) => i.kind === "debt")).toBe(false);
+  });
+
+  it("старое предложение пакета, оплаченное позже, кредитует свои часы", async () => {
+    // Пакеты убраны, но по уже выданной ссылке ЮKassa кто-то может заплатить: вебхук
+    // переведёт отменённый счёт в оплаченные. 3 занятия за 2 500 ₽ — это 3 часа, а не
+    // 2 (деньги÷ставку): иначе ученик потерял бы занятие из-за бывшей скидки.
+    const { ensureAutoInvoices } = await import("@/lib/autobill");
+    const { recolorStudent } = await import("@/lib/coloring");
+    const { createPayment } = await import("@/lib/payments");
+
+    await createPayment({ studentId: STUDENT.id, amountKopecks: 250000, kind: "package:3", note: "" });
+    payAll("package:3");
+
+    afterLesson(1);
+    await ensureAutoInvoices(STUDENT.id, STUDENT.name);
+    await recolorStudent(STUDENT.id);
+
+    expect(invoices().some((i) => i.kind === "debt" || i.kind === "advance")).toBe(false);
+    expect(colorOf(0)).toBe("10");
+    expect(colorOf(1)).toBe("10");
+    expect(colorOf(2)).toBe("6"); // третье — оплачено вперёд
   });
 
   it("отменённое занятие не превращается в долг и не ломает раскладку", async () => {
