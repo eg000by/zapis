@@ -35,11 +35,16 @@ and real money.
   shared event stays untouched.
 - **Full CRM in the same bot** — students list, per-student card, invoices, notes,
   archive; the `/admin` web page exposes the same service layer (feature parity by design).
+  The everyday flows are cut to a tap or two: a **trial lesson** is one button that
+  produces a ready-to-copy list of free windows for the parent, and one line
+  ("Masha OGE @tg") that creates the student and a confirmed lesson, re-checking the slot
+  against a fresh calendar first; **debts** list every debtor with a one-tap "✅ Paid"
+  and an undo for a mis-tap; **income** shows only money actually received plus a
+  forecast for the month (group lessons counted per member, trials excluded).
 - **Money** — hourly rate per student; a pure "balance walk" allocates paid hours over
   lessons chronologically and derives *debt*, *paid-until date* and *credit* from one
   computation. Auto-invoicing issues two separate invoices (debt + the single next
-  lesson), plus an optional "pay ahead in one payment" offer,
-  reconciled idempotently on every cabinet visit. Online payments via YooKassa (SBP),
+  lesson), reconciled idempotently on every cabinet visit. Online payments via YooKassa (SBP),
   with a webhook that never trusts the notification body — it re-fetches the payment
   status from the API.
 - **Calendar as the schedule's source of truth** — bookings live in Google Calendar
@@ -51,10 +56,26 @@ and real money.
   lesson" alert with the meeting link. Money is deliberately excluded — invoices live
   in the cabinet, and a payment message is the fastest way to make someone mute the
   bot. `/stop` disconnects; the CRM command menu is scoped to the owner's chat only.
+  A blocked bot (403 / "chat not found") unlinks the chat so the cabinet offers to
+  reconnect, and "can't make it" silences that student's reminders for the date.
 - **Post-lesson pulse** — right after a lesson ends the teacher gets a "how did it
   go?" prompt (held / missed / add a note). Reminders are timed to the lesson itself:
   a morning lesson is announced at 19:00 the previous evening, anything later at 10:00
   on the day.
+
+## Product decisions
+
+Features are kept or removed by how they are used, not by how good they sounded:
+
+- **Discounted exam packages and "pay a month ahead" were removed.** Over three and a
+  half months the system made 21 such offers and got 0 payments — students pay per
+  lesson, right after it. The discount would only have gone to exam students who stay
+  anyway, and missed lessons couldn't be deducted from a package. The removal shipped
+  with a migration that deletes the stale unpaid offers (checked against production
+  first: none had a payment link or a payment), and the YooKassa webhook now warns the
+  teacher if money ever arrives for an invoice that no longer exists.
+- **No money in student notifications** (see above): reminders are only useful if
+  nobody mutes them.
 
 ## Architecture
 
@@ -80,15 +101,22 @@ Key decisions:
   reschedules are exception instances. The app derives everything by expanding instances.
 - **Money in integer kopecks**, fixed MSK timezone, monotonic revision counters for
   reschedule confirmations, idempotent payment webhook and auto-invoice reconciliation.
+- **Two schedulers, one message.** Free Vercel cron runs once a day and GitHub throttles
+  cron in public repos to once every 2–3 hours, so the frequent pulse is driven by an
+  external pinger with a self-pacing GitHub Actions loop as backup. They can fire at
+  the same moment, so every reminder goes through `sendOnce` (`lib/once.ts`): a
+  short lease separates concurrent runs, and the "sent" mark is written *after* the
+  send — a run killed mid-send loses its lease and the next run retries. A rare
+  duplicate is preferred over a lost reminder.
 
 ## Testing
 
-321 Vitest tests run the **real route handlers and calendar logic** against an in-memory
+441 Vitest tests run the **real route handlers and calendar logic** against an in-memory
 fake of the Google Calendar API (`test/helpers/fake-google.ts`) that faithfully implements
 recurrence expansion, `EXDATE`, exception instances and `extendedProperties` merge
 semantics — so scenario tests cover booking → confirmation → reschedule → decline-revert
 → cancellation end to end, plus the balance model, auto-invoicing, payment webhook and
-cron digests. On top of that, 29 hermetic Playwright e2e tests drive the real
+cron digests. On top of that, 33 hermetic Playwright e2e tests drive the real
 booking UI in a browser with every `/api/*` call intercepted.
 
 Three of those suites exist because the bugs that reached production lived *between*
@@ -205,11 +233,15 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
   остаётся нетронутым.
 - **CRM в том же боте** — список учеников, карточка, счета, заметки, архив; веб-админка
   `/admin` работает поверх того же сервисного слоя (паритет поверхностей).
+  Частые действия — в один-два тапа: **пробное** — одна кнопка даёт готовый текст со
+  свободными окнами для родителя, а одна строка («Маша ОГЭ @tg») заводит ученика и
+  подтверждённое занятие, перед этим перепроверив слот по свежему календарю;
+  **долги** — каждый должник с кнопкой «✅ Оплатил» и отменой промаха; **доходы** —
+  только реально полученное и прогноз на месяц (группы — по участникам, пробные не в счёт).
 - **Деньги** — ставка ₽/час; «балансовый проход» раскладывает оплаченные часы по
   занятиям хронологически, и из одного вычисления получаются долг, «оплачено до» и
-  остаток. Автосчета: два отдельных счёта (долг + одно ближайшее занятие) и
-  необязательное предложение оплатить вперёд одним платежом, идемпотентная сверка
-  при каждом входе в кабинет. Онлайн-оплата ЮKassa (СБП); вебхук не верит телу
+  остаток. Автосчета: два отдельных счёта (долг + одно ближайшее занятие),
+  идемпотентная сверка при каждом входе в кабинет. Онлайн-оплата ЮKassa (СБП); вебхук не верит телу
   уведомления и перечитывает статус платежа из API.
 - **Календарь — источник правды расписания** — брони живут в событиях Google Calendar
   (`RRULE`, `EXDATE`, инстансы-исключения, `extendedProperties`); Postgres хранит только
@@ -219,18 +251,42 @@ external (Supabase); run migrations from the host: `npm run db:migrate`.
   напоминание о занятии и «скоро занятие» со ссылкой на Телемост. Денег в них нет
   намеренно: счета живут в кабинете, а сообщение про оплату — быстрый способ добиться,
   чтобы человек отключил уведомления вместе с напоминаниями. Отписка — /stop, меню
-  команд CRM видно только в чате владельца.
+  команд CRM видно только в чате владельца. Если бот заблокирован (403 / «chat not
+  found»), чат отвязывается и кабинет снова предлагает подключиться; «Не смогу
+  прийти» глушит напоминания этому ученику на эту дату.
 - **Пульс после занятия** — сразу после конца занятия преподавателю приходит «как
   прошло?» (прошло / пропуск / заметка). Момент напоминания зависит от времени самого
   занятия: утреннее (до 12:00) — накануне в 19:00, остальные — в 10:00 того же дня.
 
+## Продуктовые решения
+
+Функции остаются или уходят по тому, как ими пользуются:
+
+- **Пакеты со скидкой и «оплата месяца вперёд» удалены.** За три с половиной месяца —
+  21 предложение и 0 оплат: ученики платят поштучно сразу после занятия. Скидка
+  доставалась бы экзаменационным, которые и так не уходят, а пропуски с пакета не
+  списывались. Вместе с удалением — миграция, снимающая висящие предложения (сначала
+  проверено на проде: ни ссылок, ни оплат), а вебхук ЮKassa теперь предупреждает, если
+  деньги придут по уже удалённому счёту.
+- **В уведомлениях ученикам нет денег** (см. выше): напоминания полезны, только пока их
+  не отключили.
+
+## Надёжность уведомлений
+
+Бесплатный Vercel даёт крон раз в день, а GitHub душит кроны публичных репозиториев до
+раза в 2–3 часа, поэтому частый пульс дёргает внешний пингер, а цикл в GitHub Actions
+его подстраховывает. Они могут сработать одновременно, поэтому каждое напоминание идёт
+через `sendOnce` (`lib/once.ts`): одновременные прогоны разводит короткая аренда, а
+отметка «отправлено» ставится *после* отправки — прогон, убитый посреди send, теряет
+аренду, и следующий повторит. Редкий дубль лучше потерянного напоминания.
+
 ## Тесты
 
-350 тестов Vitest гоняет **настоящие роуты и календарную логику** поверх in-memory фейка
+441 тест Vitest гоняет **настоящие роуты и календарную логику** поверх in-memory фейка
 Google Calendar API, который честно реализует развёртку повторов, `EXDATE`,
 инстансы-исключения и merge-семантику `extendedProperties` — сценарии покрывают
 бронь → подтверждение → перенос → возврат → отмену, балансовую модель, автосчета,
-платёжный вебхук и кроны. Плюс 29 герметичных браузерных e2e на Playwright —
+платёжный вебхук и кроны. Плюс 33 герметичных браузерных e2e на Playwright —
 реальный UI записи с перехватом всех вызовов `/api/*`.
 
 ## Стек
@@ -242,7 +298,7 @@ Google Calendar API (OAuth) · Telegram Bot API · ЮKassa · Vitest · Vercel (
 
 Самостоятельный хостинг без Vercel — многостадийный образ на standalone-сборке Next.js
 плюс планировщик-сайдкар вместо Vercel Cron / GitHub Actions (пульс каждые 15 минут,
-утренние напоминания раз в день):
+утренний прогон раз в день):
 
 ```bash
 docker compose up --build   # приложение на :3000 + крон; секреты из .env.local
