@@ -357,8 +357,10 @@ export async function fetchBusy(
   for (const ev of items) {
     if (ev.status === "cancelled") continue;
     if (excludeId && (ev.id === excludeId || ev.recurringEventId === excludeId)) continue;
-    // Пропускаем события, где сам пользователь отметил "нет" — они не занимают время.
-    // (для календаря репетитора это не критично, но безопасно.)
+    // «Показывать как: свободен» — время не занято. Так Google сам ставит дни
+    // рождения из контактов (событие на весь день): без этой проверки один день
+    // рождения в среду закрывал запись на все среды — серия проверяет 4 недели.
+    if (ev.transparency === "transparent") continue;
     const s = ev.start?.dateTime || ev.start?.date;
     const e = ev.end?.dateTime || ev.end?.date;
     if (!s || !e) continue;

@@ -14,6 +14,7 @@ interface StoredEvent {
   summary?: string;
   description?: string;
   status: string; // confirmed | tentative | cancelled
+  transparency?: string; // opaque (по умолчанию) | transparent — «показывать как: свободен»
   colorId?: string | null;
   start?: { dateTime?: string; timeZone?: string };
   end?: { dateTime?: string; timeZone?: string };
