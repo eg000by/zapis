@@ -355,6 +355,37 @@ describe("пробная ссылка — одно занятие", () => {
     expect((await post("book", { token: TRIAL(), start: TUE_9 })).status).toBe(200);
   });
 
+  // На проде: день рождения из контактов Google (событие «свободен») через три
+  // недели закрывал все слоты среды — регулярная запись проверяет 4 недели вперёд.
+  it("событие «показывать как свободен» не занимает время, обычное — занимает", async () => {
+    const mod = await import("@/app/api/slots/route");
+    const slotAt = async () => {
+      const d = await (await mod.GET(new Request("http://test/api/slots"))).json();
+      return d.days.find((x: any) => x.weekday === "Вт").slots.find((s: any) => s.time === "09:00");
+    };
+    seedEvent({
+      summary: "С днем рождения!",
+      transparency: "transparent",
+      start: { dateTime: TUE3_9 },
+      end: { dateTime: new Date(new Date(TUE3_9).getTime() + 3600000).toISOString() },
+    });
+    expect((await slotAt()).busy).toBe(false);
+    // И сервер записи с сеткой согласен.
+    expect((await post("book", { token: TOKEN(), start: TUE_9 })).status).toBe(200);
+  });
+
+  it("обычное (занятое) событие через три недели закрывает слот для регулярной записи", async () => {
+    const mod = await import("@/app/api/slots/route");
+    seedEvent({
+      summary: "Врач",
+      start: { dateTime: TUE3_9 },
+      end: { dateTime: new Date(new Date(TUE3_9).getTime() + 3600000).toISOString() },
+    });
+    const d = await (await mod.GET(new Request("http://test/api/slots"))).json();
+    const tue = d.days.find((x: any) => x.weekday === "Вт").slots.find((s: any) => s.time === "09:00");
+    expect(tue.busy).toBe(true);
+  });
+
   // «Другая дата»: пробное можно поставить не на ближайшую неделю, а на выбранную.
   it("сетка по выбранной дате показывает её неделю, и запись по ней проходит", async () => {
     const mod = await import("@/app/api/slots/route");
